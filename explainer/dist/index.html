@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Alpha-Gomoku 原理交互课 · 五子棋上的 AlphaZero</title>
+    <script>
+      // anti-FOUC: apply persisted/system theme before first paint
+      try {
+        var t = localStorage.getItem("exp-theme")
+        if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+        document.documentElement.dataset.theme = t
+      } catch (e) {}
+    </script>
+    <script type="module" crossorigin src="./assets/index-7x7JBud5.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DynWJWHf.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

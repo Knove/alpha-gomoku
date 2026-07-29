@@ -1,0 +1,105 @@
+// QA rail (wide viewport), theme toggle, mobile touch
+import { chromium } from "playwright"
+const BASE = "http://localhost:4173"
+const browser = await chromium.launch()
+
+// rail at >=1640px
+const wide = await browser.newPage({ viewport: { width: 1700, height: 950 } })
+await wide.goto(BASE, { waitUntil: "networkidle" })
+const rail = wide.locator(".rail a")
+console.log("rail visible at 1700:", await rail.first().isVisible(), "items:", await rail.count())
+await rail.nth(4).click()
+await wide.waitForTimeout(800)
+const ch4top = await wide.locator("#ch-4").evaluate((el) => el.getBoundingClientRect().top)
+console.log("rail click ch-4 top px:", Math.round(ch4top), "active:", await wide.locator(".rail a.active .r-no").innerText())
+// scroll to bottom -> last rail active
+await wide.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+await wide.waitForTimeout(600)
+console.log("at bottom active rail:", await wide.locator(".rail a.active .r-no").innerText())
+await wide.close()
+
+// theme toggle
+const page = await browser.newPage({ viewport: { width: 1280, height: 950 } })
+await page.goto(BASE, { waitUntil: "networkidle" })
+const before = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim())
+const toggle = page.locator(".icon-btn")
+await toggle.click(); await page.waitForTimeout(300)
+const after1 = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim())
+const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+await toggle.click(); await page.waitForTimeout(300)
+const after2 = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim())
+console.log("theme accent before/after toggle/after back:", before, after1, after2, "dark bg:", bg)
+// keyboard: focus toggle press Enter
+await toggle.focus(); await page.keyboard.press("Enter"); await page.waitForTimeout(200)
+console.log("toggle via keyboard works:", (await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim())) !== after2)
+await page.close()
+
+// mobile touch
+const mob = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+const mErrors = []
+mob.on("pageerror", (e) => mErrors.push(String(e)))
+await mob.goto(BASE, { waitUntil: "networkidle" })
+const mch6 = mob.locator("#ch-6")
+await mch6.scrollIntoViewIfNeeded()
+await mob.waitForTimeout(400)
+const mthumbs = mch6.locator("button[aria-pressed]")
+await mthumbs.nth(5).tap()
+await mob.waitForTimeout(200)
+console.log("[mobile] tap thumb5:", (await mch6.locator(".chip.accent").first().innerText()).replace(/\s+/g, " ").trim())
+
+const mch2 = mob.locator("#ch-2")
+await mch2.scrollIntoViewIfNeeded()
+await mob.waitForTimeout(300)
+const cell = mch2.locator("svg[aria-label^='平面']").first().locator("rect").nth(40)
+const cbb2 = await cell.boundingBox()
+await mob.touchscreen.tap(cbb2.x + cbb2.width / 2, cbb2.y + cbb2.height / 2)
+await mob.waitForTimeout(200)
+const strokeAfterTap = await cell.evaluate((el) => getComputedStyle(el).stroke)
+console.log("[mobile] plane cell stroke after tap (accent=rgb(190, 52, 37)?):", strokeAfterTap)
+// tap another cell: does highlight move?
+const cell10 = mch2.locator("svg[aria-label^='平面']").first().locator("rect").nth(10)
+const cbb10 = await cell10.boundingBox()
+await mob.touchscreen.tap(cbb10.x + cbb10.width / 2, cbb10.y + cbb10.height / 2)
+await mob.waitForTimeout(200)
+console.log("[mobile] after tapping cell10: cell40 stroke:", await cell.evaluate((el) => getComputedStyle(el).stroke), "cell10 stroke:", await cell10.evaluate((el) => getComputedStyle(el).stroke))
+
+// loss chart tap
+const mfig2 = mch6.locator(".figure").nth(1)
+await mfig2.scrollIntoViewIfNeeded()
+await mob.waitForTimeout(300)
+const mchart = mfig2.locator("svg").first()
+const mcbb = await mchart.boundingBox()
+await mob.touchscreen.tap(mcbb.x + mcbb.width * 0.8, mcbb.y + mcbb.height * 0.5)
+await mob.waitForTimeout(250)
+const mtip = mfig2.locator(".tip")
+const tipVisible = (await mtip.count()) > 0 && (await mtip.isVisible())
+console.log("[mobile] loss tip after tap:", tipVisible, tipVisible ? (await mtip.innerText()).replace(/\s+/g, " ") : "")
+// tip stuck after tapping elsewhere on page?
+await mob.touchscreen.tap(200, 100)
+await mob.waitForTimeout(200)
+console.log("[mobile] loss tip after tapping away:", (await mtip.count()) > 0 && (await mtip.isVisible()))
+
+// MCTS buttons on mobile (tap targets)
+const mch4 = mob.locator("#ch-4")
+await mch4.scrollIntoViewIfNeeded()
+await mob.waitForTimeout(300)
+await mch4.locator("button", { hasText: "单步 ×1" }).first().tap()
+await mob.waitForTimeout(150)
+console.log("[mobile] MCTS sims after tap:", (await mch4.locator(".chip.mono", { hasText: "模拟" }).innerText()).trim())
+// flywheel on mobile
+const mch1 = mob.locator("#ch-1")
+await mch1.scrollIntoViewIfNeeded()
+await mch1.locator("button.btn.primary").tap()
+await mob.waitForTimeout(150)
+console.log("[mobile] flywheel after tap:", (await mch1.locator("button.btn.primary").innerText()).trim())
+// replay slider mobile
+const mfig7 = mob.locator("#ch-7 .figure").nth(1)
+await mfig7.scrollIntoViewIfNeeded()
+await mob.waitForTimeout(300)
+const mslider = mfig7.locator("input[type=range]")
+await mslider.fill("10")
+await mob.waitForTimeout(150)
+console.log("[mobile] replay slider 10:", (await mfig7.locator(".mono", { hasText: "/" }).first().innerText()).trim())
+console.log("[mobile] errors:", JSON.stringify(mErrors))
+await browser.close()
+console.log("DONE")

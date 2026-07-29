@@ -1,0 +1,16 @@
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# runtime data (training artifacts)
+data/
+
+# frontend
+web/node_modules/
+web/dist/
+
+# os
+.DS_Store
+node_modules/

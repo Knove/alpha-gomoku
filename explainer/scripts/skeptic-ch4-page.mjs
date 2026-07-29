@@ -1,0 +1,35 @@
+import { chromium } from "playwright"
+const browser = await chromium.launch()
+const page = await browser.newPage({ viewport: { width: 1400, height: 950 } })
+await page.goto("http://localhost:4173", { waitUntil: "networkidle" })
+const ch4 = page.locator("#ch-4")
+await ch4.scrollIntoViewIfNeeded()
+await page.waitForTimeout(400)
+const btn = (name) => ch4.locator("button", { hasText: name }).first()
+const tree = ch4.locator("svg[aria-label='MCTS 搜索树']")
+
+const snap = async (label) => {
+  const circles = await tree.locator("circle").count()
+  const lines = await tree.locator("line").count()
+  const texts = await tree.locator("text").allInnerTexts()
+  const titles = await tree.locator("title").allInnerTexts()
+  const readout = await ch4.locator(".mono").first().innerText()
+  console.log(`== ${label} ==`)
+  console.log("circles:", circles, "lines:", lines)
+  console.log("texts:", JSON.stringify(texts))
+  console.log("titles:", JSON.stringify(titles))
+  console.log("readout:", readout)
+}
+
+await btn("单步 ×1").click()
+await page.waitForTimeout(150)
+await snap("1 sim")
+await btn("单步 ×10").click()
+await page.waitForTimeout(150)
+await snap("11 sims")
+await btn("跑到 200").click()
+await page.waitForTimeout(400)
+await snap("200 sims")
+// screenshot for my own record
+await tree.screenshot({ path: "/tmp/skeptic-ch4-tree-200.png" })
+await browser.close()

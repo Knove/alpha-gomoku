@@ -1,0 +1,22 @@
+import { chromium } from "playwright"
+const browser = await chromium.launch()
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+await page.goto("http://localhost:4173", { waitUntil: "networkidle" })
+const svg = page.locator("#ch-3 svg[role='group']")
+await svg.scrollIntoViewIfNeeded()
+await page.waitForTimeout(800)
+const mods = page.locator("#ch-3 svg[role='group'] g[role='button']")
+// move mouse to neutral spot first
+await page.mouse.move(640, 100)
+await page.waitForTimeout(100)
+const stem = mods.nth(1)
+const bb = await stem.boundingBox()
+console.log("stem bbox:", JSON.stringify(bb))
+await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2, { steps: 5 })
+await page.waitForTimeout(300)
+const card = (await page.locator("#ch-3 .card").first().innerText()).replace(/\s+/g, " ").slice(0, 60)
+console.log("after deliberate hover on stem ->", card)
+// check dim opacity applied to other modules
+const op = await mods.nth(0).evaluate((el) => getComputedStyle(el).opacity)
+console.log("input module opacity while hovering stem (expect 0.4):", op)
+await browser.close()

@@ -1,0 +1,7 @@
+torch>=2.2
+numpy>=1.26
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pytest>=8.0
+httpx>=0.28  # TestClient (tests only)
+websockets>=14  # WS smoke scripts (optional)
