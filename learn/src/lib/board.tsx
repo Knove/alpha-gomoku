@@ -1,5 +1,5 @@
 import { useId, useState } from "react"
-import type { CSSProperties, PointerEvent } from "react"
+import type { CSSProperties } from "react"
 
 /** 9×9 SVG 棋盘(移植自 explainer 的 GomokuBoard,改数值坐标轴):
  *  - board: 81 长的扁平整型数组,0 空 / 1 黑 / -1 白,下标 = y*9+x;
@@ -57,7 +57,7 @@ export default function Board({
 
   const maxHeat = heat ? Math.max(...heat) : 0
 
-  const locate = (e: PointerEvent<SVGSVGElement>) => {
+  const locate = (e: { clientX: number; clientY: number; currentTarget: SVGSVGElement }) => {
     const rect = e.currentTarget.getBoundingClientRect()
     const scale = VB / rect.width
     const mx = (e.clientX - rect.left) * scale
@@ -99,8 +99,11 @@ export default function Board({
         setHover(c && board[c.y * N + c.x] === 0 ? c : null)
       }}
       onPointerLeave={() => setHover(null)}
-      onClick={() => {
-        if (interactive && hover) onCellClick?.(hover.x, hover.y)
+      onClick={(e) => {
+        // 从点击事件本身定位,不依赖 hover —— 触屏点按可能不触发 pointermove
+        const c = interactive ? locate(e) : null
+        const cell = c && board[c.y * N + c.x] === 0 ? c : hover
+        if (cell) onCellClick?.(cell.x, cell.y)
       }}
     >
       <defs>

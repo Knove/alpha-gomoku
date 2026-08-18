@@ -207,7 +207,7 @@ function Replay() {
       <figcaption className="figure-cap">
         <span className="cap-no">真数据</span>
         {GAME.id},共 {LEN} 手,白胜。每一手的 π 与 v 都是当时搜索的原始记录——本页只回放,
-        不重算。它只训了 3 轮,还很弱,但每一次「想」都是真的。
+        不重算。它才训到第 3 轮,还很弱,但每一次「想」都是真的。
       </figcaption>
     </figure>
   )
