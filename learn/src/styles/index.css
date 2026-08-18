@@ -1045,3 +1045,116 @@ details.account-book summary {
     white-space: normal;
   }
 }
+
+/* ============================================================
+   课内部件(L00 回放 / L01 数组与算式 / L02 复用 .l01-v* 翻号)
+   ============================================================ */
+
+/* L00 · π top5 行与 v 数值条 */
+.l00-top-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.l00-vbar {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--card-sunken);
+  border: 1px solid var(--hairline);
+}
+.l00-vbar-zero {
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--hairline-strong);
+}
+.l00-vbar-needle {
+  position: absolute;
+  top: -5px;
+  height: 18px;
+  width: 5px;
+  border-radius: 3px;
+  background: var(--accent);
+  transform: translateX(-50%);
+  transition: left 350ms ease;
+  box-shadow: var(--shadow-card);
+}
+
+/* L01/L02 · 数值方阵(与 .l01-axis 轴标配套) */
+.l01-axis {
+  width: 1rem;
+  flex: none;
+  font-size: 0.62rem;
+  color: var(--fg-faint);
+}
+.l01-cell {
+  position: relative;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+  border-top: 1px solid var(--hairline);
+  border-left: 1px solid var(--hairline);
+}
+.l01-cell:last-child {
+  border-right: 1px solid var(--hairline);
+}
+.l01-v {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum" 1;
+  font-size: 0.62rem;
+  transition: opacity 400ms ease;
+}
+.l01-v1 {
+  color: var(--fg);
+  font-weight: 650;
+}
+.l01-vm1 {
+  color: var(--accent-deep);
+  font-weight: 650;
+}
+.l01-v0 {
+  color: var(--fg-faint);
+}
+
+/* L01 · 算式高亮:y 朱砂、x 下划线 */
+.l01-hl-y {
+  color: var(--accent-deep);
+  font-weight: 700;
+}
+.l01-hl-x {
+  border-bottom: 2px solid var(--accent);
+  font-weight: 700;
+}
+
+/* L01 · 猜格子反馈 */
+.l01-ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+.l01-bad {
+  color: var(--fg-muted);
+}
+
+/* L01 · 判胜方向清点行 */
+.l01-dir-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.88rem;
+  border-radius: 7px;
+  color: var(--fg-muted);
+}
+.l01-dir-row.on {
+  background: var(--accent-wash);
+  color: var(--fg);
+  font-weight: 600;
+}

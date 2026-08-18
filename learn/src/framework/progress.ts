@@ -24,6 +24,8 @@ export function saveProgress(p: Progress): void {
 }
 
 export function passQuiz(p: Progress, lessonId: string, lessonCount: number): Progress {
+  // 已过关的课再触发(重答/回点按钮)不重复推进,防止跳课
+  if (p.quizPassed[lessonId]) return p
   const next = { ...p, quizPassed: { ...p.quizPassed, [lessonId]: true } }
   if (p.unlocked < lessonCount - 1) next.unlocked = p.unlocked + 1
   return next
