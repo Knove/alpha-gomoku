@@ -137,6 +137,8 @@ function PlayGround() {
   }
 
   const reset = (h: 1 | -1 = human) => {
+    // 思考中禁止重开:挂起的定时器会在空盘上落下旧局面的子
+    if (thinking) return
     setHuman(h)
     setMoves([])
     setAiTop(null)
