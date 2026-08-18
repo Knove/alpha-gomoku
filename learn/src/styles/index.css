@@ -1225,3 +1225,120 @@ details.account-book summary {
   outline-offset: -1px;
   z-index: 1;
 }
+
+/* ============================================================
+   L08/L09 · 表格、晋升计算器、胜率条
+   ============================================================ */
+
+.l09-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  margin: 1rem 0;
+}
+.l09-table th,
+.l09-table td {
+  border: 1px solid var(--hairline);
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+}
+.l09-table th {
+  background: var(--card-sunken);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--fg-faint);
+  font-weight: 600;
+}
+.l09-table td:not(:first-child) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* L09 · 六局三态格子 */
+.calc-slot {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 3.6rem;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.78rem;
+}
+.calc-slot .calc-slot-val {
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+/* L09 · 胜率条:填充 + 55% 线 + 指针 */
+.l09-ratebar {
+  position: relative;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--card-sunken);
+  border: 1px solid var(--hairline);
+  overflow: visible;
+}
+.l09-ratebar-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 7px 0 0 7px;
+  background: var(--accent);
+  opacity: 0.32;
+  transition: width 300ms ease;
+}
+.l09-ratebar-line {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  background: var(--accent-deep);
+  transform: translateX(-50%);
+}
+.l09-ratebar-needle {
+  position: absolute;
+  top: -3px;
+  height: 20px;
+  width: 5px;
+  border-radius: 3px;
+  background: var(--accent);
+  transform: translateX(-50%);
+  transition: left 300ms ease;
+  box-shadow: var(--shadow-card);
+}
+.l09-ratebar-tag {
+  position: absolute;
+  top: 22px;
+  transform: translateX(-50%);
+  font-size: 0.68rem;
+  white-space: nowrap;
+  color: var(--accent-deep);
+}
+
+/* L99 · 全系统图节点(SVG <a>) */
+.sys-node {
+  cursor: pointer;
+}
+.sys-node rect {
+  fill: var(--card);
+  stroke: var(--hairline-strong);
+  stroke-width: 1.3;
+  transition: stroke 140ms ease, fill 140ms ease;
+}
+.sys-node:hover rect,
+.sys-node:focus-visible rect {
+  stroke: var(--accent);
+  fill: var(--accent-wash);
+}
+.sys-node .sys-name {
+  font-size: 13px;
+  font-weight: 700;
+  fill: var(--fg);
+}
+.sys-node .sys-sub {
+  font-size: 9.5px;
+  fill: var(--fg-faint);
+}
+
