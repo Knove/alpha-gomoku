@@ -5,7 +5,7 @@ __pycache__/
 .venv/
 
 # runtime data (training artifacts)
-data/
+/data/
 
 # frontend
 web/node_modules/
