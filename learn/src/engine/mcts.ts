@@ -106,6 +106,16 @@ export class SearchTree {
     return this.pendingGame !== null;
   }
 
+  /** Widget introspection: root→leaf actions of the pending selection (read-only). */
+  pendingActions(): number[] | null {
+    return this.pendingGame === null ? null : this.pendingPath.map(([, a]) => a);
+  }
+
+  /** Widget introspection: the pending leaf position (read-only). */
+  pendingState(): GameState | null {
+    return this.pendingGame;
+  }
+
   leafInput(): number[][][] {
     if (this.pendingGame === null) throw new Error("no pending leaf");
     return encode(this.pendingGame);
