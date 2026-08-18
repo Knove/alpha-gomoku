@@ -47,17 +47,17 @@
 
 ## 真实性管线(命根)
 
-- `learn/scripts/export-weights.py`(.venv torch):导出 `best.pt` + `iter_000000.pt`(未训练对照)为 JSON(≈1MB,权重取 4 位小数)→ 打包进站;
+- `learn/scripts/export-weights.py`(.venv torch):导出 `best.pt` + `iter_000000.pt`(未训练对照)为 JSON(≈1MB,权重取 5 位小数)→ 打包进站;
 - `learn/scripts/export-data.mjs` 沿用 explainer 已验证模式:导真实对局 / metrics.jsonl / arena 战报 → `src/data/real.ts`;
 - **TS 前向引擎**(`src/engine/`):encode / conv / BN(推理态,running stats)/ ReLU / FC / tanh / softmax / log_softmax 直写,镜像 `model.py`;
 - **TS MCTS 引擎**:镜像 `mcts.py`(PUCT、逐层取负、终局直传、根噪声、访问数);
-- **正确性铁闸**:python 端对固定输入集导出期望输出,node 测试逐张量断言(容差 1e-4)。引擎对拍不过,站不许交付;
+- **正确性铁闸**:python 端对固定输入集导出期望输出(单层与整网两级),node 测试逐张量断言(单层容差 1e-4,整网经 7 层累乘放宽到 2e-3)。引擎对拍不过,站不许交付;
 - 诚实约定:真数据标「第 N 轮真实对局」,教学简化处图注声明。
 
 ## 技术与复用
 
 - React 19 + Vite 6 + TS + Tailwind 4,零新依赖;
-- 引擎独立 `src/engine/`(前向、MCTS),第 6/7/11 课与毕业沙盒共用;
+- 引擎独立 `src/engine/`(前向、MCTS),第 6、7 课与毕业沙盒(节点 11)共用;
 - SVG/Canvas 部件手写零依赖(同 explainer 契约)。
 
 ## 归档
