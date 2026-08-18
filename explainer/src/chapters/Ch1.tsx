@@ -15,7 +15,7 @@ const NODES = [
   { key: "train", label: "参数更新", sub: "损失下降,网络变强" },
 ] as const
 
-function Flywheel({ stage, onPush, done }: { stage: number; onPush: () => void; done: boolean }) {
+function Flywheel({ stage, onPush, onReplay, done }: { stage: number; onPush: () => void; onReplay: () => void; done: boolean }) {
   // 4 nodes on a circle; stage -1 = idle, 0..3 = the currently-flowing edge
   const cx = 300, cy = 230, r = 150
   const pos = NODES.map((_, i) => {
@@ -87,6 +87,14 @@ function Flywheel({ stage, onPush, done }: { stage: number; onPush: () => void; 
           <button type="button" className="btn primary" onClick={onPush} disabled={done}>
             {stage < 0 ? "推动第一轮" : done ? "四轮推完" : `推动第${["二", "三", "四"][Math.min(stage, 2)]}轮`}
           </button>
+          {done && (
+            <button type="button" className="btn" style={{ marginLeft: 8 }} onClick={onReplay}>
+              从头再看
+            </button>
+          )}
+          <div className="mini-label" style={{ marginTop: 8 }}>
+            每推一次 = 真实的一整轮迭代(四个环节各走一遍),飞轮转过 1/4 圈
+          </div>
         </div>
       </div>
       <FlywheelLedger stage={stage} />
@@ -129,7 +137,7 @@ function FlywheelLedger({ stage }: { stage: number }) {
         <div className="banner accent" style={{ marginTop: 12 }}>
           <span style={{ fontSize: "0.95rem" }}>飞轮转起来了</span>
           <span style={{ fontWeight: 400, fontSize: "0.85rem" }}>
-            四轮后它已经稳定碾压随机初始的自己;每一圈,向导都更准一点
+            四轮后它对随机初始的自己拿到 83% 胜率(第 2 轮测量);损失大体向下,但单轮会反复——第 3 轮价值损失就回弹了
           </span>
         </div>
       )}
@@ -154,14 +162,14 @@ export default function Ch1() {
           <p>
             AlphaZero 的全部魔法可以浓缩成一句话:<strong>网络指导搜索,搜索的产物反过来教网络</strong>。
             神经网络负责「直觉」——看一眼棋盘,说出哪些点值得下、局面谁占优;
-            MCTS 搜索负责「深思」——拿着这份直觉做 40 次推演,得出更可靠的结论。
+            蒙特卡洛树搜索(MCTS,第肆章细讲)负责「深思」——拿着这份直觉做 40 次推演,得出更可靠的结论。
             然后,拿深思的结论当老师,回头训练直觉。
           </p>
           <p>
             直觉变强一点,深思的向导就更准一点,深思给出的答案又更好一点——
             这个自我加强的循环,人们叫它<em>飞轮</em>。它甚至不需要任何人类棋谱点火:
-            初始网络完全随机,靠根节点的噪声到处乱试,但每一局的<strong>胜负是真实的</strong>,
-            这个锚点就足以让飞轮从静止转起来。
+            初始网络完全随机,靠根节点的噪声(每次搜索前往落点偏好里掺一点随机扰动,第肆章细讲)到处乱试,
+            但每一局的<strong>胜负是真实的</strong>,这个锚点就足以让飞轮从静止转起来。
           </p>
           <p>
             下面这台飞轮不是示意图:每推一轮,账本追加的都是你的模型在
@@ -173,12 +181,13 @@ export default function Ch1() {
       <div className="figure-col">
         <Reveal>
           <div className="figure">
-            <Flywheel stage={stage} onPush={() => setStage((s) => Math.min(s + 1, REAL.metrics.length - 1))} done={done} />
+            <Flywheel stage={stage} onPush={() => setStage((s) => Math.min(s + 1, REAL.metrics.length - 1))} onReplay={() => setStage(-1)} done={done} />
             <div className="figure-cap">
               <span className="cap-no">图 1-1</span>
               <span>
                 AlphaZero 飞轮。点「推动一轮」看真实训练如何沿环路流转:
                 神经网络 → MCTS 搜索 → 训练数据 → 参数更新 → 更强的网络。
+                训练数据三元组里的 π = 搜索给出的落点分布,z = 这局最终胜负(第伍章细讲)。
                 右侧账本来自第 0 至 3 轮真实训练。
               </span>
             </div>
@@ -211,7 +220,7 @@ export default function Ch1() {
                       </td>
                       <td style={{ padding: "0.35rem 0.6rem", borderBottom: "1px solid var(--hairline)" }}>
                         {m.best_iteration === m.iteration && m.iteration > 0
-                          ? <span style={{ color: "var(--accent-deep)", fontWeight: 700 }}>#{m.best_iteration} ★</span>
+                          ? <span style={{ color: "var(--accent-deep)", fontWeight: 700 }}>#{m.best_iteration} · best</span>
                           : `#${m.best_iteration}`}
                       </td>
                     </tr>
@@ -225,6 +234,7 @@ export default function Ch1() {
                 四轮真实账本(data/runs/demo/metrics.jsonl)。读法:策略损失 4.4 附近 ≈ ln(81)
                 的「乱猜线」,四轮的训练刚让它开始松动;真正有力的证据在最后一列——
                 第 2 轮,挑战者以 6 比 0 掀翻前任冠军,best 易主。
+                (vs baseline = 对训练开始前冻结的随机初始网络的胜率;best = 现任冠军模型;竞技场规则见第柒章。)
               </span>
             </div>
           </div>

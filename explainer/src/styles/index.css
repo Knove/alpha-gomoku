@@ -25,8 +25,12 @@
   --board-edge: #b3945a;
   --board-coord: #5b5647; /* 棋盘坐标字,木色底上 ≥4.5:1 */
   --stone-b: #161513;
+  --stone-b-hi: #5c5b56; /* 黑子渐变高光 */
+  --stone-b-lo: #000000; /* 黑子渐变暗部 */
   --stone-w: #fbf9f3;
+  --stone-w-hi: #ffffff; /* 白子渐变高光 */
   --stone-w-edge: #b9b4a6;
+  --stone-shadow: #14100a; /* 棋子投影 */
 
   --heat: rgba(190, 52, 37, 0.85);
   --ok: #4c7a57;
@@ -66,8 +70,12 @@
   --board-edge: #8f7442;
   --board-coord: #5b5647; /* 暗色木板与亮色近同色,沿用即可 */
   --stone-b: #121110;
+  --stone-b-hi: #5c5b56;
+  --stone-b-lo: #000000;
   --stone-w: #f5f2e9;
+  --stone-w-hi: #ffffff;
   --stone-w-edge: #8f8a7c;
+  --stone-shadow: #14100a;
 
   --heat: rgba(224, 88, 70, 0.9);
   --ok: #6da87c;
@@ -303,6 +311,29 @@ body {
 .formula .hl {
   color: var(--accent-deep);
   font-weight: 700;
+}
+
+/* 源码对照块(结构漫游说明卡内) */
+.codewalk {
+  margin-top: 0.8rem;
+  background: var(--card-sunken);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+}
+
+.codewalk pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.65;
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--fg-muted);
+}
+
+.codewalk pre .cm {
+  color: var(--fg-faint);
 }
 
 .misconception {

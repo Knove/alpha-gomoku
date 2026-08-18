@@ -75,6 +75,9 @@ function ArenaTimeline() {
  * 图 7-2:真实竞技对局回放(第 2 轮挑战者 vs 前冠军)
  * ============================================================ */
 
+/** 数据里的英文角色名 → 中文(与散文译名一致)。 */
+const ROLE: Record<string, string> = { challenger: "挑战者", best: "冠军", baseline: "baseline" }
+
 function ArenaReplay() {
   const game = REAL.arenaGame
   const [step, setStep] = useState(game?.moves.length ?? 0)
@@ -115,7 +118,7 @@ function ArenaReplay() {
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: "0.6rem", padding: "1rem 1.25rem", borderBottom: "1px solid var(--hairline)" }}>
         <span className="chip accent">第 {game.iteration} 轮 · 晋升赛</span>
-        <span className="chip mono">{game.meta.black ?? "?"}(黑) vs {game.meta.white ?? "?"}(白)</span>
+        <span className="chip mono">{ROLE[game.meta.black ?? ""] ?? game.meta.black ?? "?"}(黑) vs {ROLE[game.meta.white ?? ""] ?? game.meta.white ?? "?"}(白)</span>
         <span className="mini-label" style={{ marginLeft: "auto" }}>{game.id}</span>
       </div>
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 0 }}>
@@ -187,12 +190,13 @@ export default function Ch7() {
             损失曲线下降,不等于棋真的变强了——也可能只是在背数据。
             客观的裁判只有对战。于是每两轮,刚训练完的<strong>挑战者</strong>要走进
             <strong>竞技场</strong>,与现任冠军(best.pt)交替先后手打一组对抗赛:
-            胜率过半(≥ 55%)才能取而代之,否则冠军留任。
+            胜率 ≥ <span className="mono">55%</span> 才能取而代之(和棋算半分:
+            6 局 2 胜 2 和 2 负只有 50%,不够线),否则冠军留任。
           </p>
           <p>
             但 vs best 的曲线天生会「抖动」——冠军本身在不停换人。
-            所以系统还养着第三张牌:<em>baseline</em>,第 0 轮冻结的随机初始网络,永远不变。
-            对它的胜率曲线,才是单调可比的进步刻度。
+            所以系统还养着第三张牌:<em>baseline</em>,训练开始前冻结的随机初始网络
+            (一轮都没训过),永远不变。对它的胜率,才是可比的刻度——对手固定,数字才能横向比较。
           </p>
           <p>
             还有个只在工程里才看得到的坑,值得说给你听:无噪声 + 纯 argmax 的搜索是
@@ -211,7 +215,8 @@ export default function Ch7() {
               <span className="cap-no">图 7-1</span>
               <span>
                 晋升时间线(真实战报)。第 0 轮没有前任,直接加冕;第 2 轮挑战者以 6 比 0
-                掀翻前冠军;对 baseline 的胜率两期都是 83%,进步稳定可证。
+                掀翻前冠军——这才是本轮的进步铁证。对 baseline 的胜率两期都是 83%(5 胜 1 负):
+                只打 6 局,粒度太粗读不出斜率,但至少从未回退。
               </span>
             </div>
           </div>

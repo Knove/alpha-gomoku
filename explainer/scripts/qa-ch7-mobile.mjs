@@ -2,7 +2,7 @@
 import { chromium } from "playwright"
 const BASE = "http://localhost:4173"
 const browser = await chromium.launch()
-const page = await browser.newPage({ viewport: { width: 1280, height: 950 } })
+const page = await browser.newPage({ viewport: { width: 1680, height: 950 } })
 const errors = []
 page.on("pageerror", (e) => errors.push(String(e)))
 await page.goto(BASE, { waitUntil: "networkidle" })

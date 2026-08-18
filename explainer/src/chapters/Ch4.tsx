@@ -163,6 +163,18 @@ function newNode(): EngNode {
   return { prior: null, children: new Map(), N: new Float32Array(NN), W: new Float32Array(NN), expanded: false }
 }
 
+/** One in-flight simulation, split into the three phases the UI steps through
+ *  (mirrors mcts.py's select → needs_eval → expand_and_backup protocol). */
+interface Pending {
+  path: { node: EngNode; a: number }[]
+  actions: number[]
+  b: number[]
+  player: number
+  leaf: EngNode
+  value: number | null
+  terminal: boolean
+}
+
 interface Engine {
   root: EngNode
   board: number[]
@@ -172,10 +184,11 @@ interface Engine {
   lastValue: number
   noise: boolean
   rand: () => number
+  pending: Pending | null
 }
 
 function createEngine(board: number[], player: number, noise: boolean, seed: number): Engine {
-  return { root: newNode(), board: board.slice(), player, sims: 0, lastPath: [], lastValue: 0, noise, rand: mulberry32(seed) }
+  return { root: newNode(), board: board.slice(), player, sims: 0, lastPath: [], lastValue: 0, noise, rand: mulberry32(seed), pending: null }
 }
 
 function puctSelect(node: EngNode, b: number[]): number {
@@ -196,8 +209,9 @@ function puctSelect(node: EngNode, b: number[]): number {
   return best
 }
 
-/** One full simulation: select -> expand -> negamax backup (mirrors mcts.py). */
-function simulateOnce(e: Engine): void {
+/** ① 选择:从根出发按 PUCT 逐层下行,直到一个没展开过的新局面。 */
+function selectPhase(e: Engine): void {
+  if (e.pending) return
   const b = e.board.slice()
   let player = e.player
   let node = e.root
@@ -217,38 +231,57 @@ function simulateOnce(e: Engine): void {
     player = -player
     node = child
   }
+  e.pending = { path, actions, b, player, leaf: node, value: null, terminal: false }
+}
 
-  let v: number
-  const out = outcome(b)
+/** ② 展开:终局直接定胜负;否则问评估器,记下先验与估值(根上掺噪声)。 */
+function expandPhase(e: Engine): void {
+  const p = e.pending
+  if (!p || p.value !== null) return
+  const out = outcome(p.b)
   if (out !== null) {
-    v = out === 0 ? 0 : out === player ? 1 : -1
+    p.value = out === 0 ? 0 : out === p.player ? 1 : -1
+    p.terminal = true
   } else {
-    const { prior, value } = evaluate(b, player)
-    node.prior = prior
-    node.expanded = true
-    if (node === e.root && e.noise) {
-      const legal = legalMoves(b)
+    const { prior, value } = evaluate(p.b, p.player)
+    p.leaf.prior = prior
+    p.leaf.expanded = true
+    if (p.leaf === e.root && e.noise) {
+      const legal = legalMoves(p.b)
       const d = dirichlet(0.3, legal.length, e.rand)
       const mixed = new Float32Array(NN)
       for (let i = 0; i < NN; i++) mixed[i] = 0.75 * prior[i]
       legal.forEach((a, i) => {
         mixed[a] += 0.25 * d[i]
       })
-      node.prior = mixed
+      p.leaf.prior = mixed
     }
-    v = value
+    p.value = value
   }
+}
 
-  let vv = v
-  for (let i = path.length - 1; i >= 0; i--) {
+/** ③ 回传:把叶估值沿来路逐层取负地写进每条边的 N/W。 */
+function backupPhase(e: Engine): void {
+  const p = e.pending
+  if (!p || p.value === null) return
+  let vv = p.value
+  for (let i = p.path.length - 1; i >= 0; i--) {
     vv = -vv
-    const { node: nd, a } = path[i]
+    const { node: nd, a } = p.path[i]
     nd.N[a] += 1
     nd.W[a] += vv
   }
   e.sims += 1
-  e.lastPath = actions
-  e.lastValue = v
+  e.lastPath = p.actions
+  e.lastValue = p.value
+  e.pending = null
+}
+
+/** One full simulation: select -> expand -> negamax backup (mirrors mcts.py). */
+function simulateOnce(e: Engine): void {
+  selectPhase(e)
+  expandPhase(e)
+  backupPhase(e)
 }
 
 /** Visit distribution at the root (the pi the search produces). */
@@ -260,16 +293,21 @@ function rootPi(e: Engine): number[] {
 
 /* ------------------------------------------------------ preset game */
 
-/** Black has an open three on row 4; (5,4) makes an open four, which forces a
- *  win within 3 plies — the terminal +1 must travel through depth ≥ 2, so the
- *  tree genuinely grows instead of collapsing onto a single instant-win edge. */
+/** Black has four in a row on row 4 with the left end blocked by white, so
+ *  F5 = (5,4) completes five in one ply. The teaching evaluator's run scores
+ *  are capped at 2, so to the prior F5 looks merely decent — it does NOT know
+ *  the move wins. The terminal +1 must be discovered by the search itself:
+ *  within a handful of simulations some simulation selects F5, the terminal
+ *  backup stamps Q = +1 on the edge, and from then on PUCT piles nearly every
+ *  visit onto it. That pile-up is the point of the demo (verified: seed 42,
+ *  noise on, F5 first hit at sim 5, ~94% of visits by sim 50). */
 function presetBoard(): { board: number[]; player: number } {
   const b = new Array(NN).fill(0)
   const put = (x: number, y: number, p: number) => {
     b[y * N + x] = p
   }
-  put(2, 4, 1); put(3, 4, 1); put(4, 4, 1) // black open three, row 4
-  put(0, 4, -1)                            // stray white, far end
+  put(1, 4, 1); put(2, 4, 1); put(3, 4, 1); put(4, 4, 1) // black four, row 4
+  put(0, 4, -1)                            // white blocks the left end
   put(2, 1, -1); put(3, 1, -1); put(4, 1, -1) // white three, row 1
   put(6, 2, 1)                             // stray black
   return { board: b, player: 1 }
@@ -332,7 +370,9 @@ function layoutTree(root: EngNode, lastPath: number[]): VNode[] {
 }
 
 function TreeView({ engine, version }: { engine: Engine; version: number }) {
-  const vnodes = useMemo(() => layoutTree(engine.root, engine.lastPath), [engine, version])
+  // 相位走拍中高亮「本次选择」的路径;平时高亮最近一次模拟的路径
+  const hlPath = engine.pending ? engine.pending.actions : engine.lastPath
+  const vnodes = useMemo(() => layoutTree(engine.root, hlPath), [engine, version])
   const maxN = Math.max(1, ...engine.root.N)
   const width = Math.max(720, ...vnodes.map((v) => v.x + 70))
   const height = 40 + MAX_DEPTH * 62 + 46
@@ -344,7 +384,7 @@ function TreeView({ engine, version }: { engine: Engine; version: number }) {
         if (!v.parent) return null
         const share = v.parent.node.N[v.action] ?? 0
         const w = 1 + 4 * Math.min(1, share / Math.max(1, maxN))
-        const onPath = v.onPath && v.depth <= engine.lastPath.length
+        const onPath = v.onPath && v.depth <= hlPath.length
         return (
           <line key={`e${i}`} x1={v.parent.x} y1={v.parent.y} x2={v.x} y2={v.y}
             style={{ stroke: onPath ? "var(--accent)" : "var(--hairline-strong)" }}
@@ -399,6 +439,9 @@ function TreeView({ engine, version }: { engine: Engine; version: number }) {
 /* -------------------------------------------------- simulator widget */
 
 interface SimControls {
+  /** 当前相位:0=可选择,1=可展开,2=可回传 */
+  phase: 0 | 1 | 2
+  phaseStep: (kind: "select" | "expand" | "backup") => void
   step: (k: number) => void
   reset: () => void
   running: boolean
@@ -415,7 +458,17 @@ function useMctsEngine(): { engine: Engine; version: number } & SimControls {
   const [noise, setNoise] = useState(true)
   const engine = engineRef.current
 
+  const phase: 0 | 1 | 2 = engine.pending ? (engine.pending.value === null ? 1 : 2) : 0
+
+  const phaseStep = (kind: "select" | "expand" | "backup") => {
+    if (kind === "select" && phase === 0) selectPhase(engine)
+    if (kind === "expand" && phase === 1) expandPhase(engine)
+    if (kind === "backup" && phase === 2) backupPhase(engine)
+    setVersion((v) => v + 1)
+  }
+
   const step = (k: number) => {
+    if (engine.pending) return // 相位走拍中,先按「回传」走完这一拍
     for (let i = 0; i < k; i++) simulateOnce(engine)
     setVersion((v) => v + 1)
   }
@@ -438,6 +491,8 @@ function useMctsEngine(): { engine: Engine; version: number } & SimControls {
   return {
     engine,
     version,
+    phase,
+    phaseStep,
     step,
     reset: () => { setRunning(false); resetWith(noise) },
     running,
@@ -452,7 +507,7 @@ function useMctsEngine(): { engine: Engine; version: number } & SimControls {
   }
 }
 
-function MctsSim({ engine, version, step, reset, running, setRunning, noise, toggleNoise }: {
+function MctsSim({ engine, version, phase, phaseStep, step, reset, running, setRunning, noise, toggleNoise }: {
   engine: Engine
   version: number
 } & SimControls) {
@@ -464,21 +519,48 @@ function MctsSim({ engine, version, step, reset, running, setRunning, noise, tog
   const top6 = top.slice(0, 6)
   const totalVisits = engine.root.N.reduce((a, x) => a + x, 0)
   const best = top[0]
-  const pathText = engine.lastPath
+  const hlActions = engine.pending ? engine.pending.actions : engine.lastPath
+  const pathText = hlActions
     .slice(0, 8)
     .map((a) => coordLabel(a % N, Math.floor(a / N)))
     .join(" → ")
+  const fmtV = (v: number) => `${v >= 0 ? "+" : ""}${(v === 0 ? 0 : v).toFixed(3)}`
+
+  const readout =
+    phase === 1
+      ? `第 ${engine.sims + 1} 次模拟 · 选择完成:路径 ${pathText || "(根)"} —— 到达一个没展开过的新局面,点「② 展开」问一次评估`
+      : phase === 2 && engine.pending
+        ? `展开完成:${engine.pending.terminal ? "这是终局,估值直接定胜负" : "教学替身给出先验与估值"} · 叶估值 ${fmtV(engine.pending.value ?? 0)} —— 点「③ 回传」逐层取负写回`
+        : engine.sims === 0
+          ? "点「① 选择」开始一次完整模拟的三拍:选择 → 展开 → 回传"
+          : `第 ${engine.sims} 次模拟:路径 ${pathText || "(根)"} · 叶估值 ${fmtV(engine.lastValue)}`
+
+  const PHASE_BTNS = [
+    { kind: "select" as const, label: "① 选择", en: phase === 0 },
+    { kind: "expand" as const, label: "② 展开", en: phase === 1 },
+    { kind: "backup" as const, label: "③ 回传", en: phase === 2 },
+  ]
 
   return (
     <div>
       {/* controls */}
       <div className="flex flex-wrap items-center" style={{ gap: "0.6rem", padding: "1rem 1.25rem", borderBottom: "1px solid var(--hairline)" }}>
-        <button type="button" className="btn primary" onClick={() => step(1)}>单步 ×1</button>
-        <button type="button" className="btn" onClick={() => step(10)}>单步 ×10</button>
+        {PHASE_BTNS.map((b) => (
+          <button
+            key={b.kind}
+            type="button"
+            className={`btn${b.en ? " primary" : ""}`}
+            disabled={!b.en}
+            onClick={() => phaseStep(b.kind)}
+          >
+            {b.label}
+          </button>
+        ))}
+        <button type="button" className="btn" disabled={phase !== 0} onClick={() => step(10)}>模拟 ×10</button>
         <button
           type="button"
           className="btn"
-          disabled={engine.sims >= 200}
+          disabled={phase !== 0 || engine.sims >= 200}
           onClick={() => step(Math.max(0, 200 - engine.sims))}
         >
           跑到 200
@@ -486,6 +568,7 @@ function MctsSim({ engine, version, step, reset, running, setRunning, noise, tog
         <button
           type="button"
           className={`btn${running ? " active" : ""}`}
+          disabled={phase !== 0}
           onClick={() => setRunning(!running)}
         >
           {running ? "暂停" : "自动"}
@@ -501,7 +584,7 @@ function MctsSim({ engine, version, step, reset, running, setRunning, noise, tog
           className={`btn${noise ? " active" : ""}`}
           onClick={toggleNoise}
           aria-label={`根噪声:${noise ? "开" : "关"}`}
-          title="切换后搜索树重建"
+          title="往根节点的先验里掺随机扰动,逼搜索偶尔去看冷门外手;切换后搜索树重建"
         >
           {noise ? "开" : "关"}
         </button>
@@ -525,7 +608,7 @@ function MctsSim({ engine, version, step, reset, running, setRunning, noise, tog
             ghostPlayer={1}
           />
           <div className="mini-label" style={{ marginTop: 8, textAlign: "center" }}>
-            黑先 · F5(5,4) 一落成四,杀棋已定
+            黑先 · F5(5,4) 一落成五,但评估器看不出来
           </div>
         </div>
         {/* tree */}
@@ -537,9 +620,7 @@ function MctsSim({ engine, version, step, reset, running, setRunning, noise, tog
       {/* readout strip */}
       <div style={{ padding: "0.9rem 1.25rem", borderTop: "1px solid var(--hairline)" }}>
         <div className="mono" style={{ fontSize: "0.8rem", color: "var(--fg-muted)", marginBottom: 10 }}>
-          {engine.sims === 0
-            ? "点「单步」跑一次完整模拟:选择 → 展开 → 回传"
-            : `第 ${engine.sims} 次模拟:路径 ${pathText || "(根)"} · 叶估值 ${engine.lastValue >= 0 ? "+" : ""}${(engine.lastValue === 0 ? 0 : engine.lastValue).toFixed(3)}`}
+          {readout}
         </div>
         <div className="flex flex-col" style={{ gap: 5 }}>
           {top6.map((t) => (
@@ -560,15 +641,23 @@ function MctsSim({ engine, version, step, reset, running, setRunning, noise, tog
           )}
         </div>
         {engine.sims >= 50 && best && (
-          <div className="banner accent" style={{ marginTop: 12 }}>
-            <span>
-              50 次模拟后:访问数收敛到 {coordLabel(best.a % N, Math.floor(best.a / N))}
-              (占比 {fmtPct(best.n / Math.max(1, totalVisits), 0)})
-            </span>
-            <span style={{ fontWeight: 400, fontSize: "0.85rem" }}>
-              搜索找到了那条制胜线;棋盘上朱砂热力就是 π
-            </span>
-          </div>
+          best.n / Math.max(1, totalVisits) >= 0.5 ? (
+            <div className="banner accent" style={{ marginTop: 12 }}>
+              <span>
+                {engine.sims} 次模拟后:访问数收敛到 {coordLabel(best.a % N, Math.floor(best.a / N))}
+                (占比 {fmtPct(best.n / Math.max(1, totalVisits), 0)})
+              </span>
+              <span style={{ fontWeight: 400, fontSize: "0.85rem" }}>
+                搜索找到了那手制胜棋;棋盘上朱砂热力就是 π
+              </span>
+            </div>
+          ) : (
+            <div className="banner" style={{ marginTop: 12 }}>
+              <span style={{ fontWeight: 400, fontSize: "0.9rem" }}>
+                {engine.sims} 次模拟,访问数还没集中——继续「模拟 ×10」或「自动」,看 Q 把访问数拉向制胜手
+              </span>
+            </div>
+          )
         )}
       </div>
     </div>
@@ -654,7 +743,7 @@ export default function Ch4() {
             一次模拟分四步。<strong>选择</strong>:从根出发,每层挑一个分数最高的动作往下走,直到一个没见过的新局面;
             <strong>展开</strong>:问一次网络,记下它的先验与估值;<strong>回传</strong>:把估值沿来路逐层<strong>取负</strong>地记进每条边——
             我方大优,对对手就是大劣,所以每爬一层符号翻一次;<strong>重复</strong>几十次(生成本页数据的运行是 40 次)。
-            选择的公式只有一行,却同时照顾了「表现好」和「看得少」:
+            选择的公式只有一行,它叫 <em>PUCT</em>,却同时照顾了「表现好」和「看得少」:
           </p>
         </Reveal>
         <Reveal>
@@ -672,6 +761,14 @@ export default function Ch4() {
             几十次模拟后,根节点的<strong>访问数分布</strong>就是答案:越靠谱的动作被反复访问。
             这个分布通常比网络的原始输出准得多——因为它掺了几十步推演的真相——
             所以它才有资格反过来当网络的老师(下一章的主角)。
+          </p>
+          <p>
+            还有一个关键细节:<strong>噪声</strong>。自我对弈时,每次搜索开始前会往根节点的先验里掺一点
+            Dirichlet 噪声(按 <span className="mono">75% 原先验 + 25% 噪声</span> 混合,
+            与 <span className="chip mono">configs</span> 里的 <span className="mono">dirichlet_epsilon</span> 一致)——
+            冷门外手也有了非零机会,搜索才不会被网络的早期偏见锁死。
+            第一章说随机初始的网络「靠根节点的噪声到处乱试」,靠的就是它;
+            下面模拟器右上角的「根噪声」开关,可以让你亲眼对比有它没有它的差别。
           </p>
         </Reveal>
         <Reveal>
@@ -692,8 +789,9 @@ export default function Ch4() {
             <div className="figure-cap">
               <span className="cap-no">图 4-1</span>
               <span>
-                可单步的 MCTS 模拟器。黑先,F5 一子落成开放四,白棋两端无法兼顾——点「单步」看搜索如何一次模拟一次模拟地发现这条制胜线;
-                开/关根噪声对比探索的差异。树图节点数字是该手的访问次数,朱砂路径是最近一次模拟的选择。
+                可按「选择 → 展开 → 回传」三拍单步的 MCTS 模拟器。黑先,F5 一子直接落成五连——但教学评估器看不出来(它给 F5
+                的先验只是「还不错」),是搜索自己撞见终局 +1,随后几乎所有访问都涌向 F5。
+                开/关根噪声对比探索的差异。树图节点颜色是该局面的行棋方(黑节点=轮到黑下),数字是访问次数,朱砂路径是本次/最近一次模拟的选择。
                 评估器为教学示意,搜索机制与 alphagomoku/mcts.py 一致。
               </span>
             </div>

@@ -130,8 +130,8 @@ export default function Ch0() {
               训练到第 <span className="mono">3</span> 轮的模型,在第{" "}
               <span className="mono">10</span> 手把 <span className="mono">40</span>{" "}
               次模拟全部押给了天元。这一页不讲论文、不堆公式,只把这套
-              AlphaZero 式系统的每个零件——网络、搜索、数据飞轮——用你自己训练出的模型与对局拆开讲,
-              而且每一章都可以上手玩。
+              AlphaZero 式系统(不靠任何人类棋谱、只凭自我对弈从零学会下棋的方法)的每个零件——网络、搜索、数据飞轮——
+              用你自己训练出的模型与对局拆开讲,而且每一章都可以上手玩。
             </p>
           </div>
         </Reveal>
@@ -223,7 +223,7 @@ export default function Ch0() {
                 >
                   根估值为行棋方视角:<span className="mono">+1</span> 必胜、
                   <span className="mono">−1</span>{" "}
-                  必败。访问分布就是这一手的「思考过程」,第三章会把它彻底拆开。
+                  必败。访问分布就是这一手的「思考过程」,第四章会把它彻底拆开。
                   列字母沿用围棋惯例,跳过 I(避免与数字 1 混淆)。
                 </p>
               </aside>
@@ -269,7 +269,7 @@ export default function Ch0() {
           <p>
             刚才那一手,没有任何人教过它。系统只被告知「五个连成一线就算赢」,
             剩下的全是它自己在 <span className="mono">{TOTAL_ITERS}</span> 轮训练、
-            <span className="mono">{TOTAL_SAMPLES}</span> 条真实对局样本里摸索出来的。
+            <span className="mono">{TOTAL_SAMPLES}</span> 条真实对局留下的局面样本里摸索出来的。
             这一页就回答一个问题:<strong>它是怎么学会的</strong>。
           </p>
           <p>

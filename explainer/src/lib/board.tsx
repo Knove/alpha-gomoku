@@ -134,12 +134,12 @@ export default function GomokuBoard({
     >
       <defs>
         <radialGradient id={`${uid}-b`} cx="38%" cy="34%" r="75%">
-          <stop offset="0%" stopColor="#5c5b56" />
+          <stop offset="0%" style={{ stopColor: "var(--stone-b-hi)" }} />
           <stop offset="55%" style={{ stopColor: "var(--stone-b)" }} />
-          <stop offset="100%" stopColor="#000000" />
+          <stop offset="100%" style={{ stopColor: "var(--stone-b-lo)" }} />
         </radialGradient>
         <radialGradient id={`${uid}-w`} cx="40%" cy="35%" r="78%">
-          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="0%" style={{ stopColor: "var(--stone-w-hi)" }} />
           <stop offset="80%" style={{ stopColor: "var(--stone-w)" }} />
           <stop offset="100%" style={{ stopColor: "var(--stone-w-edge)" }} />
         </radialGradient>
@@ -243,7 +243,7 @@ export default function GomokuBoard({
           {stones.map((s) => (
             <circle key={`sh-${s.x}-${s.y}`}
               cx={px(s.x) + stoneR * 0.06} cy={py(s.y) + stoneR * 0.12}
-              r={stoneR} fill="#14100a" />
+              r={stoneR} style={{ fill: "var(--stone-shadow)" }} />
           ))}
         </g>
       )}

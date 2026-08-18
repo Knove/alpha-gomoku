@@ -83,7 +83,9 @@ console.log("[mobile] loss tip after tapping away:", (await mtip.count()) > 0 &&
 const mch4 = mob.locator("#ch-4")
 await mch4.scrollIntoViewIfNeeded()
 await mob.waitForTimeout(300)
-await mch4.locator("button", { hasText: "单步 ×1" }).first().tap()
+await mch4.locator("button", { hasText: "① 选择" }).first().tap()
+await mch4.locator("button", { hasText: "② 展开" }).first().tap()
+await mch4.locator("button", { hasText: "③ 回传" }).first().tap()
 await mob.waitForTimeout(150)
 console.log("[mobile] MCTS sims after tap:", (await mch4.locator(".chip.mono", { hasText: "模拟" }).innerText()).trim())
 // flywheel on mobile

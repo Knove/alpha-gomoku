@@ -21,10 +21,10 @@ const snap = async (label) => {
   console.log("readout:", readout)
 }
 
-await btn("单步 ×1").click()
+await btn("① 选择").click(); await btn("② 展开").click(); await btn("③ 回传").click()
 await page.waitForTimeout(150)
 await snap("1 sim")
-await btn("单步 ×10").click()
+await btn("模拟 ×10").click()
 await page.waitForTimeout(150)
 await snap("11 sims")
 await btn("跑到 200").click()

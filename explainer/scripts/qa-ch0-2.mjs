@@ -81,12 +81,14 @@ await page.waitForTimeout(200)
 log("Ch2", "after keyboard Enter on 客观视角, active", (await ch2.locator(".seg-btn.active").innerText()).trim())
 
 /* ---------- Ch2 planes hover ---------- */
-const planes = ch2.locator("svg[role='img'][aria-label^='平面']")
+const planes = ch2.locator("svg[role='group'][aria-label^='平面']")
 log("Ch2", "planes count", await planes.count())
 // hover cell index 40 (x=4,y=4 center, occupied by own white in canon plane0)
+await planes.nth(0).scrollIntoViewIfNeeded()
+await page.waitForTimeout(700) // Reveal 动画与布局稳定
 const rect = await planes.nth(0).locator("rect").nth(40).boundingBox()
-await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2)
-await page.waitForTimeout(150)
+await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2, { steps: 4 })
+await page.waitForTimeout(350)
 const strokeOf = async (p, i) => planes.nth(p).locator("rect").nth(i).evaluate((el) => getComputedStyle(el).stroke)
 const s0 = await strokeOf(0, 40), s1 = await strokeOf(1, 40), s2 = await strokeOf(2, 40)
 log("Ch2", "hover sync strokes same cell 3 planes", JSON.stringify([s0, s1, s2]))

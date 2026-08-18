@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react"
 import ChapterHeader from "../components/ChapterHeader"
 import Reveal from "../lib/reveal"
+import { coordLabel } from "../lib/format"
 
 const N = 9
 const CELLS = N * N
@@ -261,10 +262,11 @@ function PerspectiveFigure() {
   )
 }
 
-/* 图 2-2:encode(game) 的三张输入平面,同坐标悬停联动(触屏可点按钉住)。 */
+/* 图 2-2:encode(game) 的三张输入平面,同坐标悬停联动(触屏可点按钉住;键盘 roving tabindex)。 */
 function PlanesFigure() {
   const [hover, setHover] = useState<number | null>(null)
   const [pin, setPin] = useState<number | null>(null)
+  const [foci, setFoci] = useState<(number | null)[]>([null, null, null])
   const active = hover ?? pin
   const planes: { name: string; data: readonly number[]; fill: string; note: string }[] = [
     { name: "平面 0 · 己方子", data: PLANE_OWN, fill: "var(--fg)", note: "白棋(行棋方)的位置" },
@@ -273,25 +275,50 @@ function PlanesFigure() {
   ]
   const CS = 26 // cell size px
 
+  const onPlaneKeyDown = (pi: number) => (e: React.KeyboardEvent<SVGSVGElement>) => {
+    const f = foci[pi]
+    if (f == null) return
+    let nx = f % N
+    let ny = Math.floor(f / N)
+    if (e.key === "ArrowLeft") nx = Math.max(0, nx - 1)
+    else if (e.key === "ArrowRight") nx = Math.min(N - 1, nx + 1)
+    else if (e.key === "ArrowUp") ny = Math.max(0, ny - 1)
+    else if (e.key === "ArrowDown") ny = Math.min(N - 1, ny + 1)
+    else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault()
+      setPin(pin === f ? null : f)
+      return
+    } else return
+    e.preventDefault()
+    const ni = ny * N + nx
+    setFoci(foci.map((v, k) => (k === pi ? ni : v)))
+    setHover(ni)
+    const rects = e.currentTarget.querySelectorAll("rect[data-cell]")
+    ;(rects[ni] as SVGRectElement | undefined)?.focus()
+  }
+
   return (
     <div style={{ padding: "1.1rem 1.25rem" }}>
       <div className="flex flex-wrap justify-center" style={{ gap: "1.6rem" }}>
-        {planes.map((pl) => (
+        {planes.map((pl, pi) => (
           <div key={pl.name} style={{ textAlign: "center" }}>
             <div className="mini-label" style={{ marginBottom: 8 }}>{pl.name}</div>
             <svg
               width={CS * N}
               height={CS * N}
               style={{ display: "block", borderRadius: 8, border: "1px solid var(--hairline)", background: "var(--card-sunken)" }}
-              role="img"
-              aria-label={pl.name}
+              role="group"
+              aria-label={`${pl.name},键盘:方向键移动,回车钉住`}
+              onKeyDown={onPlaneKeyDown(pi)}
             >
               {pl.data.map((v, i) => {
                 const x = i % N, y = Math.floor(i / N)
                 const hovered = active === i
+                const focused = foci[pi] === i
                 return (
                   <rect
                     key={i}
+                    data-cell=""
                     x={x * CS + 0.5}
                     y={y * CS + 0.5}
                     width={CS - 1}
@@ -299,13 +326,23 @@ function PlanesFigure() {
                     rx={3}
                     style={{
                       fill: v === 1 ? pl.fill : hovered ? "var(--accent-wash-2)" : "transparent",
-                      stroke: hovered ? "var(--accent)" : "var(--hairline)",
+                      stroke: hovered || focused ? "var(--accent)" : "var(--hairline)",
+                      outline: "none",
                     }}
-                    strokeWidth={hovered ? 1.6 : 0.6}
+                    strokeWidth={hovered || focused ? 1.6 : 0.6}
                     opacity={v === 1 ? (hovered ? 1 : 0.9) : 1}
+                    tabIndex={focused ? 0 : -1}
+                    role="button"
+                    aria-pressed={pin === i}
+                    aria-label={`${pl.name},坐标 ${coordLabel(x, y)},值 ${v}`}
                     onPointerEnter={() => setHover(i)}
                     onPointerLeave={() => setHover(null)}
                     onClick={() => setPin(pin === i ? null : i)}
+                    onFocus={() => {
+                      setFoci(foci.map((fv, k) => (k === pi ? i : fv)))
+                      setHover(i)
+                    }}
+                    onBlur={() => setHover(null)}
                   />
                 )
               })}
@@ -315,7 +352,8 @@ function PlanesFigure() {
         ))}
       </div>
       <div className="mini-label" style={{ marginTop: 12, textAlign: "center" }}>
-        悬停或点按任意格,三张平面的同坐标格同步高亮 · 网络一次前向,吃的就是这样的 (3, 9, 9)
+        悬停或点按任意格,三张平面的同坐标格同步高亮(键盘:Tab 进入后方向键移动、回车钉住)·
+        网络每看一次局面,吃进去的就是这样的 (3, 9, 9)
       </div>
     </div>
   )
@@ -339,8 +377,8 @@ export default function Ch2() {
             胜负判定也极简:只看<strong>最后一手</strong>往四个方向数,够不够 5 连。
           </p>
           <p>
-            真正重要的是一个视角技巧。同一句「该堵活三了」,黑棋适用,白棋也适用——
-            如果让网络分别学「黑方怎么办、白方怎么办」,同样的棋理要学两遍。
+            真正重要的是一个视角技巧。同一句「该堵活三了」(活三:两端都空着的三连,再不堵,下一步就成了挡不住的四),
+            黑棋适用,白棋也适用——如果让网络分别学「黑方怎么办、白方怎么办」,同样的棋理要学两遍。
             AlphaZero 的做法是 <strong>canonical_board</strong>:把任意局面乘以当前行棋方,
             于是网络永远只看见「<em>我</em>的子(+1)和<em>对手</em>的子(−1)」。
             黑白两套棋理,塌缩成一套;同一个网络,也才能左手跟右手下棋。
@@ -383,7 +421,9 @@ export default function Ch2() {
             <div className="figure-cap">
               <span className="cap-no">图 2-2</span>
               <span>
-                同一局面(行棋方为白)的三张输入平面。它们只含 0 和 1,
+                同一局面(行棋方为白)的三张输入平面,对应{" "}
+                <span className="mono">game.py L111-117</span> 的{" "}
+                <span className="mono">encode(game)</span>。它们只含 0 和 1,
                 却已经足够网络推断「我有哪些棋形、对手有哪些威胁」。
               </span>
             </div>

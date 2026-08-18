@@ -5,7 +5,7 @@ const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
 page.on("pageerror", (e) => console.log("PAGEERROR", String(e)))
 await page.goto(BASE, { waitUntil: "networkidle" })
-await page.locator("#ch-2 svg[aria-label='平面 0 · 己方子']").scrollIntoViewIfNeeded()
+await page.locator("#ch-2 svg[aria-label^='平面 0 · 己方子']").scrollIntoViewIfNeeded()
 await page.waitForTimeout(400)
 
 const vars = await page.evaluate(() => {

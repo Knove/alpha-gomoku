@@ -43,7 +43,7 @@ async function main() {
       const sim = page.locator("#ch-4 .figure").first()
       await sim.scrollIntoViewIfNeeded()
       await page.waitForTimeout(400)
-      const step10 = sim.getByRole("button", { name: "单步 ×10" })
+      const step10 = sim.getByRole("button", { name: "模拟 ×10" })
       await step10.click()
       await page.waitForTimeout(250)
       await step10.click()

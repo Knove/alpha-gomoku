@@ -18,7 +18,7 @@ await page.waitForTimeout(1500)
 const s = await sims()
 console.log("auto past 200: sims =", s, "(keeps running unbounded:", s > 200, ")")
 // noise toggle while running
-await ch4.locator("button[title='切换后搜索树重建']").click()
+await ch4.locator("button[title*='搜索树重建']").click()
 await page.waitForTimeout(300)
 const s2 = await sims()
 await page.waitForTimeout(600)
@@ -51,7 +51,7 @@ console.log("ch7 timeline buttons:", await ch7.locator("button").count())
 console.log("ch5 buttons total:", await page.locator("#ch-5 button").count())
 
 // Ch4 QUAnatomy negative Q bar: run noise-off to convergence and check bar widths nonzero
-await btn("单步 ×10").click()
+await btn("模拟 ×10").click()
 await page.waitForTimeout(200)
 const quBars = await ch4.locator(".figure").nth(1).locator("div[title]").evaluateAll((els) => els.map((e) => ({ t: e.getAttribute("title"), w: e.style.width })))
 console.log("QU bars:", JSON.stringify(quBars))

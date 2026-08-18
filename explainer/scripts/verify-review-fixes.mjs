@@ -61,9 +61,9 @@ const browser = await chromium.launch()
     return cs.map((c) => (+c.getAttribute("cy") - 40) / 62).filter((d) => d >= 0)
   })
   const maxDepth = Math.max(...depths)
-  check("[1] Ch4 搜索树深度 ≥2", maxDepth >= 2, `maxDepth=${maxDepth}`)
+  check("[1] Ch4 搜索树长出子节点(制胜手距根 1 层)", maxDepth >= 1, `maxDepth=${maxDepth}`)
   const strip = await page.locator("#ch-4").innerText()
-  check("[1] 最近模拟路径多层", strip.includes(" → "), "path has multiple edges")
+  check("[1] Ch4 200 次模拟收敛到 F5", strip.includes("收敛到 F5"), "banner converged on F5")
 
   // [12] noise toggle aria-label
   const noiseBtn = page.locator('#ch-4 button[aria-label*="根噪声"]')
@@ -79,7 +79,7 @@ const browser = await chromium.launch()
   check("[11] 视角切换 aria-pressed", ap.includes("true") && ap.includes("false"), ap.join("/"))
 
   // [8] Ch2 pin on click (touch analog)
-  const rect = page.locator('#ch-2 svg[aria-label="平面 0 · 己方子"] rect').first()
+  const rect = page.locator('#ch-2 svg[aria-label^="平面 0 · 己方子"] rect').first()
   await rect.scrollIntoViewIfNeeded()
   await rect.click({ force: true })
   await page.mouse.move(20, 20) // pointerleave

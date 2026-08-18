@@ -460,7 +460,8 @@ export default function Ch6() {
               每一局自我对局结束,棋盘上留下的不只是胜负,还有一沓<em>作业</em>:
               每一手棋都记下三样东西——当时的局面、搜索算出的落点分布{" "}
               <span className="chip">π</span>、以及这盘棋最终的结局{" "}
-              <span className="chip">z</span>。网络对同一个局面也会给出自己的猜测:
+              <span className="chip">z</span>(从<em>该手行棋方</em>的视角记下:我赢 +1、我输 −1、和棋 0;
+              同一盘棋,黑白两手记下的 z 符号相反)。网络对同一个局面也会给出自己的猜测:
               落点分布 <span className="chip">p</span> 与形势判断{" "}
               <span className="chip">v</span>。<strong>训练,就是给这两份猜测判卷</strong>,
               误差写进同一条损失:
@@ -482,7 +483,8 @@ export default function Ch6() {
             <p>
               判卷的手法毫无玄妙:<strong>小批量随机梯度下降加动量</strong>(
               SGD + momentum)——把每份作业的误差沿梯度分摊回各层权重,
-              一次只挪一小步,动量让脚步稳住方向。
+              一次只挪一小步,动量让脚步稳住方向;外加一点点权重衰减
+              (weight decay,本页快照为 <span className="mono">1e-4</span>),拉住权重的野蛮生长。
             </p>
 
             <h3>经验池:不和昨天的自己单独约会</h3>
@@ -524,6 +526,8 @@ export default function Ch6() {
               <div className="m-title">增广 ≠ 复制粘贴</div>
               卷积网络并没有内置的旋转不变性:转过的局面在它眼里是货真价实的新输入,
               却共享同一份棋理——这正是「白送的数据」仍然有效的原因。
+              (第叁章说的「同一个棋形在天元还是角落都触发同一个反应」,共享的是同一把尺子滑到不同<em>位置</em>;
+              旋转与镜像,尺子不会自己跟着转。)
             </div>
             <p>
               下面的变换台可以逐个查验:朱砂圆盘扮演 π 中概率最高的候选点,
@@ -560,7 +564,8 @@ export default function Ch6() {
               横轴是训练轮次;朱砂线是<em>策略损失</em>,绿线是<em>价值损失</em>。
               灰色虚线是「乱猜线」<span className="mono">ln(81) ≈ 4.394</span>
               ——对 <span className="mono">81</span>{" "}
-              个格子均匀乱猜时的交叉熵,是策略损失的起跑线。
+              个格子均匀乱猜时的交叉熵,是策略损失的参考线;随机初始的网络对个别格子天生略有偏好,
+              起点(第 0 轮 <span className="mono">4.434</span>)甚至略高于乱猜线,同样正常。
             </p>
             <p>
               四轮之后,策略损失几乎贴在乱猜线上:不是没在学,而是搜索的 π

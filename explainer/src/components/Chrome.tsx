@@ -71,7 +71,12 @@ export function Chrome({ rail }: { rail: RailItem[] }) {
       </header>
       <nav className="rail" aria-label="章节">
         {rail.map((item) => (
-          <a key={item.id} href={`#${item.id}`} className={active === item.id ? "active" : ""}>
+          <a
+            key={item.id}
+            href={`#${item.id}`}
+            className={active === item.id ? "active" : ""}
+            aria-current={active === item.id ? "true" : undefined}
+          >
             <span className="r-no">{item.no}</span>
             <span className="r-line" />
             <span>{item.label}</span>
