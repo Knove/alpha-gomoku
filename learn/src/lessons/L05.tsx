@@ -201,7 +201,7 @@ function FovSlider() {
                 transition: "x 260ms ease, y 260ms ease, width 260ms ease, height 260ms ease",
               }}
               fillOpacity={0.06}
-              strokeDasharray="9 6"
+              strokeDasharray={side > 9 ? "9 6" : undefined}
             />
             <text x={bx + bw} y={by - 7} textAnchor="end" fontSize={13}
               fontFamily="ui-monospace, SF Mono, Menlo, monospace" style={{ fill: "var(--accent-deep)" }}>

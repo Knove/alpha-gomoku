@@ -369,7 +369,7 @@ function SlideWindow() {
           {done && (
             <div className="reveal-box mt-4 text-sm leading-relaxed" data-qa="scan-done">
               81 格盖完,得数落成一张「嫌疑地图」:<strong>3</strong> 只出现在三连正上方
-              (两处窗口),<strong>2</strong> 跟在两头,<strong>1</strong> 沿着这条线铺开,
+              (一处窗口),<strong>2</strong> 跟在两头,<strong>1</strong> 沿着这条线铺开,
               其余全 0——同一张模板、同一套 9 个数,一次扫描把整条横排的嫌疑全标了出来。
             </div>
           )}
