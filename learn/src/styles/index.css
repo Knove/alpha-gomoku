@@ -1158,3 +1158,70 @@ details.account-book summary {
   color: var(--fg);
   font-weight: 600;
 }
+
+/* L03 · 九宫格小表(模板/窗口/乘积)与 0/1 平面 */
+.l03-mini {
+  position: relative;
+  width: 1.7rem;
+  height: 1.7rem;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid var(--hairline);
+  border-left: 1px solid var(--hairline);
+  font-size: 0.72rem;
+}
+.l03-mini:nth-child(3n),
+.l03-cell:last-child,
+.l03-gray:last-child {
+  border-right: 1px solid var(--hairline);
+}
+.l03-mini.on {
+  background: var(--accent-wash);
+}
+.l03-neg {
+  color: var(--accent-deep);
+  font-weight: 650;
+}
+.l03-rows > div:last-child > .l03-mini,
+.l03-rows > div:last-child > .l03-cell,
+.l03-rows > div:last-child > .l03-gray {
+  border-bottom: 1px solid var(--hairline);
+}
+/* L04 · 真模板灰度格(权重 → 灰度,悬停看数值) */
+.l03-gray {
+  display: block;
+  width: 0.92rem;
+  height: 0.92rem;
+  flex: none;
+  border-top: 1px solid var(--hairline-strong);
+  border-left: 1px solid var(--hairline-strong);
+}
+.l03-cell {
+  position: relative;
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-top: 1px solid var(--hairline);
+  border-left: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--fg-faint);
+  font-size: 0.56rem;
+  cursor: pointer;
+}
+.l03-cell.on {
+  background: var(--accent-wash-2);
+  color: var(--fg);
+  font-weight: 650;
+}
+.l03-cell.sel {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  z-index: 1;
+}

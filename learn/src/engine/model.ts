@@ -26,6 +26,7 @@ export interface NetOutput {
 /** Per-layer intermediate outputs (same keys as tests/fixtures/expected.json). */
 export interface LayerTrace {
   stemOut: Tensor; // [C, N, N] after stem (conv+bn+relu)
+  blockOuts: Tensor[]; // [C, N, N] after each residual block (L05 feature wall)
   trunkOut: Tensor; // [C, N, N] after all residual blocks
   pRelu: Tensor; // [2, N, N] after policy head conv+bn+relu
   logits: number[];
@@ -89,7 +90,11 @@ export function traceNet(w: WeightsJson): (input: number[][][]) => LayerTrace {
     // stem: conv3x3(pad1) -> BN -> ReLU
     const stemOut = relu(bnInference(conv2d(x, stemW, null, 1), stemBn.gamma, stemBn.beta, stemBn.mean, stemBn.var_));
     let h = stemOut;
-    for (let i = 0; i < res; i++) h = resBlock(h, w, `blocks.${i}`);
+    const blockOuts: Tensor[] = [];
+    for (let i = 0; i < res; i++) {
+      h = resBlock(h, w, `blocks.${i}`);
+      blockOuts.push(h);
+    }
     // policy head: 1x1 conv (pad 0) -> BN -> ReLU -> fc(2*n*n -> n*n logits)
     const pRelu = relu(bnInference(conv2d(h, pConv, null, 0), pBn.gamma, pBn.beta, pBn.mean, pBn.var_));
     const logits = fc(Array.from(pRelu.data), pFcW, pFcB);
@@ -97,6 +102,6 @@ export function traceNet(w: WeightsJson): (input: number[][][]) => LayerTrace {
     const vRelu = relu(bnInference(conv2d(h, vConv, null, 0), vBn.gamma, vBn.beta, vBn.mean, vBn.var_));
     const vHidden = fc(Array.from(vRelu.data), vFc1W, vFc1B).map((z) => Math.max(0, z));
     const value = tanh1(fc(vHidden, vFc2W, vFc2B))[0];
-    return { stemOut, trunkOut: h, pRelu, logits, vHidden, value };
+    return { stemOut, blockOuts, trunkOut: h, pRelu, logits, vHidden, value };
   };
 }
