@@ -14,3 +14,9 @@
 **数据全部真实**:训练与循环的数字来自 `data/runs/demo` 的一次真实训练与 `configs/fast.json`(仓库默认 `default.json` 更大,机制相同);第二卷的搜索手算来自与 `mcts.py` 同款引擎的教学模拟器(给叶子打分的评估器是棋形启发式替身,卷内有声明)。代码行号锚到 `alphagomoku/` 真实源码,欢迎对账。
 
 配套阅读:`explainer/` 是同一套内容的交互网页版(每章一个可玩部件),`PLAN.md` 是系统的权威设计契约。
+
+课程站(本目录的 Vite SPA)依赖 `src/data/weights-*.json`。重新导出**没有** npm 脚本,须从仓库根用 venv 跑:
+
+```bash
+.venv/bin/python learn/scripts/export_weights.py
+```
