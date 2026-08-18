@@ -12,7 +12,8 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
   "include": ["src"]
 }
