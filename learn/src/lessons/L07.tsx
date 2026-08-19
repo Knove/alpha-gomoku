@@ -218,8 +218,10 @@ function Simulator() {
   const [busy, setBusy] = useState(false)
   const [ver, setVer] = useState(0)
   const treeRef = useRef<SearchTree | null>(null)
+  // 切噪声开关时换种子:同一粒种子下噪声走向固定,换粒让读者多试几次
+  const seedRef = useRef(42)
 
-  // 真权重就位 / 噪声切换 → 重建树,一切归零(种子固定,可复现)
+  // 真权重就位 / 噪声切换 → 重建树,一切归零(种子取自 seedRef,可复现)
   useEffect(() => {
     let alive = true
     loadWeights().then((w: WeightsJson) => {
@@ -233,7 +235,7 @@ function Simulator() {
   useEffect(() => {
     if (!net) return
     const cfg: MctsConfig = { cPuct: 1.5, dirichletEps: eps, dirichletAlpha: 0.3 }
-    treeRef.current = new SearchTree(POS, cfg, net, mulberry32(42))
+    treeRef.current = new SearchTree(POS, cfg, net, mulberry32(seedRef.current))
     setSims(0)
     setStage(0)
     setLeaf(null)
@@ -368,7 +370,8 @@ function Simulator() {
               disabled={!net || busy}
               onClick={() => {
                 const cfg: MctsConfig = { cPuct: 1.5, dirichletEps: eps, dirichletAlpha: 0.3 }
-                treeRef.current = new SearchTree(POS, cfg, net!, mulberry32(42))
+                seedRef.current += 1
+                treeRef.current = new SearchTree(POS, cfg, net!, mulberry32(seedRef.current))
                 setSims(0)
                 setStage(0)
                 setLeaf(null)
@@ -386,18 +389,24 @@ function Simulator() {
               根噪声(先验掺 Dirichlet,ε=0.25)
             </span>
             <span className="seg" data-qa="noise-toggle">
-              <button type="button" className={`seg-btn ${eps === 0 ? "active" : ""}`} disabled={busy} onClick={() => setEps(0)}>
+              <button type="button" className={`seg-btn ${eps === 0 ? "active" : ""}`} disabled={busy} onClick={() => { seedRef.current += 1; setEps(0) }}>
                 关
               </button>
-              <button type="button" className={`seg-btn ${eps === 0.25 ? "active" : ""}`} disabled={busy} onClick={() => setEps(0.25)}>
+              <button type="button" className={`seg-btn ${eps === 0.25 ? "active" : ""}`} disabled={busy} onClick={() => { seedRef.current += 1; setEps(0.25) }}>
                 开
               </button>
             </span>
           </div>
           <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
             反面演示「偏见锁死」:关噪声时,搜索全信网络先验,只在它偏爱的几个点打转
-            ——偏见喂偏见;开了噪声,根先验掺 25% Dirichlet 随机,冷门点也轮得到被看一眼
-            (只掺根:整棵树乱抖就没了章法)。切换即重置,种子不变。
+            ——偏见喂偏见。开了噪声,根先验掺 25% Dirichlet 随机(只掺根:整棵树乱抖
+            就没了章法)。对照着看账本的 <strong>P 列</strong>(先验):关噪声时 F5 永远
+            是 1.3%——同一网络同一局面,先验是死的;开了噪声,每次搜索的先验都不
+            一样(F5 在 1.0%~1.6% 间波动,别的点同理有涨有落)。这就是「多样性」
+            的本义:不是单方向抬高冷门点,而是让每局走不同的路。但 <strong>N 列</strong>
+            (访问)未必跟着摊——这局 Q 的历史账太强势,40 次预算仍会集中;噪声防
+            的是成千上万手自我对弈里的原地打转,不是一手里的均摊。切换即重置换
+            种子,可多试几次。
           </p>
 
           {busy && (
@@ -533,8 +542,8 @@ function Simulator() {
         真引擎 <span className="mono">SearchTree</span>(mcts.ts)三键走的是 select →
         leafInput/evalFn → expandAndBackup 的真协议;叶评估器是{" "}
         <span className="mono">loadNet</span>(真权重,weights-best.json)——
-        这是本站对 explainer 的升级:那边站着的还是启发式替身。随机数种子固定
-        (mulberry32·42),你看到的每一步都可复现。
+        这是本站对 explainer 的升级:那边站着的还是启发式替身。随机数用固定序列
+        (mulberry32,初始种子 42,重置时顺次换粒),同一局面重放同一步,结果一致。
       </figcaption>
     </figure>
   )
