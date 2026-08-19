@@ -1,22 +1,33 @@
-# learn/ 阅读指南:从零看懂 AI 五子棋
+# learn/ · 闯关式教学站
 
-四卷,由浅入深,读完即能讲清这套 AlphaZero 式系统的全部原理与它是怎么发挥作用的:
+教一个不懂神经网络的人,从零看懂这套 AlphaZero 式五子棋系统的每个设计决策——
+知其然,并知其所以然。序 + 9 课 + 毕业沙盒,每课「谜题 → 揭示 → 部件 → 对账 → 小测」,
+小测过关解锁下一课(进度存 localStorage)。
 
-| 卷 | 文件 | 一句话内容 |
-|---|---|---|
-| 第 0 卷 | [game.md](game.md) | 《棋盘:81 个数与一条铁约》——棋盘怎么进计算机、怎么判胜、为什么所有数值都从「轮到谁下」的视角记录(canonical) |
-| 第一卷 | [network.md](network.md) | 《策略-价值网络:看一眼棋盘,回答两个问题》——卷积/残差/BN/双头,145,050 个旋钮怎么把局面变成 81 个分数 + 1 个估值 |
-| 第二卷 | [mcts.md](mcts.md) | 《树搜索:落子之前的「再想四十遍」》——蒙特卡洛树搜索、PUCT、逐层取负、根噪声、访问数分布 |
-| 第三卷 | [flywheel.md](flywheel.md) | 《飞轮:数据怎么一圈圈转成棋力》——冷启动、自我对弈 (s,π,z)、经验池、对称增广、损失函数、SGD、竞技场晋升 |
+- 上线:序和第 1-2 课可直接读;后面的课**每课都要动手**——摆棋盘、滑窗口、
+  单步搜索、和训练出的真模型下一盘;
+- 真实性:浏览器里跑的是 demo 训练出的**真权重**(`src/data/weights-best.json`,
+  1.2 MB,懒加载;由 `learn/scripts/export_weights.py` 从 `data/runs/demo/checkpoints`
+  导出)与**对拍铁闸**(`tests/parity.test.ts`:TS 前向 vs torch 期望输出,
+  逐张量断言)。搜索模拟器、模板墙、特征图墙、人机对弈全部走同一个 TS 引擎;
+- 深度参考:`archive/` 是四卷 S 级文章(教学站的文案母本),`../explainer/`
+  是介绍站(非教学),`PLAN.md` 是系统的权威设计契约。
 
-**每卷同一个结构**:军令状(约束)→ 决策链(问题 → 方案 → 否掉的方案 → 代价)→ 真实数字手算例子 → 对照表 → 元规律 → 自测。
+## 运行
 
-**数据全部真实**:训练与循环的数字来自 `data/runs/demo` 的一次真实训练与 `configs/fast.json`(仓库默认 `default.json` 更大,机制相同);第二卷的搜索手算来自与 `mcts.py` 同款引擎的教学模拟器(给叶子打分的评估器是棋形启发式替身,卷内有声明)。代码行号锚到 `alphagomoku/` 真实源码,欢迎对账。
+```bash
+cd learn
+npm install --registry=https://registry.npmmirror.com
+npm run dev      # http://localhost:5173
+npm run build    # tsc + vite build → dist/
+npm test         # 引擎单测 + 对拍铁闸(node --test)
+```
 
-配套阅读:`explainer/` 是同一套内容的交互网页版(每章一个可玩部件),`PLAN.md` 是系统的权威设计契约。
-
-课程站(本目录的 Vite SPA)依赖 `src/data/weights-*.json`。重新导出**没有** npm 脚本,须从仓库根用 venv 跑:
+重导权重(重跑训练后),从仓库根:
 
 ```bash
 .venv/bin/python learn/scripts/export_weights.py
 ```
+
+导出器会同时刷新 `learn/tests/fixtures/expected.json`(对拍期望),跑 `npm test`
+确认引擎仍与 checkpoint 一致。
