@@ -4,8 +4,8 @@
 知其然,并知其所以然。序 + 9 课 + 毕业沙盒,每课「谜题 → 揭示 → 部件 → 对账 → 小测」,
 小测过关解锁下一课(进度存 localStorage)。
 
-- 上线:序和第 1-2 课可直接读;后面的课**每课都要动手**——摆棋盘、滑窗口、
-  单步搜索、和训练出的真模型下一盘;
+- 上线:序可自由读;第 1 课起**每课都要动手**——摆棋盘、滑窗口、
+  单步搜索、和训练出的真模型下一盘,小测过关才解锁下一课(进度存 localStorage);
 - 真实性:浏览器里跑的是 demo 训练出的**真权重**(`src/data/weights-best.json`,
   1.2 MB,懒加载;由 `learn/scripts/export_weights.py` 从 `data/runs/demo/checkpoints`
   导出)与**对拍铁闸**(`tests/parity.test.ts`:TS 前向 vs torch 期望输出,
@@ -26,8 +26,8 @@ npm test         # 引擎单测 + 对拍铁闸(node --test)
 重导权重(重跑训练后),从仓库根:
 
 ```bash
-.venv/bin/python learn/scripts/export_weights.py
+.venv/bin/python learn/scripts/export_weights.py   # 权重(best + 未训练 baseline)
+.venv/bin/python learn/scripts/dump_expected.py    # 对拍期望 tests/fixtures/expected.json
 ```
 
-导出器会同时刷新 `learn/tests/fixtures/expected.json`(对拍期望),跑 `npm test`
-确认引擎仍与 checkpoint 一致。
+再跑 `npm test` 确认引擎仍与 checkpoint 一致。

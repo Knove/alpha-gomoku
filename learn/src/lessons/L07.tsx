@@ -141,7 +141,7 @@ def best_action(self):
           部件的三键 <span className="mono">①选择 → ②展开 → ③回传</span> 正是
           <span className="mono">select → needsEval/leafInput → expandAndBackup</span>
           的协议;本站引擎 <span className="mono">learn/src/engine/mcts.ts</span>{" "}
-          与这份 Python 逐条对齐(对拍测试见 tests/)。唯一的界面差异:Python
+          与这份 Python 逐行镜像(Ledger 行号可对账)。唯一的界面差异:Python
           端 Predictor 先做 softmax 再交概率,TS 端 evalFn 吐裸 logits、
           由 expandAndBackup 内部做 softmax——数学同一件事。
         </p>
@@ -514,7 +514,7 @@ function Simulator() {
               </p>
               <p className="mt-2" style={{ color: "var(--fg-muted)" }}>
                 诚实口径:explainer 用的教学评估器(棋形启发式替身)50 次能收到
-                93.9%;这里站着的是真权重——它只训了 4 轮,F5 在它的先验里前面
+                93.9%;这里站着的是真权重——它才训到第 3 轮,F5 在它的先验里前面
                 压着 56 个点(它自己只有 0.012,最高的点 0.021),40 次预算全被
                 网络偏爱的点借走,一次也没轮到 F5。实测把预算拉到 770 次(先验
                 原样、种子固定),探索项才第一次把它送进来——进来之后终局直传,

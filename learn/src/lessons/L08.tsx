@@ -107,9 +107,9 @@ export default function L08() {
       <SymLab />
       <MetricCharts />
 
-      <Ledger title="selfplay.py L48-50(z 视角)、train.py L48-51(损失)、replay.py L25-44(池子)、train.py L38-40(增广)">
+      <Ledger title="selfplay.py L45-50(z 视角)、train.py L48-51(损失)、replay.py L25-44(池子)、train.py L38-40(增广)">
         <div className="codewalk">
-          <pre>{`# selfplay.py L48-50  终局统一补 z:站在每一手行棋方的视角
+          <pre>{`# selfplay.py L45-50  终局统一补 z:站在每一手行棋方的视角
 result = slot.game.outcome()
 for canon, pi, player in slot.samples:
     z = 0 if result == 0 else (1 if player == result else -1)`}</pre>

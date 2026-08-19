@@ -1,7 +1,8 @@
 /** 第 6 课 · 双头:一次前向两个答案。
  *  节拍:谜题(两个问题两个网络?)→ 揭晓(共用主干 / 两种读法 / softmax+tanh)→
  *  部件(自由摆子真前向:问网络 → 81 分数热力图 + top5 + 估值条,
- *  对照开关换 weights-iter0 未训练网)→ 对账(model.py 双头 + forward)→ 小测。 */
+ *  对照开关换 weights-untrained 未训练网:baseline,训练前冻结的随机初始化)
+ *  → 对账(model.py 双头 + forward)→ 小测。 */
 import { useEffect, useMemo, useState } from "react"
 import { Quiz, usePassLesson } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
@@ -9,7 +10,7 @@ import Board from "../lib/board"
 import { encode, legalMoves, type GameState } from "../engine/game"
 import { loadNet, type WeightsJson } from "../engine/model"
 import { softmax } from "../engine/nn"
-import { loadWeights, loadWeightsIter0 } from "../lib/weights"
+import { loadWeights, loadWeightsUntrained } from "../lib/weights"
 
 /* 初始局面沿用第 4/5 课的三连(己方 (2,4)(3,4)(4,4),轮黑)——换你随手摆。 */
 const INIT: number[] = (() => {
@@ -141,8 +142,9 @@ def forward(self, x):
           归一化外置在训练(<span className="mono">log_softmax</span>)和推理(
           <span className="mono">softmax</span>)各自进行,网络只吐裸 logits,一身轻。
           本站引擎 <span className="mono">learn/src/engine/model.ts</span> 的{" "}
-          <span className="mono">loadNet</span> 与 forward 逐条对齐——部件里
-          「问网络」按下的每一下都是它算的。
+          <span className="mono">loadNet</span> 与 forward 逐条对齐——网络的 TS 前向
+          与 torch 逐张量对拍(tests/parity.test.ts),部件里「问网络」按下的每一下
+          都是它算的。
         </p>
       </Ledger>
 
@@ -196,8 +198,8 @@ function AskBoard() {
   const [cur, setCur] = useState<1 | -1>(1) // 下一手摆的颜色(也决定网络替谁看)
   const [cmp, setCmp] = useState(false)
   const [wBest, setWBest] = useState<WeightsJson | null>(null)
-  const [wIter0, setWIter0] = useState<WeightsJson | null>(null)
-  const [res, setRes] = useState<{ best: AskResult; iter0: AskResult | null } | null>(null)
+  const [wUntrained, setWUntrained] = useState<WeightsJson | null>(null)
+  const [res, setRes] = useState<{ best: AskResult; untrained: AskResult | null } | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -207,16 +209,16 @@ function AskBoard() {
     }
   }, [])
   useEffect(() => {
-    if (!cmp || wIter0) return
+    if (!cmp || wUntrained) return
     let alive = true
-    loadWeightsIter0().then((w) => alive && setWIter0(w))
+    loadWeightsUntrained().then((w) => alive && setWUntrained(w))
     return () => {
       alive = false
     }
-  }, [cmp, wIter0])
+  }, [cmp, wUntrained])
 
   const netBest = useMemo(() => (wBest ? loadNet(wBest) : null), [wBest])
-  const netIter0 = useMemo(() => (wIter0 ? loadNet(wIter0) : null), [wIter0])
+  const netUntrained = useMemo(() => (wUntrained ? loadNet(wUntrained) : null), [wUntrained])
 
   const state = useMemo<GameState>(() => {
     const board = Array.from({ length: 9 }, (_, y) => stones.slice(y * 9, y * 9 + 9))
@@ -238,7 +240,7 @@ function AskBoard() {
     if (!netBest) return
     setRes({
       best: askNet(netBest, state),
-      iter0: cmp && netIter0 ? askNet(netIter0, state) : null,
+      untrained: cmp && netUntrained ? askNet(netUntrained, state) : null,
     })
   }
 
@@ -258,7 +260,7 @@ function AskBoard() {
             }}
             data-qa="cmp-toggle"
           />
-          对照未训练网络(iter0)
+          对照未训练网络(baseline,随机初始化)
         </label>
       </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
@@ -347,23 +349,23 @@ function AskBoard() {
 
           {cmp && (
             <div className="mt-5 border-t pt-3" style={{ borderColor: "var(--hairline)" }} data-qa="cmp-panel">
-              <div className="mini-label">对照组 · 未训练(iter0,第 0 轮前的随机权重)</div>
-              {!res?.iter0 ? (
+              <div className="mini-label">对照组 · 未训练(baseline:训练开始前冻结的随机初始化)</div>
+              {!res?.untrained ? (
                 <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
-                  {wIter0 ? "按「问网络」,两个网络同题同考。" : "正在加载 iter0 权重(独立分块,约 1.2 MB)……"}
+                  {wUntrained ? "按「问网络」,两个网络同题同考。" : "正在加载未训练权重(独立分块,约 1.2 MB)……"}
                 </p>
               ) : (
                 <div className="mt-2 flex flex-col gap-4 sm:flex-row">
-                  <div className="w-40 flex-none" data-qa="board-iter0">
-                    <Board board={stones} heat={res.iter0.probs} />
+                  <div className="w-40 flex-none" data-qa="board-untrained">
+                    <Board board={stones} heat={res.untrained.probs} />
                     <p className="num mt-1 text-center text-xs" style={{ color: "var(--fg-faint)" }}>
                       未训练的热度
                     </p>
                   </div>
                   <div className="min-w-0 flex-1">
                     <ol className="space-y-1.5">
-                      {res.iter0.top.slice(0, 3).map((t) => (
-                        <li key={t.a} className="l00-top-row" data-qa="top-row-iter0">
+                      {res.untrained.top.slice(0, 3).map((t) => (
+                        <li key={t.a} className="l00-top-row" data-qa="top-row-untrained">
                           <span className="mono text-sm">({t.a % 9},{Math.floor(t.a / 9)})</span>
                           <span className="prob-track">
                             <span className="prob-fill" style={{ width: `${t.p * 100}%` }} />
@@ -377,17 +379,18 @@ function AskBoard() {
                         </li>
                       ))}
                     </ol>
-                    <p className="num mt-3 text-lg font-bold" data-qa="v-iter0" style={{ color: "var(--fg-muted)" }}>
-                      v = {res.iter0.value >= 0 ? "+" : ""}
-                      {res.iter0.value.toFixed(2)}
+                    <p className="num mt-3 text-lg font-bold" data-qa="v-untrained" style={{ color: "var(--fg-muted)" }}>
+                      v = {res.untrained.value >= 0 ? "+" : ""}
+                      {res.untrained.value.toFixed(2)}
                     </p>
                   </div>
                 </div>
               )}
               <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                同一局面、同一架构,只差训练:未训练的策略头近乎均匀撒胡椒面
-                (81 格每格都差不多),估值贴着 0 乱飘;训练过的有明确偏好。
-                它才训了 4 轮——偏好还很浅,但已经不是噪声了。
+                同一局面、同一架构,只差训练。未训练的(baseline,纯随机初始化):策略头近乎均匀撒胡椒面——
+                初始三连局面实测最热一格才 1.4%(均匀线 1/81≈1.2%),估值贴着 0
+                (实测 +0.02,换哪个局面都在 ±0.05 里小幅漂)。训练过的(才训到第 3 轮)已有态度:
+                同一局面 v=−0.31、最热 2.0%——离懂棋还远,但已经不是均匀的噪声了。
               </p>
             </div>
           )}
@@ -397,7 +400,7 @@ function AskBoard() {
         <span className="cap-no">部件 6-1</span>
         真引擎 + 真权重:<span className="mono">encode</span>(game.ts)→{" "}
         <span className="mono">loadNet</span>(model.ts)前向,softmax 在站内现算。
-        训练后 weights-best.json;对照 weights-iter0.json(独立懒加载,打开开关才下载)。
+        训练后 weights-best.json;对照 weights-untrained.json(baseline,独立懒加载,打开开关才下载)。
       </figcaption>
     </figure>
   )

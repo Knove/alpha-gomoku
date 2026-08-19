@@ -38,7 +38,7 @@ export default function Graduation() {
           序里承诺过:11 节课之后,由你自己验收。现在你已经知道它每个零件
           为什么长这样——81 个数怎么装下一盘棋、一条视角铁约怎么贯穿全链、
           模板怎么滑、层怎么叠、两个头怎么分工、四十遍怎么想、飞轮怎么转、
-          晋升凭什么算数。它下得还很臭(才训了 4 轮),但每一步烂棋,
+          晋升凭什么算数。它下得还很臭(才训到第 3 轮),但每一步烂棋,
           你都能说出它<em>为什么</em>这么烂——这比会下好棋更难得。
         </p>
         <p className="prose mt-3">
@@ -147,7 +147,7 @@ function PlayGround() {
   const last = moves.length ? moves[moves.length - 1] : null
   const status = out !== null
     ? out === 0 ? "和棋——盘满,握手言和"
-      : out === human ? "你赢了!验收通过——它才训了 4 轮,别骄傲"
+      : out === human ? "你赢了!验收通过——它才训到第 3 轮,别骄傲"
       : "它赢了——把第 4 课的模板讲给它听"
     : thinking ? "它想事情中(每手 20 次模拟 × 每次问一次网络)……"
     : humanTurn ? `轮到你(执${human === 1 ? "黑" : "白"})落子`
@@ -227,7 +227,7 @@ function PlayGround() {
             </>
           )}
           <div className="reveal-box mt-4 text-xs leading-relaxed">
-            提个醒:它只训了 4 轮,策略损失还贴着乱猜线——它大概率会让你,
+            提个醒:它才训到第 3 轮,策略损失还贴着乱猜线——它大概率会让你,
             但偶尔会走出你看不懂的臭棋。臭得诚实。
           </div>
         </aside>

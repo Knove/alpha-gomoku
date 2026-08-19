@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BLACK, WHITE, emptyBoard, outcome, play, type GameState } from "../src/engine/game.ts";
-import { SearchTree, type MctsConfig, type EvalFn } from "../src/engine/mcts.ts";
+import { SearchTree, randGamma, type MctsConfig, type EvalFn } from "../src/engine/mcts.ts";
 
 const N = 9;
 
@@ -146,20 +146,35 @@ test("root Dirichlet noise: prior stays a distribution and follows 0.75*prior + 
   tree.select();
   tree.expandAndBackup(new Array<number>(N * N).fill(0), 0);
 
-  // replay the same rng stream: one draw per legal action (empty board = 81), in action order
-  const rng2 = mulberry32(seed);
-  const g = Array.from({ length: N * N }, () =>
-    Math.pow(-Math.log(rng2()), 1 / NOISE_CFG.dirichletAlpha),
-  );
-  const gSum = g.reduce((x, y) => x + y, 0);
-
+  // Gamma rejection sampling consumes a variable number of rng() draws, so the
+  // noise cannot be replayed exactly; assert the mixture structure instead:
+  // prior = 0.75*uniform + 0.25*noise with noise >= 0 summing to 1.
   const prior = tree.root.prior!;
   assert.ok(Math.abs(prior.reduce((x, y) => x + y, 0) - 1) < 1e-9);
   const uniform = 1 / (N * N);
+  let noiseSum = 0;
   for (let a = 0; a < N * N; a++) {
-    const expected = 0.75 * uniform + (0.25 * g[a]) / gSum;
-    assert.ok(Math.abs(prior[a] - expected) < 1e-12, `a=${a}: ${prior[a]} vs ${expected}`);
+    const noise = (prior[a] - 0.75 * uniform) / 0.25;
+    assert.ok(noise >= -1e-12, `a=${a}: negative noise share ${noise}`);
+    noiseSum += noise;
   }
+  assert.ok(Math.abs(noiseSum - 1) < 1e-9);
+});
+
+test("randGamma gives a true Dirichlet(0.3), not the sharper Weibull bug", () => {
+  // normalized Gamma(0.3) draws over 81 actions: mean of the max component.
+  // A true Dirichlet(0.3) lands near 0.12; the old -(ln U)^(1/alpha) sampler
+  // (actually Weibull) landed near 0.32.
+  const trials = 300;
+  let maxSum = 0;
+  for (let t = 0; t < trials; t++) {
+    const rng = mulberry32(t + 1);
+    const g = Array.from({ length: N * N }, () => randGamma(NOISE_CFG.dirichletAlpha, rng));
+    const s = g.reduce((x, y) => x + y, 0);
+    maxSum += Math.max(...g.map((x) => x / s));
+  }
+  const meanMax = maxSum / trials;
+  assert.ok(meanMax > 0.08 && meanMax < 0.17, `mean max component ${meanMax}`);
 });
 
 test("updateRoot keeps the searched subtree and resets the root value ledger", () => {

@@ -141,7 +141,7 @@ def _is_win_at(self, y, x) -> bool:
         </div>
         <p className="mt-3">
           本站引擎 <span className="mono">learn/src/engine/game.ts</span> 是这段 Python
-          的 TypeScript 镜像,行为逐条一致(对拍测试见 tests/)。
+          的逐行镜像(Ledger 行号可对账;TS 侧语义单测见 tests/game.test.ts)。
         </p>
       </Ledger>
 

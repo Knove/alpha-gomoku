@@ -17,7 +17,9 @@ sys.path.insert(0, str(ROOT))
 OUT = ROOT / "learn/src/data"
 
 # tag -> checkpoint path (relative to data/runs/demo)
-CKPTS = {"best": "best.pt", "iter0": "iter_000000.pt"}
+# untrained = baseline.pt: random init frozen BEFORE any training (iter_000000.pt
+# already contains 20 SGD steps, i.e. round 0 has run — not "untrained").
+CKPTS = {"best": "best.pt", "untrained": "baseline.pt"}
 
 
 def export(tag: str, rel: str) -> None:

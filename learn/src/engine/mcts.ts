@@ -47,6 +47,34 @@ function newNode(numActions: number): MctsNode {
   };
 }
 
+// ------------------------------------------------------- Dirichlet sampling
+
+/** Standard normal deviate from two rng() uniforms (Box-Muller). */
+function randn(rng: () => number): number {
+  let u = 0;
+  let v = 0;
+  while (u === 0) u = rng();
+  while (v === 0) v = rng();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+/** Gamma(shape, 1) via Marsaglia–Tsang (exported for tests). shape < 1 uses the
+ *  boost Gamma(a) = Gamma(a+1) * U^(1/a). */
+export function randGamma(shape: number, rng: () => number): number {
+  if (shape < 1) return randGamma(shape + 1, rng) * Math.pow(rng(), 1 / shape);
+  const d = shape - 1 / 3;
+  const c = 1 / Math.sqrt(9 * d);
+  for (;;) {
+    const x = randn(rng);
+    let v = 1 + c * x;
+    if (v <= 0) continue;
+    v = v * v * v;
+    const u = rng();
+    if (u < 1 - 0.0331 * (x * x) * (x * x)) return d * v;
+    if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
+  }
+}
+
 export class SearchTree {
   root: MctsNode;
   private cfg: MctsConfig;
@@ -189,11 +217,11 @@ export class SearchTree {
   private mixNoise(node: MctsNode, legal: number[]): void {
     const eps = this.cfg.dirichletEps;
     if (eps <= 0 || node.prior === null) return;
-    // Dirichlet via per-component Gamma draws: g = (-ln U)^(1/alpha), then normalize
+    // Dirichlet(alpha): one Gamma(alpha,1) draw per legal action (Marsaglia–Tsang,
+    // normal deviates via Box-Muller — see randGamma), then normalize to sum 1.
     const idx: number[] = [];
     for (let a = 0; a < legal.length; a++) if (legal[a] > 0) idx.push(a);
-    // clamp U away from 0: -ln(0) = Infinity would NaN the normalized noise
-    const g = idx.map(() => Math.pow(-Math.log(Math.max(this.rng(), 1e-12)), 1 / this.cfg.dirichletAlpha));
+    const g = idx.map(() => randGamma(this.cfg.dirichletAlpha, this.rng));
     const gSum = g.reduce((x, y) => x + y, 0);
     const mixed = node.prior.map((p) => (1 - eps) * p);
     idx.forEach((a, i) => (mixed[a] += (eps * g[i]) / gSum));

@@ -119,7 +119,7 @@ def encode(game: Game) -> np.ndarray:
           就这一个函数:先做 canonical(第 2 课),再按「= +1 / = −1」切成两张 0/1
           面,最后垫上颜色面。本站引擎{" "}
           <span className="mono">learn/src/engine/game.ts</span> 的{" "}
-          <span className="mono">encode()</span> 与它逐条对齐(对拍测试见 tests/)。
+          <span className="mono">encode()</span> 与它逐行镜像(Ledger 行号可对账)。
         </p>
       </Ledger>
 
