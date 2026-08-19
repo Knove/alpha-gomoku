@@ -33,6 +33,43 @@ export default function Graduation() {
       <SystemMap />
 
       <div className="card mt-12 p-6">
+        <h3 className="text-lg font-bold">带走的五件事</h3>
+        <div className="prose mt-3">
+          <p>
+            全系统图收的是它那十二个零件,这张单子收你的:五件散在各课、
+            换个舞台照样带得走的思维——括号里,是教会你它的那一课。
+          </p>
+          <ul>
+            <li>
+              <strong>能砌进结构的常识,别留给数据学。</strong>
+              「三连要堵」写进棋盘和模板,网络就不用从几千盘棋里自己悟
+              (<a href="#/l04">第 4 课</a>)。
+            </li>
+            <li>
+              <strong>视角统一,一份功夫当两份用。</strong>
+              所有数都站在「轮到谁」的视角,同一条棋理黑白只学一遍
+              (<a href="#/l02">第 2 课</a>)。
+            </li>
+            <li>
+              <strong>老师必须比学生强,飞轮才转得动。</strong>
+              拿学生自己的答案当教材,它只能学到自己的偏见,飞轮原地空转
+              (<a href="#/l08">第 8 课</a>)。
+            </li>
+            <li>
+              <strong>损失会撒谎,对战才算数。</strong>
+              判卷的分数量不出棋力,涨没涨要擂台上见
+              (<a href="#/l09">第 9 课</a>)。
+            </li>
+            <li>
+              <strong>对称性是免费的数据。</strong>
+              转一下棋盘,一份棋谱当八份用,存储一分不花
+              (<a href="#/l08">第 8 课变换台</a>)。
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div className="card mt-12 p-6">
         <h3 className="text-lg font-bold">毕业词</h3>
         <p className="prose mt-3">
           序里承诺过:11 节课之后,由你自己验收。现在你已经知道它每个零件

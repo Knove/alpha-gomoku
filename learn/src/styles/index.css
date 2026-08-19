@@ -294,6 +294,10 @@ body {
   color: var(--accent);
 }
 
+.prose a {
+  color: var(--accent-deep);
+}
+
 .formula {
   font-family: var(--font-mono);
   font-size: 0.9rem;

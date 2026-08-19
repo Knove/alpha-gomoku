@@ -33,6 +33,10 @@ for (const theme of ["light", "dark"]) {
       ),
     }))
   }, theme)
+  // localStorage 是在 App 挂载后才写入的,而 App 只在挂载时读一次——
+  // 不 reload 的话,后面 10 张全截成锁定页
+  await page.reload()
+  await page.waitForTimeout(300)
   for (const [route, label] of ROUTES) {
     const errors = []
     page.removeAllListeners("pageerror")

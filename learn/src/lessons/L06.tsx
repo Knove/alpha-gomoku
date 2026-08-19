@@ -95,7 +95,9 @@ export default function L06() {
         <p>
           <strong>③ 两个收尾动作。</strong>策略头的 81 个原始分数(logits)要变成
           「概率」:过 <span className="mono">softmax</span>——每个分数取 e
-          的这个次方,再各自除以总和。手算三个分数:
+          的这个次方,再各自除以总和。这里的 e 是一个固定的底数,约等于 2.718:
+          取 e 的次方就像 2³ = 2×2×2,只是把底数 2 换成 e——指数越大,结果
+          涨得越猛,分数差一点,次方之后就拉开一大截。手算三个分数:
         </p>
         <div className="formula">
           分数 <span className="hl">2</span> / 1 / 0 → e 的次方 7.39 / 2.72 / 1.00
