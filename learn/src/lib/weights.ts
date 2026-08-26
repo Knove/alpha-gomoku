@@ -6,7 +6,7 @@ import type { WeightsJson } from "../engine/model"
 let cached: Promise<WeightsJson> | null = null
 let cachedUntrained: Promise<WeightsJson> | null = null
 
-/** 训练后(weights-best,第 2 轮末=训到第 3 轮的最好棋力):第 6/7 课的真前向与叶评估。 */
+/** 训练后(weights-best,第 2 轮末=训到第 3 轮的最好棋力):第 4/10/11 课的真权重、真前向与叶评估。 */
 export function loadWeights(): Promise<WeightsJson> {
   cached ??= import("../data/weights-best.json").then((m) => m.default as WeightsJson)
   return cached

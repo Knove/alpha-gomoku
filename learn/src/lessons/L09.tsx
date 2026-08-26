@@ -1,201 +1,143 @@
-/** 第 9 课 · 竞技场:证据说话。
- *  节拍:谜题(损失降=棋力涨?)→ 揭晓三小节(晋升规则/确定性陷阱/颜色偏置读数据)→
- *  部件(晋升计算器 · 真实晋升赛对局回放)→ 对账(arena·pipeline)→ 小测。 */
+/** 第 9 课 · 叠层:看见全盘。
+ *  节拍:谜题(单层 3×3 怎么看全盘)→ 揭晓(视野每层 +2;层数 = 抽象层级;
+ *  残差/BN 一句话)→ 部件 1(层深滑杆:视野框 3×3 → 15×15)→
+ *  部件 2(真特征图墙:traceNet + weights-best,stem 与三个残差块各取前 6 通道)→
+ *  对账(model.py ResBlock / blocks)→ 小测。 */
 import { useEffect, useMemo, useState } from "react"
 import { Quiz, usePassLesson } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
-import Board from "../lib/board"
-import { REAL } from "../data/real"
-import { emptyBoard, play, type GameState } from "../engine/game"
+import { encode, type GameState } from "../engine/game"
+import { traceNet, type WeightsJson } from "../engine/model"
+import { loadWeights } from "../lib/weights"
 
-const SP = REAL.selfplayGame
-const ARENA = REAL.arenaGame!
+/* 与第 8 课同一局面:己方三连 (2,4)(3,4)(4,4),轮己方走。
+ * encode 只读 board + current,直接构造状态(教学局面:只摆三连,演示用)。 */
+const THREE: [number, number][] = [
+  [2, 4],
+  [3, 4],
+  [4, 4],
+]
+const STATE: GameState = (() => {
+  const board = Array.from({ length: 9 }, () => new Array<number>(9).fill(0))
+  for (const [x, y] of THREE) board[y][x] = 1
+  return { board, current: 1, winner: 0, moveCount: 3, lastMove: null }
+})()
 
-/* 颜色偏置小表:全部由 real.ts 第 3 轮那盘自我对局现算,不手抄。 */
-interface SideStat {
-  who: string
-  hands: number
-  vMin: number
-  vMax: number
-  piMaxMin: number
-  piMaxMax: number
-  focused: number // π 完全集中(=1)的手数
-}
-const sideStat = (player: number, who: string): SideStat => {
-  const vs = SP.moves.filter((m) => m.player === player)
-  const vmax = (m: (typeof SP.moves)[number]) => Math.max(...m.pi)
-  const vms = vs.map((m) => m.value)
-  const pms = vs.map(vmax)
-  return {
-    who,
-    hands: vs.length,
-    vMin: Math.min(...vms),
-    vMax: Math.max(...vms),
-    piMaxMin: Math.min(...pms),
-    piMaxMax: Math.max(...pms),
-    focused: vs.filter((m) => vmax(m) >= 0.999).length,
-  }
-}
-const BLACK_STAT = sideStat(1, "黑方")
-const WHITE_STAT = sideStat(-1, "白方")
-
-/* 40/40 三个铁证:同一盘棋,天元与边角垃圾点同等待遇 */
-const FORTY = [1, 9, 13].map((i) => SP.moves[i]) // 第2手(1,0)、第10手(4,4)天元、第14手(0,7)
-const coord = (x: number, y: number) => `(${x},${y})`
-
-export default function L09() {
+export default function L05() {
   const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
       <div className="eyebrow mb-3">第 9 课</div>
-      <h1 className="text-2xl font-bold">竞技场:证据说话</h1>
+      <h1 className="text-2xl font-bold">叠层:看见全盘</h1>
 
       <Quiz
         title="谜题 · 先选一个答案"
         questions={[
           {
-            q: "第 8 课末尾的损失曲线降了。损失降了,棋力就涨了吗?",
+            q: "单张模板只看得见 3×3 的一小片,可「这边阵厚、那边势薄」是全盘的事。怎么让它看见全盘?",
             options: [
-                "是,损失降就是变强,曲线是唯一标准",
-                "不一定——可能只是背熟了池子里的作业,换个局面就露馅",
-                "损失根本不重要,训练白训了",
+              "把模板做大:直接造一张 9×9 的大模板,一步看全",
+              "叠层:小模板一层层叠上去,视野每层 +2",
+              "没办法,模板天生只能看局部",
             ],
             answer: 1,
             explain:
-              "选 B。损失量的是「答案离作业多近」,不是「棋下得多好」:把训练集背熟也能让损失下降,曲线会撒谎。棋力涨没涨,只有让它真刀真枪下一场才知道——本课的竞技场就是干这个的。C 也错:损失是必要的向导,只是不当证据。",
+              "选 B。大模板一张 81 个权重、参数暴涨不说,还把「先认局部棋形、再拼全局形势」的层次压扁了。叠层让第二层的每个格子站在第一层的肩膀上:小窗还是 3×3,视野一圈圈长大——怎么长的,马上算给你看。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>揭晓 · 曲线会撒谎,对战不会</h3>
+        <h3>揭晓 · 每叠一层,视野 +2</h3>
         <p>
-          <strong>① 晋升规则:挑战者要打赢擂台。</strong>每 2 轮,刚训练完的
-          <em>挑战者</em>走进竞技场,与现任冠军<em>交替先后手</em>下 6 局,
-          胜率按「胜 + 和棋×0.5」计,<strong>≥ 55% 才换人</strong>。
-          为什么不五五开就换?因为 6 局太少、运气太重——两个棋力完全相同的网络,
-          光靠运气也可能赢下 4 局以上(概率约 34%,下面部件里给你算)。
-          55% 这条线是「赢面要明显盖过运气」的最低要求。另有锚点赛:对
-          训练开始前冻结的随机网络打一组——冠军老在换,锚点赛的数字才横向可比。
-        </p>
-        <p>
-          <strong>② 确定性陷阱:开局要采样。</strong>一个只在工程里才踩得到的坑:
-          无噪声 + 纯 argmax(argmax = 只认最大的那个:哪手访问数最高就下哪,
-          绝不例外)的搜索是<em>完全确定</em>的——两个固定的网络,
-          同先手的那几局会下出<em>逐手一模一样</em>的棋,「6 局对抗」实际只有
-          2 局的信息量(黑白各一盘)。解法:开局前几手仍按 π 采样(概率大的多抽、
-          小的也抽得到),制造分叉,之后才认真 argmax。自我对弈同理——
-          第 8 课的棋谱一盘盘长得都不一样,先给采样记一功。
-        </p>
-        <p>
-          <strong>③ 读数据:一个最容易读错的案例。</strong>第 3 轮的一盘自我对弈
-          ({SP.id})里,白方第 10 手把 40 次模拟<strong>全部</strong>押给了天元
-          (4,4)——40/40,看着像「学会了天元最大」。先把同一盘棋翻完再说
-          (下表由 real.ts 的 32 手记录现算):
-        </p>
-        <table className="l09-table">
-          <thead>
-            <tr><th>行棋方</th><th>根估值 v</th><th>π 最大值</th><th>完全集中</th></tr>
-          </thead>
-          <tbody>
-            {[WHITE_STAT, BLACK_STAT].map((s) => (
-              <tr key={s.who}>
-                <td>{s.who} {s.hands} 手</td>
-                <td className="num">{s.vMin >= 0 ? "+" : "−"}{Math.abs(s.vMin).toFixed(2)} ~ {s.vMax >= 0 ? "+" : "−"}{Math.abs(s.vMax).toFixed(2)}</td>
-                <td className="num">{s.piMaxMin.toFixed(2)} ~ {s.piMaxMax.toFixed(2)}</td>
-                <td className="num">{s.focused} 手</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p>
-          白方 16 手的根估值<strong>全为正</strong>,黑方 16 手<strong>全为负</strong>
-          ——和棋盘上是什么局面无关:价值头还没学会看棋,先抓了一条最省事的规律
-          「轮到白走就说我优」(这叫<strong>颜色偏置</strong>;颜色面给了它这个身份,
-          第 3 课埋的伏笔)。偏置进而歪了搜索的天平:白方的候选越看越顺眼,
-          访问堆成一点;黑方的候选越看越嫌弃,访问摊得很平。于是——
+          一层 3×3 只看 3×3;两层叠起来,第二层的每个格子拿第一层
+          <em>九个格子的得数</em>当原料——它的视野是 5×5。规律:
+          <strong>每多叠一层,视野边长 +2</strong>。本模型的主干:第一层(stem)1 层,
+         后面 3 个残差块 × 每块 2 层,共 <strong className="num">7</strong> 层:
         </p>
         <div className="formula">
-          {FORTY.map((m, i) => (
-            <span key={i}>
-              第 {m.n + 1} 手 {m.player === -1 ? "白" : "黑"}落 {coord(m.x, m.y)}:
-              {m.top[0].visits}/40
-              {i === 1 ? "(天元)" : "(边角)"}{i < FORTY.length - 1 ? "、" : ""}
-            </span>
-          ))}
-          <br />——<span className="hl">天元和边线角落,拿到一样的 40/40</span>
+          视野边长 = <span className="hl">3</span> + 2 × (层数 − 1) → 7 层:
+          3 + 2×<span className="hl">6</span> = <span className="hl">15</span>
         </div>
         <p>
-          天元那手撞对了,(1,0)、(0,7) 撞错了——同一个机制,和棋理无关。
-          这就是本课最该带走的一句话:<strong>π 集中 ≠ 棋力,损失降 ≠ 棋力,
-          只有对战算数。</strong>下面两件部件,一件让你把 55% 这条线亲手算一遍,
-          一件是真实晋升赛里挑战者赢下的一局。
+          15×15 盖过 9×9 全盘还有富余。而且层数买的不只是视野:
+          <strong>层数 = 抽象层级</strong>。浅层的模板认<em>子和形</em>——这三格挨着、
+          这里有个冲四;深层的模板拿浅层的得数当原料,认<em>势</em>——这一大片我厚敌薄。
+          小窗直接看「势」看不出来,一层层把局部拼装成全局。
+        </p>
+        <p>
+          两个工程细节,一句话各带过(代码在对账折叠里):①<em>残差</em>:每两层开一条
+          捷径,输出 = 输入 + 修正量——误差账(第 6 课的回摊:罚分沿网络反向
+          逐环摊到每个旋钮的账)沿捷径这条加法直路往回走,那段的账恰好是 1、
+          不参与连乘,几十层也摔不死;本模型只有 7 层,捷径是保险。②<em>BN</em>:
+          每层算完,先把数值的分布校准成标准形状再放出去,训练更稳
+          (第 7 课说过它的另一份差事:抹掉输入里的恒定零头)。
         </p>
       </div>
 
-      <PromoCalc />
-      <ArenaReplay />
+      <FovSlider />
 
-      <Ledger title="arena.py L75(胜率计法)、pipeline.py L203(≥55% 判定)、arena.py L56(开局采样)">
+      <FeatureWall />
+
+      <Ledger title="model.py L18-21(ResBlock)、L37(blocks)">
         <div className="codewalk">
-          <pre>{`# arena.py L75  胜率按「胜 + 和棋×0.5」计
-"win_rate_a": (wins_a + 0.5 * draws) / total,`}</pre>
+          <pre>{`# L18-21  残差块:两层 3×3 卷积 + 一条捷径(x + h)
+def forward(self, x: torch.Tensor) -> torch.Tensor:
+    h = F.relu(self.bn1(self.conv1(x)))   # 第一层卷积
+    h = self.bn2(self.conv2(h))           # 第二层卷积
+    return F.relu(x + h)                  # ← 捷径:x 原样加上修正量 h`}</pre>
         </div>
         <div className="codewalk">
-          <pre>{`# pipeline.py L203  过线才易主:挑战者 ≥ 55% 才成为新 best
-promoted = res["win_rate_a"] >= cfg.promote_threshold
-if promoted:
-    save_checkpoint(net, ...)   # best 易主`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# arena.py L56  确定性陷阱的解法:开局 5 手仍按 π 采样
-sample_temperature=True, temp_threshold=max(2, cfg.temp_threshold // 2),`}</pre>
+          <pre>{`# L37  主干 = stem 1 层 + 3 个残差块(每块 2 层)= 7 层
+self.blocks = nn.Sequential(*[ResBlock(channels) for _ in range(res_blocks)])`}</pre>
         </div>
         <p className="mt-3">
-          三处对上部件:①胜率的「和棋算半分」正是计算器里的分子;
-          ②promote_threshold 就是那条 55% 线,判定完当场存新冠军;
-          ③竞技场把自我对弈的开局采样阈值砍半(10 → 5)——竞技场只需要分叉
-          制造不同的棋,不需要自我对弈那么多样的探索。
+          每块两层 3×3 卷积 → 每过一块视野 +4(一层 +2);stem 之后叠 3 块,
+          3 + 2×6 = 15。BN 就是上面 <span className="mono">bn1/bn2</span> 那两行:
+          校准形状的稳定器。本站引擎{" "}
+          <span className="mono">learn/src/engine/model.ts</span> 的{" "}
+          <span className="mono">resBlock</span> 与它逐条对齐——部件二的真特征图
+          就是这个函数一层层算出来的。
         </p>
       </Ledger>
 
       <Quiz
-        title="小测 · 过关解锁毕业课"
+        title="小测 · 过关解锁第 10 课"
         onAllCorrect={() => pass("l09")}
         questions={[
           {
-            q: "6 局 2 胜 2 和 2 负,为什么不能晋升?",
+            q: "7 层的视野怎么算?",
             options: [
-              "因为有 2 局输了,输过就不配当冠军",
-              "胜率只有 (2+0.5×2)/6 = 50%,不到 55% 的线——6 局太少,50% 和抛硬币没区别,运气成分还没被甩开",
-              "和棋不算成绩,实际只赢 2 局",
+              "7 × 3 = 21 格",
+              "3 + 2 × (7 − 1) = 15:第一层 3×3,每多叠一层边长 +2",
+              "算不出来,要看每张模板的权重才知道",
             ],
             answer: 1,
             explain:
-              "晋升线问的是「赢面是否明显盖过运气」:50% 恰是五五开,而纯运气赢 4 局以上的概率都有约 34%。不设这条线,换冠军就成了掷硬币。和棋算半分不是不算——它正是「没分出高下」的诚实记法。",
+              "规律与权重无关,是结构给的:第 1 层看 3,第 2 层看 5,第 3 层看 7……每层把上一层的九个得数当原料,视野每层 +2。滑杆从 1 拨到 7 亲手数一遍:3、5、7、9、11、13、15。",
           },
           {
-            q: "竞技场的对局为什么开局几手要按 π 采样,而不是一路 argmax?",
+            q: "浅层和深层各自认什么?",
             options: [
-              "采样更快,能省计算",
-              "无噪声纯 argmax 是完全确定的:两个固定网络同先手会逐手下出一模一样的棋,6 局只剩 2 局信息量;开局采样制造分叉",
-              "为了公平,让双方轮流先行",
+              "浅层认子和形(局部棋形),深层拿浅层的得数当原料,认势(大片区域的形势)",
+              "浅层认黑子,深层认白子",
+              "层层都一样,只是通道数不同",
             ],
-            answer: 1,
+            answer: 0,
             explain:
-              "确定性陷阱:同样的网络、同样的开局、每步都取访问数最大——同一盘棋永远重演。交替先后手只能换来黑先/白先两盘。开局几手采样(大的多抽、小的也轮得到),棋盘从此分岔,6 局才真的是 6 局。",
+              "部件二的真特征图墙上肉眼可见:stem 那一排的亮斑贴着三颗子;到第三块,亮暗已经连成大片。棋形证据全来自「己方/对方」两张面——canonical 早已把黑白抹平;颜色只剩输入侧那张恒定的颜色面(整面同一个数,只报轮到谁,变不出棋形)。",
           },
           {
-            q: "第 3 轮那盘棋,第 10 手把 40 次模拟全押天元 (4,4)。为什么这不能证明它学会了「天元最大」?",
+            q: "残差的捷径(x + h)是干什么用的?",
             options: [
-              "因为 40 次模拟太少,400 次就能证明",
-              "因为同一盘棋里 (1,0)、(0,7) 这些边角垃圾点也拿到 40/40,且白方 16 手估值全为正——集中来自颜色偏置,和棋理无关",
-              "因为天元本来就不是好点",
+              "让棋盘刷新得更快",
+              "让每层只学「在上一层答案上修一点」,误差信号沿捷径直通底层——几十层也训得动",
+              "把 48 个通道压缩成 2 个",
             ],
             answer: 1,
             explain:
-              "同一个机制(白方候选的 Q 被偏置抬高)让天元和边线角落拿到同等待遇——撞对一次和撞错两次是一回事。π 集中只说明搜索在堆访问,不说明堆对了地方;棋力要靠对战证明,这就是竞技场存在的理由。",
+              "捷径的本事是「什么都不做也打平」:修正量学成 0,输入原样通过,多出来的层不会拖后腿;误差往回传时,直路那段是加法、账恰好是 1、不参与连乘(第 6 课的 1+F′)。本模型 7 层,残差是保险;压通道是两个输出头的活(第 10 课)。",
           },
         ]}
       />
@@ -203,216 +145,209 @@ sample_temperature=True, temp_threshold=max(2, cfg.temp_threshold // 2),`}</pre>
   )
 }
 
-/* ============ 部件 9-1 · 晋升计算器:6 局胜负和,亲手配平 55% 线 ============ */
+/* ============ 部件 1 · 层深滑杆:视野一圈圈长大 ============ */
 
-type Slot = 1 | 0.5 | 0 // 胜 / 和 / 负
-const SLOT_LABEL: Record<number, string> = { 1: "胜", 0.5: "和", 0: "负" }
-const NEXT: Record<number, Slot> = { 1: 0.5, 0.5: 0, 0: 1 }
-const PRESETS: { label: string; slots: Slot[] }[] = [
-  { label: "6 胜 0 负(真实第 2 轮)", slots: [1, 1, 1, 1, 1, 1] },
-  { label: "2 胜 2 和 2 负", slots: [1, 1, 0.5, 0.5, 0, 0] },
-  { label: "3 胜 1 和 2 负", slots: [1, 1, 1, 0.5, 0, 0] },
-]
+const CELL5 = 26
+const M5 = CELL5 * 4.2 // 界外余量:7 层视野(15×15)在 9×9 外还要伸 3.5 格
+const VB5 = M5 * 2 + 8 * CELL5
+const px5 = (x: number) => M5 + x * CELL5
 
-function PromoCalc() {
-  const [slots, setSlots] = useState<Slot[]>([1, 1, 0.5, 0.5, 0, 0])
-  const wins = slots.filter((s) => s === 1).length
-  const draws = slots.filter((s) => s === 0.5).length
-  const score = wins + 0.5 * draws
-  const rate = score / 6
-  const passLine = 0.55
-  const promoted = rate >= passLine
+function FovSlider() {
+  const [layers, setLayers] = useState(1)
+  const side = 3 + 2 * (layers - 1)
+  const half = side / 2
+
+  // 视野框(以天元 (4,4) 为中心),单位:格
+  const bx = px5(4 - half)
+  const by = px5(4 - half)
+  const bw = side * CELL5
 
   return (
     <figure className="figure mt-8">
-      <div className="px-4 pt-3 sm:px-5">
-        <span className="mini-label">部件 9-1 · 晋升计算器:点 6 个格子配一盘对抗</span>
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">部件 · 层深滑杆:看第几层的眼睛</span>
       </div>
-      <div className="p-4 sm:p-5">
-        <div className="flex flex-wrap gap-2" data-qa="calc-slots">
-          {slots.map((s, i) => (
-            <button key={i} type="button"
-              className={`btn calc-slot ${s === 1 ? "active" : ""}`}
-              onClick={() => setSlots((ss) => ss.map((x, j) => (j === i ? NEXT[x] : x)))}
-              data-qa="calc-slot">
-              <span className="num">第{i + 1}局</span>
-              <span className="calc-slot-val" data-val={s}>{SLOT_LABEL[s]}</span>
-            </button>
-          ))}
+      <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
+        <div className="min-w-0 flex-1 md:max-w-[26rem]">
+          <svg viewBox={`0 0 ${VB5} ${VB5}`} style={{ width: "100%", height: "auto", display: "block" }}
+            role="img" aria-label={`层数 ${layers},视野 ${side}×${side}`}>
+            <rect
+              x={M5 - CELL5 * 0.62}
+              y={M5 - CELL5 * 0.62}
+              width={VB5 - 2 * (M5 - CELL5 * 0.62)}
+              height={VB5 - 2 * (M5 - CELL5 * 0.62)}
+              rx={10}
+              style={{ fill: "var(--board)" }}
+            />
+            <g style={{ stroke: "var(--board-line)" }} strokeWidth={1} opacity={0.85}>
+              {Array.from({ length: 9 }, (_, i) => (
+                <line key={`v${i}`} x1={px5(i)} y1={px5(0)} x2={px5(i)} y2={px5(8)} />
+              ))}
+              {Array.from({ length: 9 }, (_, j) => (
+                <line key={`h${j}`} x1={px5(0)} y1={px5(j)} x2={px5(8)} y2={px5(j)} />
+              ))}
+            </g>
+            {/* 己方三连(与第 8 课同一局面) */}
+            {THREE.map(([x, y]) => (
+              <circle key={`${x}-${y}`} cx={px5(x)} cy={px5(y)} r={CELL5 * 0.36}
+                style={{ fill: "var(--stone-b)", stroke: "var(--stone-b-lo)", strokeWidth: 1.5 }} />
+            ))}
+            {/* 视野框:中心在天元;伸出棋盘的部分=界外(补 0) */}
+            <rect
+              x={bx} y={by} width={bw} height={bw} rx={8}
+              style={{
+                fill: "var(--accent)",
+                stroke: "var(--accent)",
+                strokeWidth: 2.5,
+                // CSS 几何属性可过渡的浏览器里平滑缩放;不支持则直接跳变(属性兜底)
+                transition: "x 260ms ease, y 260ms ease, width 260ms ease, height 260ms ease",
+              }}
+              fillOpacity={0.06}
+              strokeDasharray={side > 9 ? "9 6" : undefined}
+            />
+            <text x={bx + bw} y={by - 7} textAnchor="end" fontSize={13}
+              fontFamily="ui-monospace, SF Mono, Menlo, monospace" style={{ fill: "var(--accent-deep)" }}>
+              {side}×{side}
+            </text>
+            {side > 9 && (
+              <text x={bx + bw / 2} y={by + bw + 16} textAnchor="middle" fontSize={12}
+                style={{ fill: "var(--fg-faint)" }}>
+                伸出棋盘的部分 = 界外,按 0 算
+              </text>
+            )}
+          </svg>
         </div>
-        <p className="mt-2 text-xs" style={{ color: "var(--fg-faint)" }}>
-          点格子循环:胜 → 和 → 负。六局交替先后手(哪局执黑由配对轮换,不影响记分)。
-        </p>
-
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <span className="num text-lg font-bold" data-qa="calc-rate"
-            style={{ color: "var(--accent-deep)" }}>
-            ({wins} + 0.5×{draws}) / 6 = {score.toFixed(1)} / 6 = {(rate * 100).toFixed(1)}%
-          </span>
-          <span className="banner" style={{
-            borderColor: promoted ? "var(--accent)" : "var(--hairline-strong)",
-            background: promoted ? "var(--accent-wash)" : "var(--card-sunken)",
-            color: promoted ? "var(--accent-deep)" : "var(--fg-muted)",
-          }} data-qa="calc-verdict">
-            {promoted ? "✓ ≥ 55%,晋升!best 易主" : "✗ 不到 55%,现任冠军留任"}
-          </span>
-        </div>
-
-        <div className="l09-ratebar mt-3" data-qa="calc-bar">
-          <i className="l09-ratebar-fill" style={{ width: `${rate * 100}%` }} />
-          <i className="l09-ratebar-line" style={{ left: `${passLine * 100}%` }} />
-          <i className="l09-ratebar-needle" style={{ left: `${rate * 100}%` }} />
-          <span className="num l09-ratebar-tag" style={{ left: `${passLine * 100}%` }}>55% 线</span>
-        </div>
-        <div className="num mt-1 flex justify-between text-xs" style={{ color: "var(--fg-faint)" }}>
-          <span>0%</span><span>50% 五五开</span><span>100%</span>
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="text-xs" style={{ color: "var(--fg-faint)" }}>快捷:</span>
-          {PRESETS.map((p) => (
-            <button key={p.label} type="button" className="btn" data-qa="calc-preset"
-              onClick={() => setSlots(p.slots)}>
-              {p.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="reveal-box mt-4 text-sm leading-relaxed">
-          <strong>34% 运气线:</strong>假设两个网络棋力完全相同(每局五五开),
-          纯靠运气拿下 4 局及以上的概率 = (C(6,4)+C(6,5)+C(6,6)) / 2⁶ =
-          (15+6+1)/64 ≈ <span className="num">34%</span>——而 4 胜 2 负 = 66.7%,
-          稳过线。所以 6 局的晋升只敢要 55% 这种「明显好过抛硬币」的证据,
-          真要证明棋力得打几百局:6 局证明的是「飞轮转得动」,不是「棋力已经到手」。
+        <div className="min-w-0 flex-1">
+          <div className="mini-label">层数(1 → 7)</div>
+          <input
+            type="range" min={1} max={7} step={1} value={layers}
+            onChange={(e) => setLayers(Number(e.target.value))}
+            aria-label="层数"
+            style={{ ["--fill" as string]: `${((layers - 1) / 6) * 100}%` }}
+            data-qa="fov-slider"
+          />
+          <div className="mt-1 flex justify-between text-xs num" style={{ color: "var(--fg-faint)" }}>
+            {[1, 2, 3, 4, 5, 6, 7].map((l) => (
+              <span key={l}>{l}</span>
+            ))}
+          </div>
+          <div className="reveal-box mt-4">
+            <p className="num text-lg font-bold">
+              视野边长 = 3 + 2 × ({layers} − 1) ={" "}
+              <span data-qa="fov-side" style={{ color: "var(--accent-deep)" }}>{side}</span>
+            </p>
+            <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+              {layers === 1 && "第 1 层:窗口 3×3,装得下一个三连(第 8 课的模板)。"}
+              {layers > 1 && layers < 7 && `叠到第 ${layers} 层:盖住 ${side}×${side}。`}
+              {layers === 7 &&
+                "7 层 = stem 1 层 + 残差块 3 × 2 层(真模型的配置):15×15 盖过 9×9 全盘。"}
+            </p>
+          </div>
+          <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+            从 1 拨到 7,看视野框一圈圈长大:{"> "}
+            <span className="num font-bold">3 → 5 → 7 → 9 → 11 → 13 → 15</span>。
+            到第 4 层恰好罩住 9×9;真模型 7 层,界外还有一圈余量。
+          </p>
         </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">部件 9-1</span>
-        计分公式与 ≥55% 判定即 arena.py L75 与 pipeline.py L203;
-        真实记录见第 2 轮:挑战者 6 比 0 晋升(下面就是那 6 局里的一局)。
+        每叠一层,该层的每个格子拿上一层 3×3 的得数当原料——窗口还是 3×3,
+        视野边长却 +2。棋盘上仍是第 8 课那个三连局面。
       </figcaption>
     </figure>
   )
 }
 
-/* ============ 部件 9-2 · 真实晋升赛对局:第 2 轮挑战者(黑)的一胜 ============ */
+/* ============ 部件 2 · 真特征图:浅层认子,深层认势 ============ */
 
-const ALEN = ARENA.moves.length
+const CHANNELS_SHOWN = 6
 
-function ArenaReplay() {
-  const [step, setStep] = useState(0)
-  const [playing, setPlaying] = useState(false)
-
-  const states = useMemo<GameState[]>(() => {
-    const arr: GameState[] = [emptyBoard()]
-    for (const m of ARENA.moves)
-      arr.push(play(arr[arr.length - 1], m.y * 9 + m.x, m.player as 1 | -1))
-    return arr
+function FeatureWall() {
+  const [w, setW] = useState<WeightsJson | null>(null)
+  useEffect(() => {
+    let alive = true
+    loadWeights().then((x) => {
+      if (alive) setW(x)
+    })
+    return () => {
+      alive = false
+    }
   }, [])
 
-  useEffect(() => {
-    if (!playing) return
-    if (step >= ALEN) {
-      setPlaying(false)
-      return
-    }
-    const t = setTimeout(() => setStep((s) => s + 1), 700)
-    return () => clearTimeout(t)
-  }, [playing, step])
+  // 单次前向(~16ms),缓存;滑杆/交互只切展示,不重算
+  const trace = useMemo(() => {
+    if (!w) return null
+    return traceNet(w)(encode(STATE))
+  }, [w])
 
-  const cur = step < ALEN ? ARENA.moves[step] : null
-  const prev = step > 0 ? ARENA.moves[step - 1] : null
-  const top = cur ? [...cur.top].sort((a, b) => b.visits - a.visits).slice(0, 3) : []
+  const rows: { label: string; sub: string; planes: Float64Array }[] = useMemo(() => {
+    if (!trace) return []
+    return [
+      { label: "第 1 层 · stem", sub: "认子和形", planes: trace.stemOut.data },
+      { label: "第 2-3 层 · 残差块 1", sub: "", planes: trace.blockOuts[0].data },
+      { label: "第 4-5 层 · 残差块 2", sub: "", planes: trace.blockOuts[1].data },
+      { label: "第 6-7 层 · 残差块 3", sub: "认势", planes: trace.blockOuts[2].data },
+    ]
+  }, [trace])
 
   return (
-    <figure className="figure mt-8">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3 sm:px-5">
-        <span className="mini-label">部件 9-2 · 晋升赛实录——{ARENA.id}(第 2 轮,挑战者执黑)</span>
-        <span className="mini-label num" style={{ color: "var(--accent-deep)" }}>
-          该轮挑战者 6 比 0 全胜,晋升
-        </span>
+    <figure className="figure mt-12">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">部件 · 真特征图:同一局面,过一遍真网络</span>
       </div>
-      <div className="flex flex-col gap-5 p-4 sm:flex-row sm:p-5">
-        <div className="min-w-0 flex-1 sm:max-w-[22rem]">
-          <div data-qa="arena-board">
-            <Board
-              board={states[step].board.flat()}
-              lastMove={prev ? { x: prev.x, y: prev.y } : null}
-              marks={step === ALEN && prev ? [{ x: prev.x, y: prev.y, anchor: true }] : undefined}
-            />
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button type="button" className="btn" disabled={step === 0}
-              onClick={() => { setPlaying(false); setStep((s) => Math.max(0, s - 1)) }}>
-              ← 上一手
-            </button>
-            <button type="button" className="btn active" onClick={() => setPlaying((p) => !p)}>
-              {playing ? "⏸ 暂停" : "▶ 自动播放"}
-            </button>
-            <button type="button" className="btn" disabled={step >= ALEN}
-              onClick={() => { setPlaying(false); setStep((s) => Math.min(ALEN, s + 1)) }}>
-              下一手 →
-            </button>
-            <span className="num ml-auto text-sm" style={{ color: "var(--fg-faint)" }}>
-              第 {step} / {ALEN} 手
-            </span>
-          </div>
-        </div>
-
-        <aside className="w-full sm:w-64 sm:flex-none">
-          {cur ? (
-            <div>
-              <div className="mini-label">
-                第 {step + 1} 手 · 轮到{cur.player === 1 ? "黑(挑战者)" : "白(冠军)"}下
-              </div>
-              <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-                竞技场每手 30 次模拟(比自我对弈的 40 少、开局 5 手按 π 采样):
-                朱砂环标出本局的最后一手。
-              </p>
-              <div className="mini-label mt-4">π:访问 top3</div>
-              <ol className="mt-2 space-y-1.5" data-qa="arena-top">
-                {top.map((t) => (
-                  <li key={t.action} className="l00-top-row">
-                    <span className="mono text-sm">({t.x},{t.y})</span>
-                    <span className="prob-track">
-                      <span className="prob-fill" style={{ width: `${t.prob * 100}%` }} />
-                    </span>
-                    <span className="num w-10 flex-none text-right text-sm"
-                      style={{ color: "var(--accent-deep)" }}>
-                      {Math.round(t.prob * 100)}%
-                    </span>
-                  </li>
+      <div className="overflow-x-auto p-4 md:p-5">
+        {!trace ? (
+          <p className="text-sm" style={{ color: "var(--fg-muted)" }}>
+            正在加载真权重(weights-best.json,约 1.2 MB)……
+          </p>
+        ) : (
+          <div className="flex flex-col gap-5" data-qa="fwall">
+            {rows.map((r, ri) => (
+              <div key={ri} data-qa="frow" className="flex flex-wrap items-center gap-4">
+                <div className="w-[7.5rem] flex-none">
+                  <div className="mini-label">{r.label}</div>
+                  {r.sub && (
+                    <div className="text-xs" style={{ color: "var(--fg-faint)" }}>{r.sub}</div>
+                  )}
+                </div>
+                {Array.from({ length: CHANNELS_SHOWN }, (_, ch) => (
+                  <FeatureMap key={ch} planes={r.planes} ch={ch} />
                 ))}
-              </ol>
-              <p className="num mt-4 text-lg font-bold" style={{ color: "var(--accent-deep)" }}>
-                v = {cur.value >= 0 ? "+" : ""}{cur.value.toFixed(2)}
-                <span className="ml-2 text-sm font-normal" style={{ color: "var(--fg-faint)" }}>
-                  ({cur.player === 1 ? "黑" : "白"}方视角)
-                </span>
-              </p>
-              <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                白方(老冠军)的估值一路 −0.7 跌到 −0.99:新网络每一手都把它越推越远。
-              </p>
-            </div>
-          ) : (
-            <div className="reveal-box">
-              <div className="mini-label">终局</div>
-              <p className="mt-2 text-sm font-semibold">
-                挑战者(黑)胜——第 {ALEN} 手黑落 {coord(prev!.x, prev!.y)},终局直传。
-              </p>
-              <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-                这只是 6 局里的一局;配齐 6 局,胜率 100% ≥ 55%,best 易主
-                ——第 8 课真数据卡里那条「6 比 0 晋升」就是它。
-              </p>
-            </div>
-          )}
-        </aside>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">真数据</span>
-        {ARENA.id},共 {ALEN} 手,黑胜。局面由引擎逐手重建,π/v 读训练记录;
-        回放样式沿用序章的回放器——同一盘「棋谱」,这次站在竞技场的角度看。
+        <span className="cap-no">部件 9-2</span>
+        真引擎 + 真权重:<span className="mono">traceNet</span>(model.ts)对三连局面做一次前向,
+        取主干每层的前 {CHANNELS_SHOWN} 个通道(每层共 48 张)。亮 = 该通道在这里激活强。
+        结果缓存,切换展示不重算。
       </figcaption>
     </figure>
+  )
+}
+
+/** 一张 9×9 特征图:planes 为 [48, 9, 9] 布局,通道在前;每通道按自身最大值归一。 */
+function FeatureMap({ planes, ch }: { planes: Float64Array; ch: number }) {
+  const off = ch * 81
+  let max = 0
+  for (let k = 0; k < 81; k++) max = Math.max(max, planes[off + k])
+  return (
+    <svg viewBox="0 0 90 90" width="86" height="86" data-qa="fmap" role="img"
+      aria-label={`通道 ${ch} 特征图`}
+      style={{ borderRadius: 6, background: "var(--card-sunken)", flex: "none" }}>
+      {Array.from({ length: 9 }, (_, y) =>
+        Array.from({ length: 9 }, (_, x) => {
+          const v = planes[off + y * 9 + x]
+          const t = max > 0 ? v / max : 0
+          return (
+            <rect key={`${x}-${y}`} x={x * 10 + 0.5} y={y * 10 + 0.5} width={9} height={9}
+              style={{ fill: "var(--accent)" }} opacity={0.05 + t * 0.85} />
+          )
+        }),
+      )}
+    </svg>
   )
 }

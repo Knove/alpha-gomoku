@@ -1,151 +1,164 @@
-/** 第 7 课 · 搜索:再想四十遍。
- *  节拍:谜题(第一印象会错)→ 揭晓四小节(模拟 / PUCT / 逐层取负 / 访问数)→
- *  部件(单步模拟器:真引擎 SearchTree + 真权重叶评估,三键单步 select→eval→
- *  expandAndBackup;树图 / 根账本 / F5 收敛 / 根噪声开关)→ 对账(mcts.py)→ 小测。 */
-import { useEffect, useRef, useState } from "react"
+/** 第 7 课 · 三张平面。
+ *  节拍:谜题(一张 ±1 面够吗)→ 揭晓(正负抵消 → 拆两张 0/1 面 + 颜色面)→
+ *  部件 1(正负抵消计算器:同一张横三连模板,不同窗口内容,亲手验证 3 > 2 > 1)→
+ *  部件 2(同一局面三张平面并排,点格联动)→
+ *  地基篇的判决(必单调/拆面=手工 ReLU/空格面与颜色面/状态完备性)→
+ *  对账(game.py encode)→ 小测。 */
+import { useState } from "react"
 import { Quiz, usePassLesson } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import Board from "../lib/board"
-import { legalMoves, type GameState } from "../engine/game"
-import { loadNet, type WeightsJson } from "../engine/model"
-import { SearchTree, type MctsConfig, type MctsNode } from "../engine/mcts"
-import { softmax } from "../engine/nn"
-import { loadWeights } from "../lib/weights"
+import { MiniGrid9 } from "../lib/minigrid"
 
-/* 教学手摆局面(archive/mcts.md 手算例):黑四连 (1..4,4)、白堵左端 (0,4)、
- * 白三 (2,1)(3,1)(4,1)、黑闲子 (6,2),轮黑。F5 = (5,4) = action 41 一手成五。 */
-const F5 = 41
-const POS: GameState = (() => {
-  const board = Array.from({ length: 9 }, () => new Array<number>(9).fill(0))
-  for (const x of [1, 2, 3, 4]) board[4][x] = 1
-  board[4][0] = -1
-  for (const x of [2, 3, 4]) board[1][x] = -1
-  board[2][6] = 1
-  return { board, current: 1, winner: 0, moveCount: 9, lastMove: null }
+/* 教学局面:与第 2 课同一盘(5 黑 4 白共 9 手,轮白),
+ * 部件 2 用它渲染「网络眼里的三张平面」。 */
+const BLACK_POS: [number, number][] = [
+  [2, 4],
+  [3, 4],
+  [4, 4],
+  [4, 5],
+  [3, 5],
+]
+const WHITE_POS: [number, number][] = [
+  [5, 4],
+  [4, 3],
+  [5, 3],
+  [6, 4],
+]
+const OBJ: number[] = (() => {
+  const b = new Array<number>(81).fill(0)
+  for (const [x, y] of BLACK_POS) b[y * 9 + x] = 1
+  for (const [x, y] of WHITE_POS) b[y * 9 + x] = -1
+  return b
 })()
-const POS_FLAT = POS.board.flat()
 
-/** 固定种子的确定性随机(mulberry32,与 tests/mcts.test.ts 同款)——噪声可复现。 */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0
-  return () => {
-    a |= 0
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
+/* 部件 2 的三张平面(轮白:canonical 里白的变 +1,即「己方」)。
+ * 与 game.ts encode() 同一套切法,数据在本组件里现算,改动棋盘即联动。 */
+const PLANE_OWN = OBJ.map((v) => (v === -1 ? 1 : 0)) // 轮白:白子 = 己方
+const PLANE_OPP = OBJ.map((v) => (v === 1 ? 1 : 0))
+const PLANE_COLOR = new Array<number>(81).fill(0) // 轮白 → 整张 0
 
-const MAX_SIMS = 100
-const coord = (a: number) => `(${a % 9},${Math.floor(a / 9)})`
-
-export default function L07() {
+export default function L03() {
   const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
       <div className="eyebrow mb-3">第 7 课</div>
-      <h1 className="text-2xl font-bold">搜索:再想四十遍</h1>
+      <h1 className="text-2xl font-bold">三张平面</h1>
 
       <Quiz
         title="谜题 · 先选一个答案"
         questions={[
           {
-            q: "网络看一眼棋盘就报答案,快是快,但那只是第一印象——没算过「我下这、对手应那、我再下」的后续。第一印象会错,怎么办?",
+            q: "己方子记 +1、对方子记 −1、空记 0——第 2 课那张 canonical 数组已经这么记了。现在要把它喂给网络的第一层:一群只会做「对应相乘再求和」的小算子。这三个数挤在一张面里,够吗?",
             options: [
-              "换更大的网络:参数多十倍,看得更准",
-              "多想几步:沿「目前最值得看」的路线一次次推演,用统计把直觉磨准",
-              "背更多棋谱:见过的局面多了,第一印象自然就对",
+              "够了:三种身份三个数,信息一点没丢",
+              "不够:己方子和对方子要分开放——正负混在一张面里会坏事",
+              "不够:光有当前棋盘还不行,还得把之前每一步的历史都记进去",
             ],
             answer: 1,
             explain:
-              "选 B。A 和 C 都在给「看一眼」加料——但看一眼终究是看一眼:再大的网络、再多的棋谱,看一眼仍只是第一印象,直觉再强也不会自己推演「我下这、对手应那」——推演是搜索的事,不是直觉的事。B 不换眼睛,换用法:让网络当向导,顺着它指的方向把「我下这、对手应那」真的走几遍,把每条路的结果记成账,几十次之后统计说了算。这就是本课的搜索——它不另买算力,只花预算。",
+              "选 B。先给 A 记半分:信息确实一点没丢——丢的不是信息,是计算上的好用性。坏在哪儿,这课亲手算一遍就见分晓:求和的时候,对方的 −1 会把己方的 +1 抵消掉。至于 C——五子棋没有吃子、没有提子再放回的循环,当前棋盘就是全部状态,不用背历史(围棋才要,后面「状态完备性」算这笔账)。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>揭晓 · 四件事:模拟、记账、取负、落子</h3>
+        <h3>揭晓 · 正负会在求和里抵消</h3>
         <p>
-          <strong>① 模拟 = 一次推演。</strong>推演的产物长成一棵<em>树</em>:
-          节点是局面,边是落子,根就是现在要下的局面。一次推演(
-          <em>模拟</em>)从根出发,每个岔口挑「目前最值得看」的那条边往下走,
-          走到<em>没见过的局面</em>就停,问网络的看法。老派搜索在这里靠随机乱下到终局
-          ——五子棋里随机终局几乎不含信息;这里的做法:一撞见新局面就停,
-          网络的估值直接当「终局替身」。一次模拟最多问网络一次,40 次模拟笔记本扛得住。
+          先用一句话认识网络第一层的干法(第 4 课推过它的账,下一课看它怎么滑):
+          一张张 3×3 的<strong>模板</strong>——9 个数,盖在棋盘某个 3×3 的小窗上,
+          对应格子相乘,再把 9 个乘积加成一个数。比如这张「横三连模板」:
+          中间一行是 1、1、1,其余是 0,它量的是「这个窗口的中间一横排,
+          是不是我的子」。
         </p>
         <p>
-          <strong>② PUCT:每条边一本账。</strong>每条边记两个数:<em>N</em>
-          (被看过几次)和 <em>W</em>(历次得分总和),商 W/N 记作 <em>Q</em>
-          (历史平均)。岔口怎么挑?一行公式两头都照顾:
-        </p>
-        <div className="formula">
-          score(a) = <span className="hl">Q(a)</span>(历史平均,裁判)+
-          c · P(a) · √ΣN / (1 + N(a))(没看过的加分,探索)
-        </div>
-        <p>
-          P 是<em>网络先验</em>——网络说这里值得先看(第 6 课那 81 个分数派上用场了)。
-          先验是<em>向导</em>,只管先往哪看;Q 是<em>裁判</em>,管往哪走。
-          公式里的 c 是探索强度的旋钮(本站取 1.5):c 越大,越爱试冷门的
-          没看过的手;c 越小,越死磕眼下最赚的那条。
-          没看过的手(N 小)探索分高,<em>总会轮到</em>;看得多的手探索分自然衰减,
-          最后由 Q 说了算。两个都不偏:纯认 Q 是一棵树上吊死,纯均匀是撒胡椒面。
+          现在拿它去算一张 ±1 面。同一张模板,盖在「己、敌、己」三格上:
+          1×1 + 1×(−1) + 1×1 = <strong>1</strong>;盖在「己、空、己」上:
+          1 + 0 + 1 = <strong>2</strong>。看出问题了吗——
+          <strong>贴身缠斗、最该报警的地方,得分反而比太平无事还低</strong>。
+          对方那颗子在求和里永远在做<em>负功</em>,把警报往小里压;
+          要是盖在「敌、敌、敌」上更糟:得分 −3,同一张模板对 +3 和 −3
+          没法用同一个阈值报警。
         </p>
         <p>
-          <strong>③ 逐层取负:账要对得上视角。</strong>所有数值都站在
-          「当前轮到谁下」的视角(第 2 课的铁约)。我的大优就是对面的劣势:
-          黑白每换一手,符号翻一次。所以叶估值往回记的时候,<em>每爬一层翻一次符号</em>
-          ——叶子说「我(行棋方)+1」,记到上一层的边上是 −1(对那边是劣),
-          再翻回 +1……这样每条边的 Q 都站在「选这条边的那一方」的视角,账才不自相矛盾。
-          真终局不用问网络:<em>终局直传</em>——赢 +1、输 −1、和 0,直接记账,
-          这是搜索能拿到的最硬的信号。
+          解法:<strong>一种身份一张面,每张只放 0 和 1</strong>。
+          平面 0「己方子」:我的子在哪些格子,是 1、不是 0;平面 1「对方子」:
+          对手的子在哪些格子。空格不用单独一张——两张同为 0 的地方就是空。
+          拆开之后,每张面上「1 越多 = 这个事实越成立」:「己方横三连」就是
+          「己方面上这张模板得 3」,一个阈值就报警,谁也不抵消谁。
         </p>
         <p>
-          <strong>④ 访问数说了算。</strong>40 次推演跑完,哪手被反复看最多就下哪。
-          为什么不直接挑 Q 最高?一个候选若只被撞见 1 次、碰巧拿了 +1,Q 也是满分,
-          和被检验 20 次平均出来的 +1 长得一模一样——<em>Q 分不清底气,N 分得清</em>
-          。访问数把先验的方向、Q 的成色、检验的次数炖成一锅,是整个过程的总结算。
+          还差最后一张「<strong>颜色面</strong>」:整张填同一个数——轮黑走全 1,
+          轮白走全 0。canonical 把黑白抹平了,可「我执黑还是执白」是要紧事
+          (先手可以下得更凶):这个信息理论上读得出来——轮黑走时双方子数相等,
+          轮白走时黑多一子——但「数一遍全盘的子」恰恰是 3×3 小窗干不动的活。
+          颜色面就是把这个全局事实直接贴到每个格子上。三张叠起来,形状
+          <span className="mono">(3, 9, 9)</span>,读作「3 张 9×9」。
         </p>
       </div>
 
-      <Simulator />
+      <CancelCalc />
 
-      <Ledger title="mcts.py L55(select)、L101-108(PUCT)、L144-148(backup)、L154-176(落子)">
+      <ThreePlanes />
+
+      <div className="prose mt-12">
+        <h3>揭晓 · 地基篇的判决</h3>
+        <p>
+          三张平面看完,回头清算第 3-6 课埋的账——地基篇的每一门课,
+          都在这三张面上留了判决:
+        </p>
+        <p>
+          <strong>① 必单调的判决(±1 强加排序)。</strong>第 4 课判过:每个输入
+          各走一条直线。把己/敌/空记成 +1/−1/0,等于把三种<em>无序</em>的身份
+          钉上同一条数轴:权重为正时,己(+1)的分 &gt; 空(0)的分 &gt; 敌(−1)
+          的分——「空」永远夹在「己」「敌」中间,可棋理上没有这个次序。
+          抵消只是它的症状之一;病根是排序。
+        </p>
+        <p>
+          <strong>② 拆面的判决:手工 ReLU。</strong>那拆成两张 0/1 面算什么?
+          在格子值 x 只取 +1、0、−1 时:己面 = ReLU(x)、敌面 = ReLU(−x),
+          <em>逐值精确</em>——ReLU(+1)=1、ReLU(0)=0、ReLU(−1)=0。
+          拆两张面,正是给 x 手工过了正、反两个 ReLU(第 5 课的正半波与
+          负半波)。「一种身份一张面」的行话叫 one-hot——三种身份各占一张面,
+          谁也不给谁排序。暗线:ReLU(t)+ReLU(−t)=|t|,和第 5 课切开 XOR 的
+          是同一根恒等式。
+        </p>
+        <p>
+          <strong>③ 空格面可删,颜色面必须留。</strong>空格不用单独一张面,
+          除了「两张都是 0 的地方就是空」,还有更深一层:空格 = 1−己−敌,
+          给它配的任何权重,效果都能并进己、敌两张面的权重里,多出来的只剩
+          一个恒定零头。带偏置的网络,零头由偏置一口吞掉;本网络的卷积不带
+          偏置,由下一道工序 BN 的「减均值」原样抹掉——零头对每个局面都
+          一样,均值里就有它,减掉正好,网络输出一个比特都不变。对照:
+          颜色面的零头随轮到谁在 0 与 Σw₃ 之间翻转,随局面而变,谁也抹不掉
+          ——这就是「空格面可删、颜色面必须留」的全部道理。
+        </p>
+        <p>
+          <strong>④ 状态完备性:三张为什么够。</strong>输入面要装的是
+          「做对下一个决策需要的全部信息」。AlphaGo Zero 下围棋要用 17 张
+          输入平面,因为围棋有「打劫」——同一张棋盘图对应不同的合法走法,
+          必须回看历史;五子棋没有吃子,当前棋盘 + 轮到谁,就是全部状态,
+          两张面加一张颜色面,三张够,一张也不多余。
+        </p>
+      </div>
+
+      <Ledger title="game.py(encode,L111-117)">
         <div className="codewalk">
-          <pre>{`# L55  一次模拟 = 沿 PUCT 降到叶(撞见终局则当场直传)
-def select(self) -> None:`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# L101-108  岔口公式:Q(裁判)+ U(探索);已占格永远选不到
-Q = np.divide(W, N, out=np.zeros_like(W), where=N > 0)
-U = self.cfg.c_puct * P * sqrt_total / (1.0 + N)
-score = Q + U
-score[legal == 0] = -np.inf
-return int(np.argmax(score))`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# L144-148  回传:每爬一层,符号翻一次
-for node, a in reversed(path):
-    v = -v  # value flips perspective each ply
-    node.N[a] += 1.0
-    node.W[a] += v`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# L154-176  输出:访问数说了算(π = N/ΣN,训练时当网络的老师)
-def root_pi(self, temperature=1.0):
-    counts = self.root.N ...   # 访问数分布
-def best_action(self):
-    masked = np.where(legal > 0, self.root.N, -np.inf)
-    return int(np.argmax(masked))`}</pre>
+          <pre>{`# L111-117  canonical 数组 → 三张 0/1 平面
+def encode(game: Game) -> np.ndarray:
+    """(3, n, n) float32: current player's stones, opponent's stones, color plane."""
+    canon = game.canonical_board()          # 第 2 课的铁约:我方 = +1
+    cur = (canon == 1).astype(np.float32)   # 平面 0:我的子在哪些格子
+    opp = (canon == -1).astype(np.float32)  # 平面 1:对手的子在哪些格子
+    color = np.full_like(cur, 1.0 if game.current_player == BLACK else 0.0)
+    return np.stack([cur, opp, color])      # 平面 2:整张同一个数`}</pre>
         </div>
         <p className="mt-3">
-          部件的三键 <span className="mono">①选择 → ②展开 → ③回传</span> 正是
-          <span className="mono">select → needsEval/leafInput → expandAndBackup</span>
-          的协议;本站引擎 <span className="mono">learn/src/engine/mcts.ts</span>{" "}
-          与这份 Python 逐行镜像(Ledger 行号可对账)。唯一的界面差异:Python
-          端 Predictor 先做 softmax 再交概率,TS 端 evalFn 吐裸 logits、
-          由 expandAndBackup 内部做 softmax——数学同一件事。
+          就这一个函数:先做 canonical(第 2 课),再按「= +1 / = −1」切成两张 0/1
+          面,最后垫上颜色面。本站引擎{" "}
+          <span className="mono">learn/src/engine/game.ts</span> 的{" "}
+          <span className="mono">encode()</span> 与它逐行镜像(Ledger 行号可对账)。
         </p>
       </Ledger>
 
@@ -154,37 +167,48 @@ def best_action(self):
         onAllCorrect={() => pass("l07")}
         questions={[
           {
-            q: "PUCT 里先验 P 和 Q 各是什么角色?",
+            q: "一张 ±1 面(己 +1、敌 −1、空 0)到底哪里不够?",
             options: [
-              "P 管落子,Q 只管展示——最终下哪看 P",
-              "P 是向导(网络说先往哪看),Q 是裁判(几十次推演的历史平均,管往哪走)",
-              "两个都是裁判,谁大听谁的",
+              "数不够精确,应该改用小数",
+              "模板求和时,对方的负数会抵消己方的正数——最该报警的缠斗区得分反而被压低",
+              "一张面装不下 81 个格子,内存会溢出",
             ],
             answer: 1,
             explain:
-              "先验只负责「先看哪」,一次都没被看过的候选完全由 P 领路;但看过之后,账本(Q)越攒越厚,探索分衰减,最终谁被反复访问由 Q 和检验次数决定。全信 P 是被第一印象锁死,全信 Q 是一棵树上吊死。",
+              "格子还是那 81 个,信息也没少——坏在求和这道工序上:1 + (−1) + 1 = 1,比 1 + 0 + 1 = 2 还小。混在一张面里的敌我信号会互相拆台,拆开才能各报各的警。",
           },
           {
-            q: "手算例:叶估值 −1(叶子行棋方要输),为什么记到根的边上变成了 +1?",
+            q: "为什么拆成两张 0/1 面,而不是想办法修正一张 ±1 面?",
             options: [
-              "记账时出了正负号错误,实现上一直没改",
-              "黑白换手视角翻一次:叶子的「我输」正是根行棋方的「我赢」——每爬一层符号翻一次,账才站在每条边自己那一方的视角",
-              "因为终局直传把 −1 换成了 +1",
+              "一张面一个事实:己方面上 1 越多「我方在」越成立,对方面同理,谁也不抵消谁",
+              "为了把网络撑大一点,多两层参数",
+              "因为 0 和 1 在计算机里算得更快",
             ],
-            answer: 1,
+            answer: 0,
             explain:
-              "所有数值都站在「当前轮到谁」的视角:叶子轮到白,白输 −1;往上一层是黑的账,黑赢当然记 +1。回传每爬一层 v = −v 翻一次,整条链每条边的 Q 才都站在「选这条边的那一方」视角,不自相矛盾。",
+              "要点是「一个事实一张面」:己方三连 = 己方面得 3,对方三连 = 对方面得 3,一个阈值通吃两张面。空格不需要第三张——两张都是 0 的地方就是空,省一张是一张。",
           },
           {
-            q: "40 次推演跑完,为什么按访问数 N 落子,而不是挑 Q 最高的?",
+            q: "颜色面整张填同一个数,它补的是什么模板算不出来的东西?",
             options: [
-              "因为 N 计算起来更简单",
-              "因为 Q 分不清底气:只被看过 1 次、碰巧 +1 的候选,和被检验 20 次平均出来的 +1 长得一模一样;N 把先验方向、Q 成色、检验次数炖成一锅",
-              "因为 Q 有正有负,N 永远是正数",
+              "下一手该谁走(合法落点的位置)",
+              "「我执黑还是执白」这个全局身份——判断它要数全盘的子,3×3 小窗干不动",
+              "最近三手的落子历史",
             ],
             answer: 1,
             explain:
-              "Q 是平均,平均分不清「一次的运气」和「二十次的底气」。访问数高的手,是被先验领来、又被 Q 留下的手——三种信息它都收到。训练时干脆拿 N/ΣN 当老师(π),第 8 课的飞轮就从这里起转。",
+              "轮到谁走,encode 之前就知道,不用猜;历史,五子棋用不上。颜色面补的是身份:执黑执白下法该不一样,而「数子判断身份」恰恰是只看局部的小窗做不到的事——直接把答案贴进输入,不让网络自己去数。",
+          },
+          {
+            q: "地基篇回头看:把 ±1 拆成己/敌两张 0/1 面,用第 5 课的话说,相当于给格子值做了什么?",
+            options: [
+              "把数变小,网络算得更快",
+              "手工过了两个 ReLU:己面=ReLU(x)、敌面=ReLU(−x),在 x∈{+1,0,−1} 上逐值精确——三种身份各归各面,不再被钉上同一条数轴",
+              "把输入加一倍,网络参数也跟着翻倍",
+            ],
+            answer: 1,
+            explain:
+              "ReLU(+1)=1、ReLU(0)=0、ReLU(−1)=0——拆面正是把第 5 课的正、负两个半波手工做在输入端。±1 的病根在必单调:三种无序身份被钉上数轴,「空」永远夹在中间;拆面把「次序」拆没了,一个事实一张面。暗线:ReLU(t)+ReLU(−t)=|t|,和第 5 课切开 XOR 的是同一根恒等式。",
           },
         ]}
       />
@@ -192,510 +216,216 @@ def best_action(self):
   )
 }
 
-/* ============ 部件 · 单步模拟器(真引擎 + 真权重叶评估) ============ */
+/* ============ 部件 1 · 正负抵消计算器 ============ */
 
-type NetFn = (planes: number[][][]) => { logits: number[]; value: number }
+/** 横三连模板:中间一行 1 1 1,其余 0(与 archive/network.md 手算例同一张)。 */
+const TEMPLATE = [0, 0, 0, 1, 1, 1, 0, 0, 0]
 
-interface LeafView {
-  path: number[]
-  leaf: GameState
-}
-interface NetAns extends LeafView {
-  logits: number[] // 原样存着,③ 回传交给 expandAndBackup(softmax 在引擎内做)
-  value: number
-  top: { a: number; p: number }[]
-  ms: number
-}
+/** 窗口内容预设:名字描述中间一横排(模板上下两行是 0,乘什么都得 0)。
+ *  值:1 己 / −1 敌 / 0 空。 */
+const PRESETS: { name: string; mid: number[] }[] = [
+  { name: "己己己", mid: [1, 1, 1] },
+  { name: "己己空", mid: [1, 1, 0] },
+  { name: "己空己", mid: [1, 0, 1] },
+  { name: "己敌己", mid: [1, -1, 1] },
+  { name: "空己空", mid: [0, 1, 0] },
+  { name: "敌敌敌", mid: [-1, -1, -1] },
+]
 
-function Simulator() {
-  const [net, setNet] = useState<NetFn | null>(null)
-  const [eps, setEps] = useState<0 | 0.25>(0) // 根噪声开关
-  const [sims, setSims] = useState(0)
-  const [stage, setStage] = useState<0 | 1 | 2>(0) // 0 可①;1 已选可②;2 已评估可③
-  const [leaf, setLeaf] = useState<LeafView | null>(null)
-  const [ans, setAns] = useState<NetAns | null>(null)
-  const [termMsg, setTermMsg] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [ver, setVer] = useState(0)
-  const treeRef = useRef<SearchTree | null>(null)
-  // 切噪声开关时换种子:同一粒种子下噪声走向固定,换粒让读者多试几次
-  const seedRef = useRef(42)
+type View = "pm1" | "own" | "opp"
 
-  // 真权重就位 / 噪声切换 → 重建树,一切归零(种子取自 seedRef,可复现)
-  useEffect(() => {
-    let alive = true
-    loadWeights().then((w: WeightsJson) => {
-      if (!alive) return
-      setNet(() => loadNet(w))
-    })
-    return () => {
-      alive = false
-    }
-  }, [])
-  useEffect(() => {
-    if (!net) return
-    const cfg: MctsConfig = { cPuct: 1.5, dirichletEps: eps, dirichletAlpha: 0.3 }
-    treeRef.current = new SearchTree(POS, cfg, net, mulberry32(seedRef.current))
-    setSims(0)
-    setStage(0)
-    setLeaf(null)
-    setAns(null)
-    setTermMsg(null)
-    setVer((v) => v + 1)
-  }, [net, eps])
+function CancelCalc() {
+  const [preset, setPreset] = useState(3) // 默认「己敌己」,直接看抵消
+  const [view, setView] = useState<View>("pm1")
 
-  const stepSelect = () => {
-    const tree = treeRef.current
-    if (!tree || stage !== 0) return
-    tree.select()
-    setTermMsg(null)
-    if (tree.needsEval()) {
-      const path = tree.pendingActions() ?? []
-      const lf = tree.pendingState()
-      if (lf) setLeaf({ path, leaf: lf })
-      setStage(1)
-    } else {
-      // 终局:select 内部已按 ±1/0 直传记账
-      setLeaf(null)
-      setAns(null)
-      setSims((s) => s + 1)
-      setTermMsg("这次推演直接撞见终局:输赢已定,不用问网络——赢 +1 / 输 −1 / 和 0,直接记账(终局直传)。")
-    }
-    setVer((v) => v + 1)
-  }
+  // 3×3 窗口:只有中间一行有内容
+  const window9 = (() => {
+    const w = new Array<number>(9).fill(0)
+    const mid = PRESETS[preset].mid
+    w[3] = mid[0]
+    w[4] = mid[1]
+    w[5] = mid[2]
+    return w
+  })()
 
-  const stepExpand = () => {
-    const tree = treeRef.current
-    if (!tree || stage !== 1 || !leaf) return
-    const t0 = performance.now()
-    const { logits, value } = net!(tree.leafInput()) // 问真网络(策略头+价值头)
-    const ms = performance.now() - t0
-    const legal = legalMoves(leaf.leaf)
-    const probs = softmax(logits)
-    let sum = 0
-    const masked = probs.map((p, a) => p * legal[a])
-    for (const p of masked) sum += p
-    const top = masked
-      .map((p, a) => ({ a, p: sum > 1e-9 ? p / sum : p }))
-      .sort((x, y) => y.p - x.p)
-      .slice(0, 3)
-    setAns({ ...leaf, logits, value, top, ms })
-    setStage(2)
-  }
+  // 当前视角下窗口显示的值:±1 原样 / 己方面(只有 +1 变 1)/ 对方面(只有 −1 变 1)
+  const shown = window9.map((v) =>
+    view === "pm1" ? v : view === "own" ? (v === 1 ? 1 : 0) : v === -1 ? 1 : 0,
+  )
+  const products = TEMPLATE.map((t, i) => t * shown[i])
+  const sum = products.reduce((a, b) => a + b, 0)
 
-  const stepBackup = () => {
-    const tree = treeRef.current
-    if (!tree || stage !== 2 || !ans) return
-    tree.expandAndBackup(ans.logits, ans.value)
-    setAns(null)
-    setLeaf(null)
-    setStage(0)
-    setSims((s) => s + 1)
-    setVer((v) => v + 1)
-  }
-
-  const run = (k: number) => {
-    const tree = treeRef.current
-    if (!tree || stage !== 0 || busy) return
-    const n = Math.min(k, MAX_SIMS - sims)
-    if (n <= 0) return
-    setBusy(true)
-    setTermMsg(null)
-    setTimeout(() => {
-      tree.run(n) // 协议与三键单步同一份代码
-      setSims((s) => s + n)
-      setVer((v) => v + 1)
-      setBusy(false)
-    }, 30)
-  }
-
-  const tree = treeRef.current
-  const shown = ans ?? leaf
-  const rootN = tree ? Array.from(tree.root.N) : []
-  const rootW = tree ? Array.from(tree.root.W) : []
-  const rootPrior = tree?.root.prior ?? null
-  const rootV = tree ? tree.rootValue() : 0
-  let sumN = 0
-  for (const n of rootN) sumN += n
-  const topRows = rootN
-    .map((n, a) => ({ a, n }))
-    .filter((r) => r.n > 0)
-    .sort((x, y) => y.n - x.n)
-    .slice(0, 5)
-  const f5n = rootN[F5] ?? 0
-  const f5Share = sumN > 0 ? (f5n / sumN) * 100 : 0
+  const fmt = (v: number) => (v === 0 ? "·" : v > 0 ? `${v}` : `−${Math.abs(v)}`)
+  const viewName =
+    view === "pm1" ? "一张 ±1 面" : view === "own" ? "己方 0/1 面" : "对方 0/1 面"
+  const isPM1 = view === "pm1"
 
   return (
     <figure className="figure mt-8">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
-        <span className="mini-label">部件 · 单步模拟器:真引擎一步一步走</span>
-        <span className="num text-sm" style={{ color: "var(--fg-faint)" }} data-qa="sim-count-wrap">
-          已推演 <span data-qa="sim-count">{sims}</span> / 40 次
+        <span className="mini-label">部件 · 正负抵消计算器</span>
+        <span className="seg">
+          <button type="button" className={`seg-btn ${isPM1 ? "active" : ""}`}
+            onClick={() => setView("pm1")}>
+            一张 ±1 面
+          </button>
+          <button type="button" className={`seg-btn ${view === "own" ? "active" : ""}`}
+            onClick={() => setView("own")}>
+            己方 0/1 面
+          </button>
+          <button type="button" className={`seg-btn ${view === "opp" ? "active" : ""}`}
+            onClick={() => setView("opp")}>
+            对方 0/1 面
+          </button>
         </span>
       </div>
-
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
-        {/* 左:局面 + 步进控制 + 当前一步 */}
-        <div className="min-w-0 flex-1 md:max-w-[23rem]">
-          <div data-qa="pos-board">
-            <Board board={POS_FLAT} marks={[{ x: 5, y: 4, anchor: true }]} />
-          </div>
-          <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            教学手摆局面(黑 5 白 4 却轮黑,奇偶不合真实对局——搜索照样跑)。
-            朱砂环标的是 F5 = (5,4) = action 41:黑落这里,横排 (1,4)…(5,4) 成五,
-            一手赢棋。
-          </p>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" className="btn" disabled={!net || stage !== 0 || busy} onClick={stepSelect} data-qa="step-select">
-              ① 选择
-            </button>
-            <button type="button" className="btn" disabled={stage !== 1} onClick={stepExpand} data-qa="step-expand">
-              ② 展开
-            </button>
-            <button type="button" className="btn" disabled={stage !== 2} onClick={stepBackup} data-qa="step-backup">
-              ③ 回传
-            </button>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button type="button" className="btn" disabled={!net || stage !== 0 || busy || sims + 10 > MAX_SIMS} onClick={() => run(10)} data-qa="run10">
-              连跑 10 次
-            </button>
-            <button type="button" className="btn" disabled={!net || stage !== 0 || busy || sims >= 40} onClick={() => run(40 - sims)} data-qa="run40">
-              跑到 40 次
-            </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={!net || busy}
-              onClick={() => {
-                const cfg: MctsConfig = { cPuct: 1.5, dirichletEps: eps, dirichletAlpha: 0.3 }
-                seedRef.current += 1
-                treeRef.current = new SearchTree(POS, cfg, net!, mulberry32(seedRef.current))
-                setSims(0)
-                setStage(0)
-                setLeaf(null)
-                setAns(null)
-                setTermMsg(null)
-                setVer((v) => v + 1)
-              }}
-              data-qa="reset"
-            >
-              ↺ 重置
-            </button>
-          </div>
-          <div className="mt-2 flex items-center gap-2">
-            <span className="text-xs" style={{ color: "var(--fg-faint)" }}>
-              根噪声(先验掺 Dirichlet,ε=0.25)
-            </span>
-            <span className="seg" data-qa="noise-toggle">
-              <button type="button" className={`seg-btn ${eps === 0 ? "active" : ""}`} disabled={busy} onClick={() => { seedRef.current += 1; setEps(0) }}>
-                关
-              </button>
-              <button type="button" className={`seg-btn ${eps === 0.25 ? "active" : ""}`} disabled={busy} onClick={() => { seedRef.current += 1; setEps(0.25) }}>
-                开
-              </button>
-            </span>
-          </div>
-          <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            反面演示「偏见锁死」:关噪声时,搜索全信网络先验,只在它偏爱的几个点打转
-            ——偏见喂偏见。开了噪声,根先验掺 25% Dirichlet 随机(只掺根:整棵树乱抖
-            就没了章法)。对照着看账本的 <strong>P 列</strong>(先验):关噪声时 F5 永远
-            是 1.3%——同一网络同一局面,先验是死的;开了噪声,每次搜索的先验都不
-            一样(F5 在 1.0%~1.6% 间波动,别的点同理有涨有落)。这就是「多样性」
-            的本义:不是单方向抬高冷门点,而是让每局走不同的路。但 <strong>N 列</strong>
-            (访问)未必跟着摊——这局 Q 的历史账太强势,40 次预算仍会集中;噪声防
-            的是成千上万手自我对弈里的原地打转,不是一手里的均摊。切换即重置换
-            种子,可多试几次。
-          </p>
-
-          {busy && (
-            <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
-              推演中(每次模拟问一次网络,约 16 ms)……
-            </p>
-          )}
-          {stage === 0 && !busy && sims === 0 && (
-            <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-              按「① 选择」:模拟器从根沿 PUCT 挑一条路走到叶子;
-              「② 展开」问真网络要先验和估值;「③ 回传」记账、树长大一节。
-            </p>
-          )}
-
-          {shown && (
-            <div className="reveal-box mt-3" data-qa="leaf-box">
-              <div className="mini-label">
-                本次推演{stage === 1 ? "· 已选到叶,待问网络" : "· 网络已答,待记账"}
-              </div>
-              <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-                路线:根{shown.path.length === 0 ? "(根自身)" : shown.path.map(coord).join(" → ")}
-                ,停在没见过的局面(轮到{shown.leaf.current === 1 ? "黑" : "白"}):
-              </p>
-              <div className="mt-2 flex items-start gap-3">
-                <div className="w-28 flex-none">
-                  <Board board={shown.leaf.board.flat()} />
-                </div>
-                {ans ? (
-                  <div className="min-w-0 flex-1 text-xs" style={{ color: "var(--fg-muted)" }}>
-                    <p className="num" style={{ color: "var(--accent-deep)" }}>
-                      v = {ans.value >= 0 ? "+" : ""}{ans.value.toFixed(3)}
-                      <span className="ml-2 font-normal" style={{ color: "var(--fg-faint)" }}>
-                        ({ans.leaf.current === 1 ? "黑" : "白"}方视角,{ans.ms.toFixed(1)} ms)
-                      </span>
-                    </p>
-                    <p className="mt-1.5">先验 top3(这局面的向导):</p>
-                    <ol className="mt-1 space-y-1">
-                      {ans.top.map((t) => (
-                        <li key={t.a} className="l00-top-row" data-qa="prior-row">
-                          <span className="mono">{coord(t.a)}</span>
-                          <span className="prob-track">
-                            <span className="prob-fill" style={{ width: `${Math.min(100, t.p * 600)}%` }} />
-                          </span>
-                          <span className="num">{(t.p * 100).toFixed(1)}%</span>
-                        </li>
-                      ))}
-                    </ol>
-                    <p className="mt-1.5" style={{ color: "var(--fg-faint)" }}>
-                      回传时每爬一层翻一次符号,记进沿途每条边。
-                    </p>
-                  </div>
-                ) : (
-                  <p className="flex-1 text-xs" style={{ color: "var(--fg-faint)" }}>
-                    网络还没看这个局面——按「② 展开」。
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-          {termMsg && (
-            <div className="reveal-box mt-3 text-sm leading-relaxed" data-qa="term-msg">
-              {termMsg}
-            </div>
-          )}
+        <div className="flex min-w-0 flex-1 items-start justify-center gap-5 md:justify-start">
+          <MiniGrid9 label="模板" cells={TEMPLATE.map(fmt)} tint={TEMPLATE.map((t) => t !== 0)} />
+          <span className="mt-[4.7rem] text-lg" style={{ color: "var(--fg-faint)" }}>×</span>
+          <MiniGrid9 label={`窗口(${viewName})`} cells={shown.map(fmt)}
+            tint={shown.map((v) => v !== 0)} />
+          <span className="mt-[4.7rem] text-lg" style={{ color: "var(--fg-faint)" }}>=</span>
+          <MiniGrid9 label="9 个乘积" cells={products.map(fmt)}
+            tint={products.map((p) => p !== 0)} hot={products.map((p) => p < 0)} />
         </div>
-
-        {/* 右:树图 + 根账本 */}
         <div className="min-w-0 flex-1">
-          <div className="mini-label">搜索树(节点=局面,边=落子;边上 N/W/Q)</div>
-          <div className="mt-2 overflow-x-auto" data-qa="tree-wrap">
-            {!net || !tree ? (
-              <p className="text-sm" style={{ color: "var(--fg-muted)" }}>
-                正在加载真权重(weights-best.json,约 1.2 MB)……
-              </p>
-            ) : (
-              <TreeView root={tree.root} ver={ver} path={shown?.path ?? []} />
-            )}
+          <div className="mini-label">窗口内容(中间一横排)</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {PRESETS.map((p, i) => (
+              <button key={p.name} type="button" className={`btn ${i === preset ? "active" : ""}`}
+                onClick={() => setPreset(i)}>
+                {p.name}
+              </button>
+            ))}
           </div>
-
-          <div className="mt-5 border-t pt-3" style={{ borderColor: "var(--hairline)" }}>
-            <div className="mini-label">
-              根账本 · top 候选
-              {tree && sims > 0 && (
-                <span className="num ml-2" style={{ color: "var(--fg-faint)" }}>
-                  ΣN={sumN}(首次推演只展开根,不记边)v̄={rootV >= 0 ? "+" : ""}
-                  {rootV.toFixed(2)}(黑方视角)
-                </span>
-              )}
-            </div>
-            {sims === 0 ? (
-              <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
-                还没有账。第一次推演只把根展开(问一次网络,拿到 81 个先验);
-                从第二次起,每条边开始记 N 和 W。
-              </p>
-            ) : (
-              <div className="mt-2 space-y-1.5">
-                {topRows.map((r) => (
-                  <RootRow key={r.a} a={r.a} n={r.n} q={rootW[r.a] / r.n} share={r.n / sumN} prior={rootPrior?.[r.a] ?? 0} />
-                ))}
-                {f5n === 0 && <RootRow a={F5} n={0} q={0} share={0} prior={rootPrior?.[F5] ?? 0} f5 />}
-              </div>
-            )}
+          <div className="reveal-box mt-4">
+            <div className="mini-label">求和</div>
+            <p className="num mt-1.5 text-lg font-bold" data-qa="calc-sum">
+              {expr(products.slice(3, 6))} ={" "}
+              <span style={{ color: "var(--accent-deep)" }}>{sum}</span>
+            </p>
+            <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+              只列中间一行的三项——模板上下两行是 0,乘什么都得 0(乘积格里看得到)。
+            </p>
           </div>
-
-          {sims >= 40 && (
-            <div className="reveal-box mt-4 text-sm leading-relaxed" data-qa="f5-box">
-              <div className="mini-label">收敛演示 · F5 的真实战绩</div>
-              <p className="mt-1.5">
-                40 次推演后,F5((5,4),一手成五)的访问占比:{" "}
-                <span className="num font-bold" style={{ color: "var(--accent-deep)" }} data-qa="f5-share">
-                  {f5Share.toFixed(1)}%
-                </span>
-                <span className="num" style={{ color: "var(--fg-muted)" }}>
-                  (N={f5n}/ΣN={sumN})
-                </span>
-              </p>
-              <p className="mt-2" style={{ color: "var(--fg-muted)" }}>
-                诚实口径:explainer 用的教学评估器(棋形启发式替身)50 次能收到
-                93.9%;这里站着的是真权重——它才训到第 3 轮,F5 在它的先验里前面
-                压着 56 个点(它自己只有 0.012,最高的点 0.021),40 次预算全被
-                网络偏爱的点借走,一次也没轮到 F5。实测把预算拉到 770 次(先验
-                原样、种子固定),探索项才第一次把它送进来——进来之后终局直传,
-                Q 立刻 +1。
-                <strong>搜索放大直觉:直觉弱时,预算也追不回</strong>
-                ——这笔债,第 8 课的飞轮来还。
-              </p>
-            </div>
+          {isPM1 ? (
+            <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+              在 ±1 面上依次点「己己己 → 己空己 → 己敌己」:{"> "}
+              <span className="num font-bold">3</span> {"> "}
+              <span className="num font-bold">2</span> {"> "}
+              <span className="num font-bold">1</span>
+              ——中间那颗子从「空」换成「敌」,得分不升反降。这就是抵消:
+              报警器在最需要它的时候最哑。
+            </p>
+          ) : (
+            <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+              拆到 0/1 面上再看「己敌己」:己方面得 2(敌子不入场),对方面得 1
+              ——两个事实各报各的,不再互相拆台。切回「一张 ±1 面」对照。
+            </p>
           )}
         </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">部件 7-1</span>
-        真引擎 <span className="mono">SearchTree</span>(mcts.ts)三键走的是 select →
-        leafInput/evalFn → expandAndBackup 的真协议;叶评估器是{" "}
-        <span className="mono">loadNet</span>(真权重,weights-best.json)——
-        这是本站对 explainer 的升级:那边站着的还是启发式替身。随机数用固定序列
-        (mulberry32,初始种子 42,重置时顺次换粒),同一局面重放同一步,结果一致。
+        同一张横三连模板、同一批窗口,只换「面怎么切」。抵消发生在求和那一步——
+        亲手点一遍,胜过看十遍公式。
       </figcaption>
     </figure>
   )
 }
 
-function RootRow({
-  a,
-  n,
-  q,
-  share,
-  prior,
-  f5 = false,
-}: {
-  a: number
-  n: number
-  q: number
-  share: number
-  prior: number
-  f5?: boolean
-}) {
-  return (
-    <div className={`l00-top-row${f5 ? " opacity-70" : ""}`} data-qa={f5 ? "f5-row" : "root-row"}>
-      <span className="mono text-sm" style={{ minWidth: "3.4rem" }}>
-        {coord(a)}
-        {f5 && <span className="ml-1 text-[0.62rem]">(F5)</span>}
-      </span>
-      <span className="num text-xs" style={{ color: "var(--fg-faint)", minWidth: "3.2rem" }}>
-        P {(prior * 100).toFixed(1)}%
-      </span>
-      <span className="num text-xs" style={{ color: "var(--fg-faint)", minWidth: "2.6rem" }}>
-        N {n}
-      </span>
-      <span className="num text-xs" style={{ color: "var(--fg-faint)", minWidth: "3.4rem" }}>
-        Q {n > 0 ? (q >= 0 ? "+" : "") + q.toFixed(2) : "—"}
-      </span>
-      <span className="prob-track">
-        <span className="prob-fill" style={{ width: `${share * 100}%` }} />
-      </span>
-      <span className="num w-10 flex-none text-right text-xs" style={{ color: "var(--accent-deep)" }}>
-        {(share * 100).toFixed(1)}%
-      </span>
+/** 九宫格小表已提取到 lib/minigrid(第 8 课滑窗共用)。 */
+
+
+/** 「1×1 + 1×(−1) + 1×1」式的中间行展开(模板中间一行全是 1)。 */
+function expr(row: number[]): string {
+  const w = (v: number) => (v < 0 ? `(−${Math.abs(v)})` : `${v}`)
+  return row.map((v) => `1×${w(v)}`).join(" + ")
+}
+
+/* ============ 部件 2 · 同一局面,三张平面 ============ */
+
+function ThreePlanes() {
+  const [sel, setSel] = useState<number | null>(null)
+
+  const plane = (data: number[], name: string, sub: string, key: string) => (
+    <div key={key} className="min-w-0">
+      <div className="mini-label mb-1.5">{name}</div>
+      <div className="l03-rows inline-block">
+        <div className="flex">
+          <span className="l01-axis" />
+          {Array.from({ length: 9 }, (_, x) => (
+            <span key={x} className="l01-axis num w-[1.05rem] text-center">{x}</span>
+          ))}
+        </div>
+        {Array.from({ length: 9 }, (_, y) => (
+          <div key={y} className="flex">
+            <span className="l01-axis num leading-[1.05rem]">{y}</span>
+            {Array.from({ length: 9 }, (_, x) => {
+              const i = y * 9 + x
+              return (
+                <button key={x} type="button" className={`l03-cell ${data[i] ? "on" : ""} ${sel === i ? "sel" : ""}`}
+                  aria-label={`(${x},${y}) = ${data[i]}`}
+                  onClick={() => setSel(sel === i ? null : i)}>
+                  <span className="num">{data[i] ? 1 : "·"}</span>
+                </button>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+      <p className="mt-1.5 text-xs" style={{ color: "var(--fg-faint)" }}>{sub}</p>
     </div>
   )
-}
 
-/* ============ 树图:DFS 布局,节点 ≤ 推演数 + 1 ============ */
-
-interface LNode {
-  node: MctsNode
-  action: number | null // 从父节点过来的落子
-  parent: LNode | null
-  depth: number
-  children: LNode[]
-  x: number
-}
-
-const XGAP = 66
-const YGAP = 84
-const PADX = 58
-const PADY = 34
-
-function TreeView({ root, path }: { root: MctsNode; ver: number; path: number[] }) {
-  // 布局:叶子按 DFS 序排 x,父亲居子女中点(ver 仅为触发重渲染)
-  const all: LNode[] = []
-  let leafX = 0
-  const walk = (node: MctsNode, action: number | null, parent: LNode | null, depth: number): LNode => {
-    const t: LNode = { node, action, parent, depth, children: [], x: 0 }
-    all.push(t)
-    for (const a of Array.from(node.children.keys()).sort((p, q) => p - q))
-      t.children.push(walk(node.children.get(a)!, a, t, depth + 1))
-    t.x = t.children.length ? (t.children[0].x + t.children[t.children.length - 1].x) / 2 : leafX++
-    return t
-  }
-  walk(root, null, null, 0)
-
-  // 当前推演路径上的边(parent→child)集合
-  const onPath = new Set<LNode>()
-  let cur = all[0]
-  for (const a of path) {
-    const next = cur.children.find((c) => c.action === a)
-    if (!next) break
-    onPath.add(next)
-    cur = next
-  }
-
-  const width = Math.max(1, leafX) * XGAP + PADX * 2
-  const height = (Math.max(...all.map((n) => n.depth)) + 1) * YGAP + PADY * 2
-  const cx = (t: LNode) => PADX + t.x * XGAP
-  const cy = (t: LNode) => PADY + t.depth * YGAP
+  const selText =
+    sel === null
+      ? "点棋盘或任何一张面的格子——同一个交叉点在三张面上同时亮起来。"
+      : `你点的是 (${sel % 9},${Math.floor(sel / 9)}):己方面 ${
+          PLANE_OWN[sel] ? 1 : 0
+        }、对方面 ${PLANE_OPP[sel] ? 1 : 0}、颜色面 ${PLANE_COLOR[sel]}。`
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: "auto", display: "block", minWidth: 320 }}
-      role="img" aria-label="蒙特卡洛搜索树">
-      {all
-        .filter((t) => t.parent)
-        .map((t) => {
-          const p = t.parent!
-          const a = t.action!
-          const N = p.node.N[a]
-          const W = p.node.W[a]
-          const on = onPath.has(t)
-          return (
-            <g key={`e${t.depth}-${t.action}`}>
-              <line
-                x1={cx(p)} y1={cy(p)} x2={cx(t)} y2={cy(t)}
-                style={{ stroke: on ? "var(--accent)" : "var(--hairline-strong)" }}
-                strokeWidth={on ? 2.6 : 1.4}
-              />
-              <text
-                x={(cx(p) + cx(t)) / 2 + 4} y={(cy(p) + cy(t)) / 2 - 2}
-                fontSize={9.5} fontFamily="ui-monospace, SF Mono, Menlo, monospace"
-                style={{ fill: on ? "var(--accent-deep)" : "var(--fg-faint)" }}>
-                {coord(a)} N={N}
-              </text>
-              <text
-                x={(cx(p) + cx(t)) / 2 + 4} y={(cy(p) + cy(t)) / 2 + 9}
-                fontSize={9} fontFamily="ui-monospace, SF Mono, Menlo, monospace"
-                style={{ fill: "var(--fg-faint)" }}>
-                W={W >= 0 ? "+" : ""}{W.toFixed(1)} Q={N > 0 ? (W / N >= 0 ? "+" : "") + (W / N).toFixed(2) : "—"}
-              </text>
-            </g>
-          )
-        })}
-      {all.map((t, i) => {
-        const expanded = t.node.expanded
-        return (
-          <g key={`n${i}`} data-qa="tree-node">
-            {t.depth === 0 ? (
-              <>
-                <circle cx={cx(t)} cy={cy(t)} r={13} style={{ fill: "var(--board)" }} />
-                <text x={cx(t)} y={cy(t)} fontSize={11} textAnchor="middle" dominantBaseline="middle"
-                  style={{ fill: "var(--board-line)" }} fontWeight={700}>
-                  根
-                </text>
-              </>
-            ) : (
-              <circle
-                cx={cx(t)} cy={cy(t)} r={expanded ? 8.5 : 6}
-                style={{
-                  fill: expanded ? "var(--board-line)" : "var(--paper)",
-                  stroke: "var(--board-line)",
-                  strokeWidth: 1.6,
-                }}
-              />
-            )}
-            {onPath.has(t) && (
-              <circle cx={cx(t)} cy={cy(t)} r={t.depth === 0 ? 17 : 13}
-                fill="none" style={{ stroke: "var(--accent)" }} strokeWidth={2.4} />
-            )}
-          </g>
-        )
-      })}
-    </svg>
+    <figure className="figure mt-12">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">部件 · 同一局面,网络吃的三张面</span>
+      </div>
+      <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
+        <div className="min-w-0 flex-1 md:max-w-[22rem]">
+          <Board
+            board={OBJ}
+            swap
+            lastMove={{ x: 4, y: 4 }}
+            onCellClick={(x, y) => setSel(sel === y * 9 + x ? null : y * 9 + x)}
+            marks={sel !== null ? [{ x: sel % 9, y: Math.floor(sel / 9) }] : undefined}
+          />
+          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+            第 2 课的教学局面:5 黑 4 白、轮白。已拨到白方视角(己方 = 白)。
+          </p>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+            {selText}
+          </p>
+          <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+            数一数:己方面恰有 <strong className="num">4</strong> 个 1(白子),
+            对方面恰有 <strong className="num">5</strong> 个 1(黑子),
+            颜色面整张 <strong className="num">0</strong>(轮白走;要是轮黑,
+            这张面整张变 1)。黑白棋子消失,只剩「事实」本身。
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-start justify-center gap-6 border-t border-[color:var(--hairline)] p-4 md:p-5">
+        {plane(PLANE_OWN, "平面 0 · 己方子", "我的子在哪:4 个 1", "own")}
+        {plane(PLANE_OPP, "平面 1 · 对方子", "对手的子在哪:5 个 1", "opp")}
+        {plane(PLANE_COLOR, "平面 2 · 颜色面", "我执黑?整张同一个数:0", "color")}
+      </div>
+      <figcaption className="figure-cap">
+        <span className="cap-no">部件 7-2</span>
+        右侧三张 0/1 面与 <span className="mono">encode()</span> 的输出逐格一致
+        ——这就是网络每次「看到」的东西,叠成 (3, 9, 9)。
+      </figcaption>
+    </figure>
   )
 }

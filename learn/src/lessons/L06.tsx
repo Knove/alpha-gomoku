@@ -1,52 +1,18 @@
-/** 第 6 课 · 双头:一次前向两个答案。
- *  节拍:谜题(两个问题两个网络?)→ 揭晓(共用主干 / 两种读法 / softmax+tanh)→
- *  部件(自由摆子真前向:问网络 → 81 分数热力图 + top5 + 估值条,
- *  对照开关换 weights-untrained 未训练网:baseline,训练前冻结的随机初始化)
- *  → 对账(model.py 双头 + forward)→ 小测。 */
-import { useEffect, useMemo, useState } from "react"
+/** 第 6 课 · 回摊:责任怎么找到每个旋钮(地基篇 4/4)。
+ *  节拍:谜题(罚分怎么落到旋钮头上)→ 揭晓(还第 5 课的账/一层责任=原料/
+ *  变化率接力·手推数字例/梯度死/残差)→ 部件(两层账本:拖 w₁/w₂ 前向反向
+ *  联动,拖 w₁ 穿 0 看账目熄灯;lr=0.1 走一步)→ 对账(train.py backward)→ 小测。 */
+import { useState } from "react"
 import { Quiz, usePassLesson } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
-import Board from "../lib/board"
-import { encode, legalMoves, type GameState } from "../engine/game"
-import { loadNet, type WeightsJson } from "../engine/model"
-import { softmax } from "../engine/nn"
-import { loadWeights, loadWeightsUntrained } from "../lib/weights"
+import { twoLayer, twoLayerStep } from "../lib/foundations"
 
-/* 初始局面沿用第 4/5 课的三连(己方 (2,4)(3,4)(4,4),轮黑)——换你随手摆。 */
-const INIT: number[] = (() => {
-  const b = new Array<number>(81).fill(0)
-  for (const x of [2, 3, 4]) b[4 * 9 + x] = 1
-  return b
-})()
-
-interface AskResult {
-  probs: number[] // 空格上重新归一的 81 概率
-  top: { a: number; p: number }[] // top5
-  value: number // 当前行棋方视角
-  ms: number
-}
-
-/** 一次真前向:encode → loadNet 的函数(与本站引擎同一形状)。 */
-function askNet(
-  net: (input: number[][][]) => { logits: number[]; value: number },
-  st: GameState,
-): AskResult {
-  const t0 = performance.now()
-  const { logits, value } = net(encode(st))
-  const ms = performance.now() - t0
-  const legal = legalMoves(st)
-  const raw = softmax(logits)
-  let sum = 0
-  const probs = raw.map((p, a) => p * legal[a])
-  for (const p of probs) sum += p
-  if (sum > 1e-9) for (let a = 0; a < 81; a++) probs[a] /= sum
-  const top = probs
-    .map((p, a) => ({ a, p }))
-    .filter((t) => t.p > 0)
-    .sort((x, y) => y.p - x.p)
-    .slice(0, 5)
-  return { probs, top, value, ms }
-}
+/* 手推例固定:x=2(窗口里己方子数)、z=+1(这盘我赢);
+ * w₁、w₂ 可拖,默认正例 0.5 / 1.5。 */
+const X = 2
+const Z = 1
+const W1_0 = 0.5
+const W2_0 = 1.5
 
 export default function L06() {
   const pass = usePassLesson()
@@ -54,99 +20,100 @@ export default function L06() {
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
       <div className="eyebrow mb-3">第 6 课</div>
-      <h1 className="text-2xl font-bold">双头:一次前向两个答案</h1>
+      <h1 className="text-2xl font-bold">回摊:责任怎么找到每个旋钮</h1>
 
       <Quiz
         title="谜题 · 先选一个答案"
         questions={[
           {
-            q: "网络看完棋盘,要回答两个问题:81 格各下哪(逐点的分数),和整盘谁优(一个数)。怎么安排这套问答?",
+            q: "玩具网络答错了一道题:它说 v=1.5,真答案 z=1,罚了 0.25 分。这道题经过了两个旋钮(w₁、w₂)。这笔罚分,该怎么落到每个旋钮头上?",
             options: [
-              "两个网络:一个专门学「下哪」,一个专门学「谁优」",
-              "一个主干带两个头:主干看棋,末端分岔,一个头逐点读,一个头整盘读",
-              "一个网络答两次:先把 81 个分数算完,再用同一套权重算一遍估值",
+              "平摊:两个旋钮各记一半,公平",
+              "按影响摊:谁对答案的影响大,谁多担——「影响」怎么算,正是要揭晓的账法",
+              "不用摊:把两个旋钮都重置成随机数,重新来",
             ],
             answer: 1,
             explain:
-              "选 B。A 白学一遍:判断「这里该下」和「这局我优」,看的是同一批棋形——理解只该学一次。C 连「同一套权重读出两种形状的答案」都做不到:81 个分数和 1 个数,读法本身就不同,各配各的读法层(头)。A、C 的共同错误:把「两个问题」当成了「两份理解」。",
+              "选 B。平摊听着公平,实则冤枉:一个旋钮可能只顺路搭了句话,另一个才是主谋。按影响摊,要回答「这个旋钮拧一点点,罚分会变多少」——这正是第 3 课立的账目。账目怎么穿过层层运算找到每个旋钮,就是本课的「回摊」。答错了也照样放行。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>揭晓 · 一份理解,两种读法</h3>
+        <h3>揭晓 · 变化率接力,逐环相乘</h3>
         <p>
-          <strong>① 为什么共用主干。</strong>「这里该下」和「这局我优」问的是同一盘棋:
-          三连该堵、这边的势厚不厚,是同一批棋形证据。让两个网络各学各的,
-          等于把「认棋形」这门课学两遍——参数翻倍还在其次,更贵的是数据:
-          本站每一盘训练对局都是自己下出来的,一份理解教两个头,样本不涨价。
-          还有个顺带的好处:价值头逼着主干学「形势判断」,
-          这份理解策略头也拿去用——两个头互相当老师。
-        </p>
-        <p>
-          <strong>② 两个头,两种读法。</strong>主干(第 4、5 课那 7 层卷积)吐出
-          48 张 9×9 的理解地图;两个头各自把它读成自己的答案。
-          <em>策略头逐点读</em>:先用 1×1 卷积把 48 通道压到 2 通道
-          (1×1 不看邻域,只在每个交叉点上把 48 个数做一次加权求和),
-          再读成 81 个分数——每个格子一个,棋盘的空间分辨率一分不丢。
-          <em>价值头整盘读</em>:压到 1 通道后要把 81 个数收成 1 个数,落差太大,
-          中间先过一层 64 个数的台阶,再收成 1。逐点的归逐点,整盘的归整盘。
-        </p>
-        <p>
-          <strong>③ 两个收尾动作。</strong>策略头的 81 个原始分数(logits)要变成
-          「概率」:过 <span className="mono">softmax</span>——每个分数取 e
-          的这个次方,再各自除以总和。这里的 e 是一个固定的底数,约等于 2.718:
-          取 e 的次方就像 2³ = 2×2×2,只是把底数 2 换成 e——指数越大,结果
-          涨得越猛,分数差一点,次方之后就拉开一大截。手算三个分数:
+          <strong>先还第 5 课一笔账。</strong>纯乘纯加的两层,叠了白叠
+          (w₂·(w₁·x) = (w₂·w₁)·x)——所以真网络在每次求和之后都插一道弯折,
+          本课的例子就带弯折。<em>一层看子、一层看势</em>:第一层把「窗口里
+          己方子数」(x)折成形势分,第二层把形势分读成赢面 v。玩具长这样:
         </p>
         <div className="formula">
-          分数 <span className="hl">2</span> / 1 / 0 → e 的次方 7.39 / 2.72 / 1.00
-          (和 11.11)→ 除以和 <span className="hl">0.67</span> / 0.24 / 0.09
-          ——加起来正好 1
+          h = ReLU(w₁·x) → v = w₂·h → 罚分 = (v − z)²
         </div>
         <p>
-          每格占多少、全盘加起来 1,这就是部件里 top5 的那行百分比。价值头收成的
-          1 个数要过 <span className="mono">tanh</span>:把任意数压进 −1 到 +1
-          ——这是赢面标尺(+1 稳赢、−1 稳输、0 五五开),
-          和训练目标「终局我赢 +1 / 我输 −1」同一把尺子,误差才可比。
-          注意视角:两个头都站在<em>当前轮到的那一方</em>回答,黑白一换手,符号翻一次
-          (第 2 课的铁约,一路贯穿到这里)。
+          <strong>① 一层的责任 = 它烧的原料。</strong>第 4 课判过:每个权重的账,
+          恰好是它乘的那份输入。要把「罚分对 v 的账」摊回 w₁、w₂,只需沿网络
+          <em>反向</em>把变化率一环环乘回去——教科书叫链式法则,本站叫
+          <strong>变化率接力</strong>。
+        </p>
+        <p>
+          <strong>② 手推一遍(数字例)。</strong>x=2、w₁=0.5、w₂=1.5、z=1:
+          前向 s=w₁·x=<strong className="num">1</strong>,h=ReLU(1)=
+          <strong className="num">1</strong>,v=w₂·h=<strong className="num">1.5</strong>,
+          罚分=(1.5−1)²=<strong className="num">0.25</strong>。反向接力,
+          从罚分那头往回走四环:
+        </p>
+        <div className="formula">
+          ∂罚/∂w₁ = <span className="hl">2(v−z)</span> ×{" "}
+          <span className="hl">w₂</span> × <span className="hl">门</span> ×{" "}
+          <span className="hl">x</span> = 1 × 1.5 × 1 × 2 ={" "}
+          <span className="hl">3</span>
+          <br />∂罚/∂w₂ = 2(v−z) × h = 1 × 1 ={" "}
+          <span className="hl">1</span>
+        </div>
+        <p>
+          ReLU 的账拆两环看:<em>门</em>的账(正分区 1、负分区 0)乘<em>输入</em>的
+          账 x——负分区门关死,后面乘什么都归 0。这套接力沿 7 层真网络一路乘到
+          底,就是「反向传播」:每个 14.5 万旋钮各领到自己的账,一次算清。
+        </p>
+        <p>
+          <strong>③ 梯度死:整条样本失声。</strong>把 w₁ 拧到 −0.5:s=−1、
+          h=0、v=0、罚分=1——但两个旋钮的账<strong>全是 0</strong>:w₂ 的账
+          恰是它乘的 h(=0);接力链断在「门」那环。深栈里负分区串成片,
+          信号就死在里面。部件里拖 w₁ 穿过 0,亲眼看账目熄灯。
+        </p>
+        <p>
+          <strong>④ 深栈的另一种死:梯度消失,残差是解药。</strong>七层接力,
+          每环的账多半小于 1,连乘是几何衰减——账还没走到底层就缩成 0。
+          残差的捷径治这个:直路是加法,加法对输入的账恰好是
+          <strong className="num">1</strong>(精确,不随权重变);总账 =
+          直路的 1 + 弯路的 F′。F′ 学成 0(这块啥也不修)时总账正好 1,
+          信号原样通过;直路那份 1 不参与任何连乘——这才是「摔不死」的出处。
+          (不说「账恒 1」:总账 1+F′,F′ 为负时比 1 还小。)
         </p>
       </div>
 
-      <AskBoard />
+      <TwoLayerBook />
 
-      <Ledger title="model.py L39-46(两个头)、L48-55(forward)">
+      <Ledger title="train.py L48-55(一步训练:前向 → 罚分 → 回摊 → 拧旋钮)">
         <div className="codewalk">
-          <pre>{`# L39-46  末端分岔:两个小头,各接各的读法
-self.p_conv = nn.Conv2d(channels, 2, 1, bias=False)  # 策略头:1×1 压到 2 通道
-self.p_bn   = nn.BatchNorm2d(2)
-self.p_fc   = nn.Linear(2*n*n, n*n)                 # 展平 162 → 读成 81 个分数
-self.v_conv = nn.Conv2d(channels, 1, 1, bias=False)  # 价值头:1×1 压到 1 通道
-self.v_bn   = nn.BatchNorm2d(1)
-self.v_fc1  = nn.Linear(n*n, 64)                    # 81 → 64(落差大,先过一层台阶)
-self.v_fc2  = nn.Linear(64, 1)                      # 64 → 1`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# L48-55  forward:一次前向,两个答案
-def forward(self, x):
-    h = self.blocks(self.stem(x))              # 主干:一份理解
-    p = F.relu(self.p_bn(self.p_conv(h)))      # 策略头读 h → 81 个 logits
-    p = self.p_fc(p.reshape(-1, 2*n*n))
-    v = F.relu(self.v_bn(self.v_conv(h)))      # 价值头读同一个 h
-    v = F.relu(self.v_fc1(v.reshape(-1, n*n)))
-    v = torch.tanh(self.v_fc2(v)).squeeze(-1)  # → 1 个数,压进 −1..+1
-    return p, v`}</pre>
+          <pre>{`# train.py L48-55  你手推过的那套接力,torch 一行做完
+logits, v = net(x)                # 前向:14.5 万旋钮层层计票、弯折
+value_loss = F.mse_loss(v, target_z)
+policy_loss = -(target_pi * logp).sum(dim=-1).mean()
+loss = value_loss + policy_loss
+
+optimizer.zero_grad()             # 清掉上一批的旧账
+loss.backward()                   # 回摊:罚分沿网络反向接力,
+                                  #   每个旋钮各领到自己的账
+optimizer.step()                  # 下山:每个旋钮按账挪 lr 那么多`}</pre>
         </div>
         <p className="mt-3">
-          两处值得指认:①两个头读的是<em>同一个</em> <span className="mono">h</span>
-          ——「一份理解」在代码里就是这一个变量;②forward 里找不到 softmax:
-          归一化外置在训练(<span className="mono">log_softmax</span>)和推理(
-          <span className="mono">softmax</span>)各自进行,网络只吐裸 logits,一身轻。
-          本站引擎 <span className="mono">learn/src/engine/model.ts</span> 的{" "}
-          <span className="mono">loadNet</span> 与 forward 逐条对齐——网络的 TS 前向
-          与 torch 逐张量对拍(tests/parity.test.ts),部件里「问网络」按下的每一下
-          都是它算的。
+          <span className="mono">loss.backward()</span> 就是本课整套变化率接力
+          ——torch 把四环乘法沿 7 层网络自动接完,你手推的正是它内部的账法。
+          至此四门地基课闭环:第 3 课立「账目」、第 4 课给第一个公式
+          (∂z/∂w=x)、本课把账接成链——「学习」的全部机制你已经亲手算过一遍。
+          下一课回到棋盘,看这套机制怎么吃掉「三张平面」。
         </p>
       </Ledger>
 
@@ -155,37 +122,37 @@ def forward(self, x):
         onAllCorrect={() => pass("l06")}
         questions={[
           {
-            q: "为什么「下哪」和「谁优」共用一个主干,而不训练两个网络?",
+            q: "回摊(反向传播)在干什么?",
             options: [
-              "共用省内存,两个网络存不下",
-              "两个问题看的是同一批棋形:理解只学一遍,还能互相促进——价值头逼出的形势判断,策略头也用得上",
-              "因为只买得起一份棋谱数据",
+              "把罚分平分给每个旋钮",
+              "变化率接力:罚分对答案的账,沿网络反向逐环相乘,摊到每个旋钮——谁影响大,谁的账大",
+              "把答错的题存起来下次重考",
             ],
             answer: 1,
             explain:
-              "内存和数据都不是主因,主因是「同一份理解」:判断该下哪和判断谁占优,证据是同一批棋形。分开学等于「认棋形」这门课学两遍;合在一起,价值头学到的形势判断还反哺策略头。省参数省算力(一次前向两个答案)是顺带的账。",
+              "接力链四环:2(v−z) × w₂ × 门 × x——每一环都是「那边拧一点点,这边变多少」。平摊冤枉人:重置随机数更糟,把学到的全扔了。",
           },
           {
-            q: "策略头和价值头的读法差在哪?",
+            q: "w₁ 拧成负的(s<0),为什么两个旋钮的账全变 0?",
             options: [
-              "策略头整盘读成一个数,价值头逐点读成 81 个分数",
-              "策略头逐点读:压到 2 通道后读成 81 个分数;价值头整盘读:压到 1 通道,经 64 的台阶收成 1 个数",
-              "没有差别,只是输出的名字不同",
+              "因为负权重不许训练",
+              "ReLU 门关死:h=0,而 w₂ 的账恰是它乘的 h;接力链又断在「门」那环——这条样本对两个旋钮全部失声(梯度死)",
+              "因为罚分太小,四舍五入成 0",
             ],
             answer: 1,
             explain:
-              "逐点的归逐点、整盘的归整盘:策略头保住棋盘的空间分辨率(每格一个分数,第 1 课的 81 个动作一一对应);价值头要把整盘收成一个赢面数,81→64→1 的台阶就是给这个落差修的坡。",
+              "两层一起哑:往 w₂ 方向,v=w₂·h 里 h=0,拧 w₂ 纹丝不动;往 w₁ 方向,门的账是 0,接力断链。深栈里负分区串成片,整块网络学不到东西——这就是残差要治的第二种死(第一种是连乘衰减)。",
           },
           {
-            q: "价值头的输出为什么要过 tanh?",
+            q: "残差的「摔不死」,力量从哪来?",
             options: [
-              "为了让它看起来更像概率,加起来等于 1",
-              "为了压进 −1 到 +1:和训练目标(赢 +1 / 输 −1 / 和 0)同一把尺子,误差才可比,训练早期也不会飙出天文数字",
-              "为了让计算更快",
+              "捷径让网络层数变少、算得快",
+              "直路是加法,对输入的账恰好是 1、不参与连乘:总账=1+F′,F′ 学成 0 时信号原样通过",
+              "捷径自带一个额外的训练信号",
             ],
             answer: 1,
             explain:
-              "tanh 不做归一(那是策略头 softmax 的活),它定量纲:把任意数压进 [−1,+1] 的赢面标尺。尺子对了,(v−z)² 这笔误差才有意义;有界输出还顺带稳住了训练。想读成胜率,按 (v+1)/2 换算。",
+              "加法的账精确是 1——多深的栈,这份 1 都原样传到底。注意口径:总账是 1+F′ 不是「恒 1」,F′ 为负时总账比 1 还小;但直路那份 1 独立于所有权重,永不衰减,这才是底座的意义。",
           },
         ]}
       />
@@ -193,216 +160,206 @@ def forward(self, x):
   )
 }
 
-/* ============ 部件 · 自由摆子,问真网络 ============ */
+/* ============ 部件 6-1 · 两层账本:前向反向联动 + 走一步 ============ */
 
-function AskBoard() {
-  const [stones, setStones] = useState<number[]>(INIT)
-  const [cur, setCur] = useState<1 | -1>(1) // 下一手摆的颜色(也决定网络替谁看)
-  const [cmp, setCmp] = useState(false)
-  const [wBest, setWBest] = useState<WeightsJson | null>(null)
-  const [wUntrained, setWUntrained] = useState<WeightsJson | null>(null)
-  const [res, setRes] = useState<{ best: AskResult; untrained: AskResult | null } | null>(null)
+const boxStyle = {
+  border: "1px solid var(--hairline)",
+  borderRadius: 8,
+  padding: "0.3rem 0.55rem",
+  minWidth: "5.2rem",
+  textAlign: "center" as const,
+}
+const arrow = <span style={{ color: "var(--fg-faint)" }}>→</span>
 
-  useEffect(() => {
-    let alive = true
-    loadWeights().then((w) => alive && setWBest(w))
-    return () => {
-      alive = false
-    }
-  }, [])
-  useEffect(() => {
-    if (!cmp || wUntrained) return
-    let alive = true
-    loadWeightsUntrained().then((w) => alive && setWUntrained(w))
-    return () => {
-      alive = false
-    }
-  }, [cmp, wUntrained])
+function TwoLayerBook() {
+  const [w1, setW1] = useState(W1_0)
+  const [w2, setW2] = useState(W2_0)
+  const [last, setLast] = useState<{
+    b1: number
+    b2: number
+    n1: number
+    n2: number
+    before: ReturnType<typeof twoLayer>
+    after: ReturnType<typeof twoLayer>
+  } | null>(null)
 
-  const netBest = useMemo(() => (wBest ? loadNet(wBest) : null), [wBest])
-  const netUntrained = useMemo(() => (wUntrained ? loadNet(wUntrained) : null), [wUntrained])
+  const g = twoLayer(w1, w2, X, Z)
+  const dead = g.gate === 0
 
-  const state = useMemo<GameState>(() => {
-    const board = Array.from({ length: 9 }, (_, y) => stones.slice(y * 9, y * 9 + 9))
-    let n = 0
-    for (const v of stones) if (v !== 0) n++
-    return { board, current: cur, winner: 0, moveCount: n, lastMove: null }
-  }, [stones, cur])
-
-  const place = (x: number, y: number) => {
-    setRes(null) // 棋盘一变,旧答案作废——数字永远对得上眼前的局面
-    setStones((s) => {
-      const next = s.slice()
-      next[y * 9 + x] = cur
-      return next
-    })
+  const stepOnce = () => {
+    const before = twoLayer(w1, w2, X, Z)
+    const n = twoLayerStep(w1, w2, X, Z)
+    const after = twoLayer(n.w1, n.w2, X, Z)
+    setLast({ b1: w1, b2: w2, n1: n.w1, n2: n.w2, before, after })
+    setW1(n.w1)
+    setW2(n.w2)
+  }
+  const reset = () => {
+    setW1(W1_0)
+    setW2(W2_0)
+    setLast(null)
   }
 
-  const ask = () => {
-    if (!netBest) return
-    setRes({
-      best: askNet(netBest, state),
-      untrained: cmp && netUntrained ? askNet(netUntrained, state) : null,
-    })
-  }
-
-  const vb = res ? res.best.value * cur : 0 // 估值条按黑方视角换算
+  const f2 = (v: number) => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2)
+  const dim = dead ? { opacity: 0.45 } : undefined
 
   return (
     <figure className="figure mt-8">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
-        <span className="mini-label">部件 · 亲手摆局面,问真网络</span>
-        <label className="flex cursor-pointer items-center gap-2 text-sm" style={{ color: "var(--fg-muted)" }}>
-          <input
-            type="checkbox"
-            checked={cmp}
-            onChange={(e) => {
-              setCmp(e.target.checked)
-              setRes(null)
-            }}
-            data-qa="cmp-toggle"
-          />
-          对照未训练网络(baseline,随机初始化)
-        </label>
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">部件 · 两层账本:一层看子,一层看势</span>
       </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
-        <div className="min-w-0 flex-1 md:max-w-[24rem]">
-          <div data-qa="board-main">
-            <Board board={stones} onCellClick={place} heat={res?.best.probs} ghostPlayer={cur} />
+        <div className="min-w-0 flex-1 md:max-w-[17rem]">
+          <div className="mini-label">第一层 w₁(看子:子数折形势)−1 → 1</div>
+          <input type="range" min={-1} max={1} step={0.05} value={w1}
+            onChange={(e) => {
+              setW1(Number(e.target.value))
+              setLast(null)
+            }} aria-label="w1 滑杆"
+            style={{ ["--fill" as string]: `${((w1 + 1) / 2) * 100}%` }}
+            data-qa="w1-slider" />
+          <div className="mini-label mt-3">第二层 w₂(看势:形势读赢面)0 → 3</div>
+          <input type="range" min={0} max={3} step={0.05} value={w2}
+            onChange={(e) => {
+              setW2(Number(e.target.value))
+              setLast(null)
+            }} aria-label="w2 滑杆"
+            style={{ ["--fill" as string]: `${(w2 / 3) * 100}%` }}
+            data-qa="w2-slider" />
+
+          <div className="reveal-box mt-4">
+            <p className="text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+              x = 2(这扇窗里有 2 颗己方子)、z = +1(这盘我赢)。拖 w₁
+              <strong>穿过 0</strong>:看反向的账目列整体熄灯——那条样本
+              对两个旋钮全部失声,梯度死。
+            </p>
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="seg">
-              <button type="button" className={`seg-btn ${cur === 1 ? "active" : ""}`} onClick={() => setCur(1)}>
-                摆黑
-              </button>
-              <button type="button" className={`seg-btn ${cur === -1 ? "active" : ""}`} onClick={() => setCur(-1)}>
-                摆白
-              </button>
-            </span>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                setStones(new Array<number>(81).fill(0))
-                setRes(null)
-              }}
-            >
-              清空
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button type="button" className="btn primary" onClick={stepOnce} data-qa="step-btn">
+              走一步(lr = 0.1)
             </button>
-            <button type="button" className="btn primary" disabled={!netBest} onClick={ask} data-qa="ask-btn">
-              {netBest ? "问网络 →" : "正在加载真权重……"}
-            </button>
+            <button type="button" className="btn" onClick={reset}>↺ 回到手推例</button>
           </div>
-          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            红色热度 = 策略头的概率(空格上重新归一,已占格不参与)。摆子颜色同时是
-            「轮到谁」——网络站在它这边看棋盘、报估值。
-          </p>
+          {last && (
+            <div className="reveal-box mt-3 text-xs leading-relaxed" data-qa="step-readout">
+              <div className="mini-label">刚走的一步</div>
+              <p className="num mt-1">
+                w₁ {f2(last.b1)} → {f2(last.n1)}、w₂ {f2(last.b2)} → {f2(last.n2)}
+              </p>
+              <p className="num mt-0.5">
+                v {f2(last.before.v)} → {f2(last.after.v)}
+                {last.after.v < Z && last.before.v > Z ? "(跨过了 z=1)" : ""}、
+                罚分 {last.before.loss.toFixed(3)} → {last.after.loss.toFixed(3)}
+              </p>
+              <p className="mt-1 text-xs" style={{ color: "var(--fg-faint)" }}>
+                第 3 课的「步子大,跨过谷底」在这里现身:一步从 1.5 跨到 0.56,
+                罚分降了,但跨过头了——多走几步会自己荡回来。
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="min-w-0 flex-1">
-          {!res ? (
-            <p className="text-sm" style={{ color: "var(--fg-muted)" }}>
-              初始是第 4 课的三连局面。随手摆几个子(黑白随便,不用轮流),
-              按「问网络」:一次真前向(约 16 ms),两个头当场交卷。
-            </p>
-          ) : (
-            <>
-              <div className="mini-label">策略头 · 下哪:top5(坐标,概率)</div>
-              <ol className="mt-2 space-y-1.5">
-                {res.best.top.map((t) => (
-                  <li key={t.a} className="l00-top-row" data-qa="top-row">
-                    <span className="mono text-sm">({t.a % 9},{Math.floor(t.a / 9)})</span>
-                    <span className="prob-track">
-                      <span className="prob-fill" style={{ width: `${t.p * 100}%` }} />
-                    </span>
-                    <span
-                      className="num w-12 flex-none text-right text-sm"
-                      style={{ color: "var(--accent-deep)" }}
-                    >
-                      {(t.p * 100).toFixed(1)}%
-                    </span>
-                  </li>
-                ))}
-              </ol>
-
-              <div className="mt-4 border-t pt-3" style={{ borderColor: "var(--hairline)" }}>
-                <div className="mini-label">
-                  价值头 · 谁优:<span className="num">一次前向 {res.best.ms.toFixed(1)} ms</span>
-                </div>
-                <p className="num mt-1.5 text-2xl font-bold" data-qa="v-best" style={{ color: "var(--accent-deep)" }}>
-                  v = {res.best.value >= 0 ? "+" : ""}
-                  {res.best.value.toFixed(2)}
-                </p>
-                <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-                  {cur === 1 ? "黑" : "白"}方视角(轮到谁就替谁看);条上已换算到黑方视角。
-                </p>
-                <div className="l00-vbar mt-2">
-                  <i className="l00-vbar-zero" />
-                  <i className="l00-vbar-needle" style={{ left: `${((vb + 1) / 2) * 100}%` }} />
-                </div>
-                <div className="num mt-1 flex justify-between text-xs" style={{ color: "var(--fg-faint)" }}>
-                  <span>−1 白优</span>
-                  <span>0</span>
-                  <span>+1 黑优</span>
-                </div>
-              </div>
-            </>
-          )}
-
-          {cmp && (
-            <div className="mt-5 border-t pt-3" style={{ borderColor: "var(--hairline)" }} data-qa="cmp-panel">
-              <div className="mini-label">对照组 · 未训练(baseline:训练开始前冻结的随机初始化)</div>
-              {!res?.untrained ? (
-                <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
-                  {wUntrained ? "按「问网络」,两个网络同题同考。" : "正在加载未训练权重(独立分块,约 1.2 MB)……"}
-                </p>
-              ) : (
-                <div className="mt-2 flex flex-col gap-4 sm:flex-row">
-                  <div className="w-40 flex-none" data-qa="board-untrained">
-                    <Board board={stones} heat={res.untrained.probs} />
-                    <p className="num mt-1 text-center text-xs" style={{ color: "var(--fg-faint)" }}>
-                      未训练的热度
-                    </p>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <ol className="space-y-1.5">
-                      {res.untrained.top.slice(0, 3).map((t) => (
-                        <li key={t.a} className="l00-top-row" data-qa="top-row-untrained">
-                          <span className="mono text-sm">({t.a % 9},{Math.floor(t.a / 9)})</span>
-                          <span className="prob-track">
-                            <span className="prob-fill" style={{ width: `${t.p * 100}%` }} />
-                          </span>
-                          <span
-                            className="num w-12 flex-none text-right text-sm"
-                            style={{ color: "var(--fg-muted)" }}
-                          >
-                            {(t.p * 100).toFixed(1)}%
-                          </span>
-                        </li>
-                      ))}
-                    </ol>
-                    <p className="num mt-3 text-lg font-bold" data-qa="v-untrained" style={{ color: "var(--fg-muted)" }}>
-                      v = {res.untrained.value >= 0 ? "+" : ""}
-                      {res.untrained.value.toFixed(2)}
-                    </p>
-                  </div>
-                </div>
-              )}
-              <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                同一局面、同一架构,只差训练。未训练的(baseline,纯随机初始化):策略头近乎均匀撒胡椒面——
-                初始三连局面实测最热一格才 1.4%(均匀线 1/81≈1.2%),估值贴着 0
-                (实测 +0.02,换哪个局面都基本贴着 0 小幅漂)。训练过的(才训到第 3 轮)已有态度:
-                同一局面 v=−0.31、最热 2.0%——离懂棋还远,但已经不是均匀的噪声了。
-              </p>
+          <div className="mini-label">前向:x → s → h → v → 罚分</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2" data-qa="fwd-chain">
+            <div style={boxStyle}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>x 子数</div>
+              <div className="num font-bold">{X}</div>
             </div>
+            {arrow}
+            <div style={boxStyle}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>s = w₁·x</div>
+              <div className="num font-bold">{g.s.toFixed(2)}</div>
+            </div>
+            {arrow}
+            <div style={{ ...boxStyle, border: dead ? "1px solid var(--accent)" : "1px solid var(--hairline)" }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>h = ReLU(s)</div>
+              <div className="num font-bold" style={{ color: dead ? "var(--accent-deep)" : undefined }}>
+                {g.h.toFixed(2)}
+              </div>
+            </div>
+            {arrow}
+            <div style={boxStyle}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>v = w₂·h</div>
+              <div className="num font-bold">{g.v.toFixed(2)}</div>
+            </div>
+            {arrow}
+            <div style={{ ...boxStyle, borderColor: "var(--accent)" }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>罚分 (v−z)²</div>
+              <div className="num font-bold" style={{ color: "var(--accent-deep)" }}>
+                {g.loss.toFixed(3)}
+              </div>
+            </div>
+          </div>
+
+          <div className="mini-label mt-5">反向:罚分 → 接力四环 → w₁ 的账</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2" data-qa="bwd-chain">
+            <div style={{ ...boxStyle, ...dim }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>① 罚对 v</div>
+              <div className="num font-bold">2(v−z) = {g.dv.toFixed(2)}</div>
+            </div>
+            <span style={{ color: "var(--fg-faint)", ...dim }}>×</span>
+            <div style={{ ...boxStyle, ...dim }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>② v 对 h</div>
+              <div className="num font-bold">w₂ = {w2.toFixed(2)}</div>
+            </div>
+            <span style={{ color: "var(--fg-faint)", ...dim }}>×</span>
+            <div style={{ ...boxStyle, border: "1px solid var(--accent)" }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>③ 门 [s&gt;0]</div>
+              <div className="num font-bold" style={{ color: dead ? "var(--accent-deep)" : undefined }}>
+                {g.gate}
+              </div>
+            </div>
+            <span style={{ color: "var(--fg-faint)", ...dim }}>×</span>
+            <div style={{ ...boxStyle, ...dim }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>④ h 对 w₁</div>
+              <div className="num font-bold">x = {X}</div>
+            </div>
+            <span style={{ color: "var(--fg-faint)", ...dim }}>=</span>
+            <div style={{ ...boxStyle, borderColor: "var(--accent)", ...dim }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>w₁ 的账</div>
+              <div className="num font-bold" style={{ color: "var(--accent-deep)" }}>
+                {g.dW1.toFixed(2)}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2" data-qa="bwd-w2">
+            <span className="text-xs" style={{ color: "var(--fg-faint)" }}>
+              w₂ 的账(只两环:① × h) =
+            </span>
+            <div style={{ ...boxStyle, borderColor: "var(--accent)", ...dim }}>
+              <div className="num font-bold" style={{ color: "var(--accent-deep)" }}>
+                {g.dW2.toFixed(2)}
+              </div>
+            </div>
+          </div>
+
+          {dead ? (
+            <div className="reveal-box mt-4 text-sm leading-relaxed" data-qa="dead-banner"
+              style={{ borderColor: "var(--accent)", color: "var(--accent-deep)" }}>
+              <strong>门关死:梯度死。</strong>s ≤ 0,h=0——w₂ 的账恰是它乘的 h
+              (0),w₁ 的接力断在第③环(门=0)。这条样本对两个旋钮
+              <strong>全部失声</strong>:罚分明明是 {g.loss.toFixed(2)},
+              却没有一个旋钮知道该动。把 w₁ 拖回正的,账目复明。
+            </div>
+          ) : (
+            <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+              接力链四环相乘:{g.dv.toFixed(2)} × {w2.toFixed(2)} × 1 ×{" "}
+              {X} = {g.dW1.toFixed(2)}(w₁ 的账)。每一环都是「那边拧一点点,
+              这边变多少」——回摊没有任何魔法,只是把第 3、4 课的账目沿网络
+              反向乘了一遍。
+            </p>
           )}
         </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">部件 6-1</span>
-        真引擎 + 真权重:<span className="mono">encode</span>(game.ts)→{" "}
-        <span className="mono">loadNet</span>(model.ts)前向,softmax 在站内现算。
-        训练后 weights-best.json;对照 weights-untrained.json(baseline,独立懒加载,打开开关才下载)。
+        前向与反向同一套数(lib/foundations.ts 的{" "}
+        <span className="mono">twoLayer</span>):拖任何一个旋钮,两本账同时更新。
+        「走一步」是真梯度步 w ← w − 0.1×账;手推例的数字(3、1、0.25)与
+        揭晓里的算式逐位一致。
       </figcaption>
     </figure>
   )

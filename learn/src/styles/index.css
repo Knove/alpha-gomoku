@@ -1193,7 +1193,34 @@ details.account-book summary {
 .l03-rows > div:last-child > .l03-gray {
   border-bottom: 1px solid var(--hairline);
 }
-/* L04 · 真模板灰度格(权重 → 灰度,悬停看数值) */
+/* L04 · 计票器九宫格(窗口/权重/乘积,放得下 −0.31 这样的两位小数) */
+.l04-grid {
+  display: inline-block;
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+.l04-row {
+  display: flex;
+}
+.l04-cell {
+  width: 2.45rem;
+  height: 1.5rem;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid var(--hairline);
+  border-left: 1px solid var(--hairline);
+  font-size: 0.68rem;
+}
+.l04-cell.on {
+  background: var(--accent-wash);
+}
+.l04-cell.hot .num {
+  color: var(--accent-deep);
+  font-weight: 650;
+}
+/* L04(旧)· 真模板灰度格(权重 → 灰度,悬停看数值) */
 .l03-gray {
   display: block;
   width: 0.92rem;

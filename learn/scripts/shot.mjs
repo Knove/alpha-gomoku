@@ -7,8 +7,11 @@ const ROOT = new URL("..", import.meta.url).pathname
 const ROUTES = [
   ["prologue", "序"], ["l01", "1"], ["l02", "2"], ["l03", "3"], ["l04", "4"],
   ["l05", "5"], ["l06", "6"], ["l07", "7"], ["l08", "8"], ["l09", "9"],
-  ["graduation", "毕业"],
+  ["l10", "10"], ["l11", "11"], ["l12", "12"], ["l13", "13"], ["graduation", "毕业"],
 ]
+/** 懒加载真权重的课(截图前多等一会):新 l04 计票课 + 旧 l04-l07 挪成的 l08-l11 */
+const SLOW = new Set(["l04", "l08", "l09", "l10", "l11"])
+const ALL_IDS = ROUTES.map(([r]) => r).filter((r) => r !== "graduation")
 
 const vite = await (await import("vite")).createServer({
   root: ROOT, logLevel: "error", server: { port: 5197 },
@@ -23,18 +26,16 @@ mkdirSync("/tmp/learn-final", { recursive: true })
 for (const theme of ["light", "dark"]) {
   await page.goto(base)
   await page.waitForTimeout(200)
-  await page.evaluate((t) => {
+  await page.evaluate(({ ids, theme }) => {
     localStorage.clear()
-    localStorage.setItem("exp-theme", t)
-    // 全解锁,毕业沙盒可达
-    localStorage.setItem("learn-progress-v1", JSON.stringify({
-      unlocked: 10, quizPassed: Object.fromEntries(
-        ["prologue", "l01", "l02", "l03", "l04", "l05", "l06", "l07", "l08", "l09"].map((id) => [id, true]),
-      ),
+    localStorage.setItem("exp-theme", theme)
+    // 全解锁,毕业沙盒可达(进度 key 是 v2:课程 15 条,cap = 14)
+    localStorage.setItem("learn-progress-v2", JSON.stringify({
+      unlocked: 14, quizPassed: Object.fromEntries(ids.map((id) => [id, true])),
     }))
-  }, theme)
+  }, { ids: ALL_IDS, theme })
   // localStorage 是在 App 挂载后才写入的,而 App 只在挂载时读一次——
-  // 不 reload 的话,后面 10 张全截成锁定页
+  // 不 reload 的话,后面全截成锁定页
   await page.reload()
   await page.waitForTimeout(300)
   for (const [route, label] of ROUTES) {
@@ -42,7 +43,7 @@ for (const theme of ["light", "dark"]) {
     page.removeAllListeners("pageerror")
     page.on("pageerror", (e) => errors.push(String(e)))
     await page.goto(base + "#/" + route)
-    await page.waitForTimeout(route === "l04" || route === "l05" || route === "l06" || route === "l07" ? 900 : 400)
+    await page.waitForTimeout(SLOW.has(route) ? 900 : 400)
     await page.screenshot({ path: `/tmp/learn-final/${route}-${theme}.png`, fullPage: true })
     if (errors.length) console.log(`ERR ${route}(${theme}):`, errors.join("; "))
     else console.log(`ok  ${label} ${route} ${theme}`)

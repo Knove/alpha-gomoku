@@ -1,40 +1,32 @@
-/** 第 3 课 · 三张平面。
- *  节拍:谜题(一张 ±1 面够吗)→ 揭晓(正负抵消 → 拆两张 0/1 面 + 颜色面)→
- *  部件 1(正负抵消计算器:同一张横三连模板,不同窗口内容,亲手验证 3 > 2 > 1)→
- *  部件 2(同一局面三张平面并排,点格联动)→ 对账(game.py encode)→ 小测。 */
-import { useState } from "react"
+/** 第 3 课 · 旋钮:自己变准的机器(地基篇 1/4)。
+ *  节拍:谜题(棋力从哪来)→ 揭晓(查表破产/旋钮 vs 开关/账目/下山)→
+ *  部件 1(打靶器:双三局面 v=w·x,连续旋钮的抛物线 vs 开关档位没坡)→
+ *  部件 2(下山步进器:lr 滑杆真实梯度步,双刻度线 0.125/0.25)→
+ *  对账(train.py optimizer)→ 小测。 */
+import { useEffect, useState } from "react"
 import { Quiz, usePassLesson } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import Board from "../lib/board"
-import { MiniGrid9 } from "../lib/minigrid"
+import { linGrad, linStep } from "../lib/foundations"
 
-/* 教学局面:与第 2 课同一盘(5 黑 4 白共 9 手,轮白),
- * 部件 2 用它渲染「网络眼里的三张平面」。 */
-const BLACK_POS: [number, number][] = [
-  [2, 4],
-  [3, 4],
-  [4, 4],
-  [4, 5],
-  [3, 5],
-]
-const WHITE_POS: [number, number][] = [
-  [5, 4],
-  [4, 3],
-  [5, 3],
-  [6, 4],
-]
-const OBJ: number[] = (() => {
+/* 教学局面:己方双三——横 (2,4)(3,4)(4,4) + 竖 (4,4)(4,5)(4,6),
+ * 盘面读数 x=2(我方已成三连的个数),真答案 z=+1(双活三几乎必赢)。
+ * 一个旋钮的玩具估价器:v = w·x,罚分 (v−z)²。 */
+const X = 2
+const Z = 1
+const W0 = 0 // 下山起点:旋钮随机初始位置
+const STOPS = [-1, -0.4, 0.2, 0.8, 1.4, 2] // 开关版的六个档位(故意躲开谷底 0.5)
+
+const DUAL: number[] = (() => {
   const b = new Array<number>(81).fill(0)
-  for (const [x, y] of BLACK_POS) b[y * 9 + x] = 1
-  for (const [x, y] of WHITE_POS) b[y * 9 + x] = -1
+  for (const [x, y] of [
+    [2, 4], [3, 4], [4, 4], [4, 5], [4, 6],
+  ] as [number, number][])
+    b[y * 9 + x] = 1
   return b
 })()
 
-/* 部件 2 的三张平面(轮白:canonical 里白的变 +1,即「己方」)。
- * 与 game.ts encode() 同一套切法,数据在本组件里现算,改动棋盘即联动。 */
-const PLANE_OWN = OBJ.map((v) => (v === -1 ? 1 : 0)) // 轮白:白子 = 己方
-const PLANE_OPP = OBJ.map((v) => (v === 1 ? 1 : 0))
-const PLANE_COLOR = new Array<number>(81).fill(0) // 轮白 → 整张 0
+const loss = (w: number) => (w * X - Z) * (w * X - Z)
 
 export default function L03() {
   const pass = usePassLesson()
@@ -42,84 +34,87 @@ export default function L03() {
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
       <div className="eyebrow mb-3">第 3 课</div>
-      <h1 className="text-2xl font-bold">三张平面</h1>
+      <h1 className="text-2xl font-bold">旋钮:自己变准的机器</h1>
 
       <Quiz
         title="谜题 · 先选一个答案"
         questions={[
           {
-            q: "己方子记 +1、对方子记 −1、空记 0——第 2 课那张 canonical 数组已经这么记了。现在要把它喂给网络的第一层:一群只会做「对应相乘再求和」的小算子。这三个数挤在一张面里,够吗?",
+            q: "要造一台会下棋的机器,「棋力」从哪来?",
             options: [
-              "够了:三种身份三个数,信息一点没丢",
-              "不够:己方子和对方子要分开放——正负混在一张面里会坏事",
-              "不够:光有当前棋盘还不行,还得把之前每一步的历史都记进去",
+              "背棋谱:把每种局面的最好一步都存进一张大表,下棋时查表",
+              "写规则:请高手把棋理一条条写成「如果…就…」的代码",
+              "长旋钮:造一台带一排可以连续拧动的旋钮的机器,让它自己把旋钮拧到对",
             ],
-            answer: 1,
+            answer: 2,
             explain:
-              "选 B。先给 A 记半分:信息确实一点没丢——丢的不是信息,是计算上的好用性。坏在哪儿,这课亲手算一遍就见分晓:求和的时候,对方的 −1 会把己方的 +1 抵消掉。至于 C——五子棋没有吃子、没有提子再放回的循环,当前棋盘就是全部状态,不用背历史(围棋才要,揭晓里带一句)。",
+              "选 C。A 马上算给你看:存不下,存得下也没有泛化;B 是老一代棋类 AI 的路,能写几条,写不全,而且「这个棋形值几分」它答不了;C 把「棋力」变成「旋钮的位置」——本站 14.5 万个旋钮,没有一个位置是人设的,全是机器自己从输赢里拧出来的。答错了也照样放行。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>揭晓 · 正负会在求和里抵消</h3>
+        <h3>揭晓 · 四步:存不下、旋钮、账目、下山</h3>
         <p>
-          先用一句话认识网络第一层的干法(下一课专讲):一张张 3×3 的
-          <strong>模板</strong>——9 个数,盖在棋盘某个 3×3 的小窗上,对应格子相乘,
-          再把 9 个乘积加成一个数。比如这张「横三连模板」:中间一行是 1、1、1,
-          其余是 0,它量的是「这个窗口的中间一横排,是不是我的子」。
+          <strong>① 查表法,存不下也没泛化。</strong>81 格每格三种填法,光格子
+          组合就有 3<sup>81</sup>≈4×10<sup>38</sup> 种——合法局面只是其中一部分
+          (黑白子数受轮次约束:黑子数等于白子数、或恰好多一),量级也小不到哪去:
+          查表存不下。更要命的是就算存得下——<em>泛化</em>,白话说是没见过的局面
+          也<strong>答得靠谱</strong>;查表法每条记录是孤岛,没见过的局面上只能
+          瞎猜。不是泛化差,是没有泛化这回事。
         </p>
         <p>
-          现在拿它去算一张 ±1 面。同一张模板,盖在「己、敌、己」三格上:
-          1×1 + 1×(−1) + 1×1 = <strong>1</strong>;盖在「己、空、己」上:
-          1 + 0 + 1 = <strong>2</strong>。看出问题了吗——
-          <strong>贴身缠斗、最该报警的地方,得分反而比太平无事还低</strong>。
-          对方那颗子在求和里永远在做<em>负功</em>,把警报往小里压;
-          要是盖在「敌、敌、敌」上更糟:得分 −3,同一张模板对 +3 和 −3
-          没法用同一个阈值报警。
+          <strong>② 长旋钮:用结构假设换样本效率。</strong>与其记住每个局面,
+          不如装一台「只会少数几种运算、带一群可拧旋钮」的机器,让几千盘棋把
+          旋钮从随机位置拧到对。旋钮的行话叫<strong>权重、参数</strong>——序里
+          「14.5 万参数」说的就是 14.5 万个旋钮。旋钮必须是<em>连续</em>的:
+          对照「如果…就…」那种<em>开关</em>——开关的参数是离散档位,拧半格,
+          输出纹丝不动;你站在一档上,不知道旁边一档更高还是更低,只能挨个试。
+          连续旋钮不一样:拧一点点,输出就变一点点,而且变多少有数——
+          「往哪边拧更好」永远有答案。(注意:坏的不是开关这道工序,是把开关
+          <em>当旋钮拧</em>。第 5 课你会见到 ReLU,它内部就有一道「如果」,
+          但它是对连续输入做判断,旋钮照样连续可拧。)
         </p>
         <p>
-          解法:<strong>一种身份一张面,每张只放 0 和 1</strong>。
-          平面 0「己方子」:我的子在哪些格子,是 1、不是 0;平面 1「对方子」:
-          对手的子在哪些格子。空格不用单独一张——两张同为 0 的地方就是空。
-          拆开之后,每张面上「1 越多 = 这个事实越成立」:「己方横三连」就是
-          「己方面上这张模板得 3」,一个阈值就报警,谁也不抵消谁。
+          <strong>③ 账目:拧一点点,变多少。</strong>拧一点点 Δw,输出变 Δv;
+          Δv 除以 Δw,就是「v 对 w 的账」,记作{" "}
+          <span className="mono">∂v/∂w</span>——教科书叫导数,本站叫账目,
+          因为它回答的正是「这一格拧多少,账变多少」。再立一对词:{""}
+          <em>误差</em>是差值 v−z(机器说 v,真答案 z);<em>损失</em>是罚分
+          (v−z)²——平方让正负误差都变罚分、差得越远罚得越狠。v 和 z 用的是序里
+          那把尺子(+1 稳赢、−1 稳输);z 要终局才揭晓(第 12 课正式讲它怎么来),
+          本课先当已知数用。
         </p>
         <p>
-          还差最后一张「<strong>颜色面</strong>」:整张填同一个数——轮黑走全 1,
-          轮白走全 0。canonical 把黑白抹平了,可「我执黑还是执白」是要紧事
-          (先手可以下得更凶):这个信息理论上读得出来——轮黑走时双方子数相等,
-          轮白走时黑多一子——但「数一遍全盘的子」恰恰是 3×3 小窗干不动的活。
-          颜色面就是把这个全局事实直接贴到每个格子上。三张叠起来,形状
-          <span className="mono">(3, 9, 9)</span>,读作「3 张 9×9」。
-        </p>
-        <p>
-          顺带回答谜题里的选项 C:AlphaGo Zero 下围棋要用 17 张输入平面,
-          因为围棋有「打劫」——同一张棋盘图对应不同的合法走法,必须回看历史。
-          五子棋没有吃子,当前棋盘就是全部状态,三张够。
+          <strong>④ 下山:蒙着眼找谷底。</strong>损失对 w 是一条开口向上的抛物线,
+          谷底就是「拧到这,罚分最小」。训练就是蒙眼下山:看不见整条曲线,只摸得着
+          脚下的坡(账目),每一步沿坡向下的方向挪一点,挪多少乘上一个
+          <em>学习率 lr</em>。步子太小,磨蹭;步子太大,一步跨过谷底来回震荡,
+          甚至越荡越高——多大算太大,下面部件里亲手拖。
         </p>
       </div>
 
-      <CancelCalc />
+      <TargetRange />
 
-      <ThreePlanes />
+      <Descender />
 
-      <Ledger title="game.py(encode,L111-117)">
+      <Ledger title="train.py L13-20(optimizer:真训练的下山器)">
         <div className="codewalk">
-          <pre>{`# L111-117  canonical 数组 → 三张 0/1 平面
-def encode(game: Game) -> np.ndarray:
-    """(3, n, n) float32: current player's stones, opponent's stones, color plane."""
-    canon = game.canonical_board()          # 第 2 课的铁约:我方 = +1
-    cur = (canon == 1).astype(np.float32)   # 平面 0:我的子在哪些格子
-    opp = (canon == -1).astype(np.float32)  # 平面 1:对手的子在哪些格子
-    color = np.full_like(cur, 1.0 if game.current_player == BLACK else 0.0)
-    return np.stack([cur, opp, color])      # 平面 2:整张同一个数`}</pre>
+          <pre>{`# train.py L13-20  真训练用的「下山器」:SGD + 动量
+def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
+    return torch.optim.SGD(
+        net.parameters(),          # 全部旋钮(14.5 万个)
+        lr=cfg.lr,                 # 步子大小:0.01(config.py)
+        momentum=0.9,              # 顺着既有方向多稳一步
+        weight_decay=1e-4,         # 拉住权重的野蛮生长
+        nesterov=True,
+    )`}</pre>
         </div>
         <p className="mt-3">
-          就这一个函数:先做 canonical(第 2 课),再按「= +1 / = −1」切成两张 0/1
-          面,最后垫上颜色面。本站引擎{" "}
-          <span className="mono">learn/src/engine/game.ts</span> 的{" "}
-          <span className="mono">encode()</span> 与它逐行镜像(Ledger 行号可对账)。
+          本课部件里你拧的是<strong>一个</strong>旋钮;真训练一次拧 14.5 万个——
+          每个都按自己的账目挪一点,算法还是同一个下山(SGD,梯度下降)。动量、
+          权重衰减是工程上的加固,不改变「沿账目下山」这个主旋律。
+          每一步具体怎么算,第 6 课摊开。
         </p>
       </Ledger>
 
@@ -128,37 +123,37 @@ def encode(game: Game) -> np.ndarray:
         onAllCorrect={() => pass("l03")}
         questions={[
           {
-            q: "一张 ±1 面(己 +1、敌 −1、空 0)到底哪里不够?",
+            q: "查表法(把每种局面的答案都存起来)的两个死穴是?",
             options: [
-              "数不够精确,应该改用小数",
-              "模板求和时,对方的负数会抵消己方的正数——最该报警的缠斗区得分反而被压低",
-              "一张面装不下 81 个格子,内存会溢出",
-            ],
-            answer: 1,
-            explain:
-              "格子还是那 81 个,信息也没少——坏在求和这道工序上:1 + (−1) + 1 = 1,比 1 + 0 + 1 = 2 还小。混在一张面里的敌我信号会互相拆台,拆开才能各报各的警。",
-          },
-          {
-            q: "为什么拆成两张 0/1 面,而不是想办法修正一张 ±1 面?",
-            options: [
-              "一张面一个事实:己方面上 1 越多「我方在」越成立,对方面同理,谁也不抵消谁",
-              "为了把网络撑大一点,多两层参数",
-              "因为 0 和 1 在计算机里算得更快",
+              "存不下(组合数 10^38 量级),而且没有泛化——没见过的局面上只能瞎猜",
+              "查表太慢,和存不下",
+              "表格会坏,而且要人工维护",
             ],
             answer: 0,
             explain:
-              "要点是「一个事实一张面」:己方三连 = 己方面得 3,对方三连 = 对方面得 3,一个阈值通吃两张面。空格不需要第三张——两张都是 0 的地方就是空,省一张是一张。",
+              "存不下是硬件账,没泛化是机制账:每条记录是孤岛,记录之间互不相干——局面稍微没见过,表帮不上任何忙。泛化=没见过的局面也答得靠谱,查表法连「泛化差」都算不上,是没有泛化这回事。",
           },
           {
-            q: "颜色面整张填同一个数,它补的是什么模板算不出来的东西?",
+            q: "为什么参数要做成「连续旋钮」,而不能是开关档位?",
             options: [
-              "下一手该谁走(合法落点的位置)",
-              "「我执黑还是执白」这个全局身份——判断它要数全盘的子,3×3 小窗干不动",
-              "最近三手的落子历史",
+              "连续的数在计算机里存得更省",
+              "开关拧半格输出纹丝不动——账目处处为 0,「往哪边拧更好」没有答案;连续旋钮拧一点点变一点点,坡永远有方向",
+              "开关写代码更难",
             ],
             answer: 1,
             explain:
-              "轮到谁走,encode 之前就知道,不用猜;历史,五子棋用不上。颜色面补的是身份:执黑执白下法该不一样,而「数子判断身份」恰恰是只看局部的小窗做不到的事——直接把答案贴进输入,不让网络自己去数。",
+              "部件里对照过:开关版只有六个孤零零的档位,站在这档看不见隔壁的高低;连续版的抛物线处处有坡,账目负就往右拧、正就往左拧,蒙着眼也走得 downhill。顺带:开关永远差着一截——最好的档位罚分 0.36,连续旋钮能拧到 0。",
+          },
+          {
+            q: "学习率(lr)调大会怎样?",
+            options: [
+              "只会更快收敛,越大越好",
+              "步子大了会跨过谷底:先来回震荡,过了临界值(本课部件里 x=2 时是 0.25)误差反而每步放大——发散上天",
+              "没有影响,只是一个写法习惯",
+            ],
+            answer: 1,
+            explain:
+              "下山步进器拖过:lr=0.05 稳步;0.125 恰好一步到谷底;0.2 跨谷来回但误差在缩;0.25 永久来回;0.35 越荡越高。误差每步乘的因子是 (1−2·lr·x²)——它的绝对值小于 1 才收敛。学习率是「步子大小」四个字的全部数学。",
           },
         ]}
       />
@@ -166,215 +161,341 @@ def encode(game: Game) -> np.ndarray:
   )
 }
 
-/* ============ 部件 1 · 正负抵消计算器 ============ */
+/* ============ 部件 3-1 · 打靶器:连续旋钮 vs 开关档位 ============ */
 
-/** 横三连模板:中间一行 1 1 1,其余 0(与 archive/network.md 手算例同一张)。 */
-const TEMPLATE = [0, 0, 0, 1, 1, 1, 0, 0, 0]
+/** 抛物线图几何(L 上限 9.5,谷底 w*=Z/X=0.5) */
+const CW = 300, CH = 176, CPL = 38, CPR = 12, CPT = 12, CPB = 30
+const WMIN = -1, WMAX = 2, LMAX = 9.5
+const xOf = (w: number) => CPL + ((w - WMIN) / (WMAX - WMIN)) * (CW - CPL - CPR)
+const yOf = (l: number) => CH - CPB - (Math.min(l, LMAX) / LMAX) * (CH - CPT - CPB)
+const CURVE = Array.from({ length: 61 }, (_, i) => {
+  const w = WMIN + (i / 60) * (WMAX - WMIN)
+  return `${xOf(w).toFixed(1)},${yOf(loss(w)).toFixed(1)}`
+}).join(" ")
 
-/** 窗口内容预设:名字描述中间一横排(模板上下两行是 0,乘什么都得 0)。
- *  值:1 己 / −1 敌 / 0 空。 */
-const PRESETS: { name: string; mid: number[] }[] = [
-  { name: "己己己", mid: [1, 1, 1] },
-  { name: "己己空", mid: [1, 1, 0] },
-  { name: "己空己", mid: [1, 0, 1] },
-  { name: "己敌己", mid: [1, -1, 1] },
-  { name: "空己空", mid: [0, 1, 0] },
-  { name: "敌敌敌", mid: [-1, -1, -1] },
-]
+function TargetRange() {
+  const [mode, setMode] = useState<"knob" | "switch">("knob")
+  const [w, setW] = useState(0) // 连续旋钮位置
+  const [stop, setStop] = useState(2) // 开关档位下标(默认 0.2)
 
-type View = "pm1" | "own" | "opp"
-
-function CancelCalc() {
-  const [preset, setPreset] = useState(3) // 默认「己敌己」,直接看抵消
-  const [view, setView] = useState<View>("pm1")
-
-  // 3×3 窗口:只有中间一行有内容
-  const window9 = (() => {
-    const w = new Array<number>(9).fill(0)
-    const mid = PRESETS[preset].mid
-    w[3] = mid[0]
-    w[4] = mid[1]
-    w[5] = mid[2]
-    return w
-  })()
-
-  // 当前视角下窗口显示的值:±1 原样 / 己方面(只有 +1 变 1)/ 对方面(只有 −1 变 1)
-  const shown = window9.map((v) =>
-    view === "pm1" ? v : view === "own" ? (v === 1 ? 1 : 0) : v === -1 ? 1 : 0,
-  )
-  const products = TEMPLATE.map((t, i) => t * shown[i])
-  const sum = products.reduce((a, b) => a + b, 0)
-
-  const fmt = (v: number) => (v === 0 ? "·" : v > 0 ? `${v}` : `−${Math.abs(v)}`)
-  const viewName =
-    view === "pm1" ? "一张 ±1 面" : view === "own" ? "己方 0/1 面" : "对方 0/1 面"
-  const isPM1 = view === "pm1"
+  const v = w * X
+  const l = loss(w)
+  const g = linGrad(w, X, Z) // 脚下的账(坡)
+  const sw = STOPS[stop]
+  const swLoss = loss(sw)
 
   return (
     <figure className="figure mt-8">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
-        <span className="mini-label">部件 · 正负抵消计算器</span>
-        <span className="seg">
-          <button type="button" className={`seg-btn ${isPM1 ? "active" : ""}`}
-            onClick={() => setView("pm1")}>
-            一张 ±1 面
+        <span className="mini-label">部件 · 打靶器:一个旋钮的估价器</span>
+        <span className="seg" data-qa="range-mode">
+          <button type="button" className={`seg-btn ${mode === "knob" ? "active" : ""}`}
+            onClick={() => setMode("knob")}>
+            连续旋钮
           </button>
-          <button type="button" className={`seg-btn ${view === "own" ? "active" : ""}`}
-            onClick={() => setView("own")}>
-            己方 0/1 面
-          </button>
-          <button type="button" className={`seg-btn ${view === "opp" ? "active" : ""}`}
-            onClick={() => setView("opp")}>
-            对方 0/1 面
+          <button type="button" className={`seg-btn ${mode === "switch" ? "active" : ""}`}
+            onClick={() => setMode("switch")}>
+            开关档位
           </button>
         </span>
       </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
-        <div className="flex min-w-0 flex-1 items-start justify-center gap-5 md:justify-start">
-          <MiniGrid9 label="模板" cells={TEMPLATE.map(fmt)} tint={TEMPLATE.map((t) => t !== 0)} />
-          <span className="mt-[4.7rem] text-lg" style={{ color: "var(--fg-faint)" }}>×</span>
-          <MiniGrid9 label={`窗口(${viewName})`} cells={shown.map(fmt)}
-            tint={shown.map((v) => v !== 0)} />
-          <span className="mt-[4.7rem] text-lg" style={{ color: "var(--fg-faint)" }}>=</span>
-          <MiniGrid9 label="9 个乘积" cells={products.map(fmt)}
-            tint={products.map((p) => p !== 0)} hot={products.map((p) => p < 0)} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="mini-label">窗口内容(中间一横排)</div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {PRESETS.map((p, i) => (
-              <button key={p.name} type="button" className={`btn ${i === preset ? "active" : ""}`}
-                onClick={() => setPreset(i)}>
-                {p.name}
-              </button>
-            ))}
+        <div className="min-w-0 flex-1 md:max-w-[19rem]">
+          <div data-qa="dual-board">
+            <Board board={DUAL} lastMove={{ x: 4, y: 6 }} />
           </div>
-          <div className="reveal-box mt-4">
-            <div className="mini-label">求和</div>
-            <p className="num mt-1.5 text-lg font-bold" data-qa="calc-sum">
-              {expr(products.slice(3, 6))} ={" "}
-              <span style={{ color: "var(--accent-deep)" }}>{sum}</span>
+          <div className="reveal-box mt-3 text-sm leading-relaxed">
+            <div className="mini-label">盘面读数 x 与真答案 z</div>
+            <p className="num mt-1.5">
+              x = <strong>2</strong>(我方已成三连的个数:横一条 + 竖一条)
+              <br />z = <strong>+1</strong>(双活三几乎必赢——这盘「我」赢)
             </p>
             <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-              只列中间一行的三项——模板上下两行是 0,乘什么都得 0(乘积格里看得到)。
+              玩具估价器只有一个旋钮:v = w·x(读数乘权重)。x、z 固定,
+              全部的自由度就是这个 w——拧它,看罚分 (v−z)² 怎么变。
             </p>
           </div>
-          {isPM1 ? (
-            <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-              在 ±1 面上依次点「己己己 → 己空己 → 己敌己」:{"> "}
-              <span className="num font-bold">3</span> {"> "}
-              <span className="num font-bold">2</span> {"> "}
-              <span className="num font-bold">1</span>
-              ——中间那颗子从「空」换成「敌」,得分不升反降。这就是抵消:
-              报警器在最需要它的时候最哑。
-            </p>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <svg viewBox={`0 0 ${CW} ${CH}`} data-qa="target-curve"
+            style={{ width: "100%", height: "auto", display: "block", maxWidth: 340 }}>
+            <line x1={CPL} y1={CH - CPB} x2={CW - CPR} y2={CH - CPB}
+              style={{ stroke: "var(--hairline-strong)" }} strokeWidth={1} />
+            {[1, 4, 9].map((p) => (
+              <g key={p}>
+                <line x1={CPL} y1={yOf(p)} x2={CW - CPR} y2={yOf(p)}
+                  style={{ stroke: "var(--hairline)" }} strokeWidth={0.7} />
+                <text x={CPL - 5} y={yOf(p) + 3} fontSize={9} textAnchor="end"
+                  className="num" style={{ fill: "var(--fg-faint)" }}>{p}</text>
+              </g>
+            ))}
+            {[-1, 0, 0.5, 1, 2].map((t) => (
+              <text key={t} x={xOf(t)} y={CH - CPB + 13} fontSize={9.5} textAnchor="middle"
+                className="num" style={{ fill: "var(--fg-faint)" }}>
+                w={t > 0 ? "+" + t : t}
+              </text>
+            ))}
+            {/* 谷底标线:w* = z/x = 0.5 */}
+            <line x1={xOf(0.5)} y1={yOf(0)} x2={xOf(0.5)} y2={yOf(9)}
+              strokeDasharray="4 4" style={{ stroke: "var(--fg-faint)" }} strokeWidth={1} />
+            <text x={xOf(0.5)} y={CPT + 8} fontSize={9.5} textAnchor="middle" className="num"
+              style={{ fill: "var(--fg-faint)" }}>
+              谷底 w* = z/x = 0.5
+            </text>
+            <polyline points={CURVE} fill="none" style={{ stroke: "var(--accent)" }} strokeWidth={2} />
+
+            {mode === "knob" ? (
+              <g data-qa="knob-dot">
+                <circle cx={xOf(w)} cy={yOf(l)} r={6} style={{ fill: "var(--accent-deep)" }} />
+                <text x={xOf(w)} y={yOf(l) - 10} fontSize={10} textAnchor="middle" className="num"
+                  style={{ fill: "var(--accent-deep)" }}>
+                  {l.toFixed(2)}
+                </text>
+              </g>
+            ) : (
+              <g data-qa="switch-dots">
+                {STOPS.map((s, i) => (
+                  <circle key={s} cx={xOf(s)} cy={yOf(loss(s))} r={i === stop ? 6 : 4}
+                    style={{
+                      fill: i === stop ? "var(--accent-deep)" : "var(--fg-faint)",
+                    }} />
+                ))}
+                <text x={xOf(sw)} y={yOf(swLoss) - 10} fontSize={10} textAnchor="middle"
+                  className="num" style={{ fill: "var(--accent-deep)" }}>
+                  {swLoss.toFixed(2)}
+                </text>
+              </g>
+            )}
+          </svg>
+
+          {mode === "knob" ? (
+            <div data-qa="knob-panel">
+              <div className="mini-label mt-2">拧 w(−1 → 2)</div>
+              <input type="range" min={-1} max={2} step={0.01} value={w}
+                onChange={(e) => setW(Number(e.target.value))} aria-label="w 滑杆"
+                style={{ ["--fill" as string]: `${((w + 1) / 3) * 100}%` }}
+                data-qa="knob-slider" />
+              <div className="reveal-box mt-3">
+                <p className="num">
+                  v = w·x = {(w).toFixed(2)}×2 ={" "}
+                  <strong style={{ color: "var(--accent-deep)" }}>{v.toFixed(2)}</strong>
+                  {"   "}罚分 = (v−z)² ={" "}
+                  <strong style={{ color: "var(--accent-deep)" }}>{l.toFixed(3)}</strong>
+                </p>
+                <p className="num mt-1.5">
+                  脚下的账 ∂罚/∂w ={" "}
+                  <strong>{g >= 0 ? "+" : ""}{g.toFixed(1)}</strong>
+                  <span className="ml-2 font-normal" style={{ color: "var(--fg-muted)" }}>
+                    {g < 0 ? "账是负的 → 往右拧,罚分降" : g > 0 ? "账是正的 → 往左拧,罚分降" : "账是 0 → 你正踩在谷底"}
+                  </span>
+                </p>
+              </div>
+              <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+                拖到任何位置,账目都告诉你下一步该往哪边拧——这就是「连续」买的
+                东西:整条曲线处处有坡,蒙眼也走得下山。
+              </p>
+            </div>
           ) : (
-            <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-              拆到 0/1 面上再看「己敌己」:己方面得 2(敌子不入场),对方面得 1
-              ——两个事实各报各的,不再互相拆台。切回「一张 ±1 面」对照。
-            </p>
+            <div data-qa="switch-panel">
+              <div className="mini-label mt-2">档位(只能整档跳,没有中间)</div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {STOPS.map((s, i) => (
+                  <button key={s} type="button"
+                    className={`btn ${i === stop ? "active" : ""}`}
+                    onClick={() => setStop(i)} data-qa="stop-btn">
+                    {s > 0 ? "+" + s : s}
+                  </button>
+                ))}
+              </div>
+              <div className="reveal-box mt-3">
+                <p className="num">
+                  站在 {sw} 档:v = {(sw * X).toFixed(2)}、罚分 ={" "}
+                  <strong style={{ color: "var(--accent-deep)" }}>{swLoss.toFixed(3)}</strong>
+                </p>
+                <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+                  六个档位里最好的是 ±0.36(0.2 档和 0.8 档并列)——连续旋钮能拧到的
+                  0.5(罚分 0)它们永远差一截。更糟的是:站在 0.2 档,不跳过去试,
+                  你不知道 0.8 档更好还是更糟——<strong>档位之间没有坡,账是 0</strong>。
+                </p>
+              </div>
+            </div>
           )}
         </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">部件 3-1</span>
-        同一张横三连模板、同一批窗口,只换「面怎么切」。抵消发生在求和那一步——
-        亲手点一遍,胜过看十遍公式。
+        同一条罚分曲线,两种机器:连续旋钮处处有坡(账目=坡),开关只有六个孤点。
+        训练要的「自己变准」,买的是左边那种机器。
       </figcaption>
     </figure>
   )
 }
 
-/** 九宫格小表已提取到 lib/minigrid(第 4 课滑窗共用)。 */
+/* ============ 部件 3-2 · 下山步进器:lr 与三种走法 ============ */
 
+const MAX_STEPS = 200
+/** 发散时 w 可能到 10^95 量级(200 步封顶永不溢出)——大数用科学计数法 */
+const fmtW = (v: number) => (Math.abs(v) < 1000 ? v.toFixed(3) : v.toExponential(2))
 
-/** 「1×1 + 1×(−1) + 1×1」式的中间行展开(模板中间一行全是 1)。 */
-function expr(row: number[]): string {
-  const w = (v: number) => (v < 0 ? `(−${Math.abs(v)})` : `${v}`)
-  return row.map((v) => `1×${w(v)}`).join(" + ")
+function zoneOf(lr: number): string {
+  if (lr < 0.125) return "稳步下山(每步误差乘因子 |1−2·lr·x²|<1,单调缩)"
+  if (Math.abs(lr - 0.125) < 1e-9) return "一步到谷底(因子恰好 0)"
+  if (lr < 0.25) return "跨谷来回震荡,误差每步翻号但在缩——仍在收敛"
+  if (Math.abs(lr - 0.25) < 1e-9) return "因子 = −1:永久来回,卡死在谷两侧"
+  return "发散上天:因子绝对值 > 1,误差每步放大"
 }
 
-/* ============ 部件 2 · 同一局面,三张平面 ============ */
+function Descender() {
+  const [lr, setLr] = useState(0.05)
+  const [hist, setHist] = useState<number[]>([W0])
+  const [running, setRunning] = useState(false)
 
-function ThreePlanes() {
-  const [sel, setSel] = useState<number | null>(null)
+  // 换 lr 就从头走:因子变了,旧轨迹混在一起看不清形态
+  const setLrReset = (v: number) => {
+    setLr(v)
+    setHist([W0])
+    setRunning(false)
+  }
+  const stepOnce = () => {
+    setHist((h) =>
+      h.length >= MAX_STEPS ? h : [...h, linStep(h[h.length - 1], X, Z, lr)],
+    )
+  }
+  const reset = () => {
+    setHist([W0])
+    setRunning(false)
+  }
 
-  const plane = (data: number[], name: string, sub: string, key: string) => (
-    <div key={key} className="min-w-0">
-      <div className="mini-label mb-1.5">{name}</div>
-      <div className="l03-rows inline-block">
-        <div className="flex">
-          <span className="l01-axis" />
-          {Array.from({ length: 9 }, (_, x) => (
-            <span key={x} className="l01-axis num w-[1.05rem] text-center">{x}</span>
-          ))}
-        </div>
-        {Array.from({ length: 9 }, (_, y) => (
-          <div key={y} className="flex">
-            <span className="l01-axis num leading-[1.05rem]">{y}</span>
-            {Array.from({ length: 9 }, (_, x) => {
-              const i = y * 9 + x
-              return (
-                <button key={x} type="button" className={`l03-cell ${data[i] ? "on" : ""} ${sel === i ? "sel" : ""}`}
-                  aria-label={`(${x},${y}) = ${data[i]}`}
-                  onClick={() => setSel(sel === i ? null : i)}>
-                  <span className="num">{data[i] ? 1 : "·"}</span>
-                </button>
-              )
-            })}
-          </div>
-        ))}
-      </div>
-      <p className="mt-1.5 text-xs" style={{ color: "var(--fg-faint)" }}>{sub}</p>
-    </div>
-  )
+  useEffect(() => {
+    if (!running) return
+    if (hist.length >= MAX_STEPS) {
+      setRunning(false)
+      return
+    }
+    const t = setTimeout(stepOnce, 110)
+    return () => clearTimeout(t)
+  })
 
-  const selText =
-    sel === null
-      ? "点棋盘或任何一张面的格子——同一个交叉点在三张面上同时亮起来。"
-      : `你点的是 (${sel % 9},${Math.floor(sel / 9)}):己方面 ${
-          PLANE_OWN[sel] ? 1 : 0
-        }、对方面 ${PLANE_OPP[sel] ? 1 : 0}、颜色面 ${PLANE_COLOR[sel]}。`
+  const n = hist.length - 1
+  const wNow = hist[hist.length - 1]
+  const factor = 1 - 2 * lr * X * X
+  const flew = Math.abs(wNow) > WMAX + 0.5 || wNow < WMIN - 0.5
 
   return (
     <figure className="figure mt-12">
       <div className="px-4 pt-4 sm:px-5">
-        <span className="mini-label">部件 · 同一局面,网络吃的三张面</span>
+        <span className="mini-label">部件 · 下山步进器:蒙眼下山的三种走法</span>
       </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
-        <div className="min-w-0 flex-1 md:max-w-[22rem]">
-          <Board
-            board={OBJ}
-            swap
-            lastMove={{ x: 4, y: 4 }}
-            onCellClick={(x, y) => setSel(sel === y * 9 + x ? null : y * 9 + x)}
-            marks={sel !== null ? [{ x: sel % 9, y: Math.floor(sel / 9) }] : undefined}
-          />
-          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            第 2 课的教学局面:5 黑 4 白、轮白。已拨到白方视角(己方 = 白)。
-          </p>
-        </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-            {selText}
-          </p>
-          <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-            数一数:己方面恰有 <strong className="num">4</strong> 个 1(白子),
-            对方面恰有 <strong className="num">5</strong> 个 1(黑子),
-            颜色面整张 <strong className="num">0</strong>(轮白走;要是轮黑,
-            这张面整张变 1)。黑白棋子消失,只剩「事实」本身。
+          <svg viewBox={`0 0 ${CW} ${CH}`} data-qa="descend-curve"
+            style={{ width: "100%", height: "auto", display: "block", maxWidth: 340 }}>
+            <line x1={CPL} y1={CH - CPB} x2={CW - CPR} y2={CH - CPB}
+              style={{ stroke: "var(--hairline-strong)" }} strokeWidth={1} />
+            {[1, 4, 9].map((p) => (
+              <line key={p} x1={CPL} y1={yOf(p)} x2={CW - CPR} y2={yOf(p)}
+                style={{ stroke: "var(--hairline)" }} strokeWidth={0.7} />
+            ))}
+            <line x1={xOf(0.5)} y1={yOf(0)} x2={xOf(0.5)} y2={yOf(9)}
+              strokeDasharray="4 4" style={{ stroke: "var(--fg-faint)" }} strokeWidth={1} />
+            <text x={xOf(0.5)} y={CPT + 8} fontSize={9.5} textAnchor="middle" className="num"
+              style={{ fill: "var(--fg-faint)" }}>
+              谷底 0.5
+            </text>
+            <polyline points={CURVE} fill="none" style={{ stroke: "var(--accent)" }}
+              strokeWidth={2} opacity={0.55} />
+            {/* 轨迹:相邻步连线(飞出画面的点由 svg 根部裁掉) */}
+            <polyline data-qa="descend-trace"
+              points={hist
+                .map((wv) => `${xOf(wv).toFixed(1)},${yOf(loss(wv)).toFixed(1)}`)
+                .join(" ")}
+              fill="none" style={{ stroke: "var(--fg-faint)" }} strokeWidth={1} />
+            {hist.map((wv, i) =>
+              wv >= WMIN - 0.4 && wv <= WMAX + 0.4 ? (
+                <circle key={i} cx={xOf(wv)} cy={yOf(loss(wv))} r={i === n ? 5 : 1.6}
+                  style={{ fill: i === n ? "var(--accent-deep)" : "var(--fg-faint)" }} />
+              ) : null,
+            )}
+            {flew && (
+              <text x={CW - CPR - 4} y={CPT + 10} fontSize={10} textAnchor="end"
+                style={{ fill: "var(--accent-deep)" }}>
+                已飞出画面 →
+              </text>
+            )}
+          </svg>
+          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+            还是打靶器那道题(x=2、z=+1,起点 w=0):每按一步,w ← w − lr×账。
+            小圆点是走过的位置,线是相邻两步的连线——lr=0.2 时那条来回跨谷的
+            折线,就是「步子太大」的样子。
           </p>
         </div>
-      </div>
-      <div className="flex flex-wrap items-start justify-center gap-6 border-t border-[color:var(--hairline)] p-4 md:p-5">
-        {plane(PLANE_OWN, "平面 0 · 己方子", "我的子在哪:4 个 1", "own")}
-        {plane(PLANE_OPP, "平面 1 · 对方子", "对手的子在哪:5 个 1", "opp")}
-        {plane(PLANE_COLOR, "平面 2 · 颜色面", "我执黑?整张同一个数:0", "color")}
+
+        <div className="min-w-0 flex-1 md:max-w-[19rem]">
+          <div className="mini-label">学习率 lr(0 → 0.5)</div>
+          <input type="range" min={0} max={0.5} step={0.005} value={lr}
+            onChange={(e) => setLrReset(Number(e.target.value))} aria-label="lr 滑杆"
+            style={{ ["--fill" as string]: `${(lr / 0.5) * 100}%` }}
+            data-qa="lr-slider" />
+          {/* 双刻度线:0.125(一步到谷底)与 0.25(临界) */}
+          <div className="num relative mt-1 h-7 text-xs" style={{ color: "var(--fg-faint)" }}>
+            <span className="absolute" style={{ left: `${(0.125 / 0.5) * 100}%`, top: 0, transform: "translateX(-50%)" }}>
+              |<br />0.125
+            </span>
+            <span className="absolute" style={{ left: "0.5%" }}>0</span>
+            <span className="absolute" style={{ left: `${(0.25 / 0.5) * 100}%`, top: 0, transform: "translateX(-50%)", color: "var(--accent-deep)" }}>
+              |<br />0.25
+            </span>
+            <span className="absolute" style={{ right: 0 }}>0.5</span>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="text-xs" style={{ color: "var(--fg-faint)" }}>预设</span>
+            {[0.05, 0.2, 0.35].map((p) => (
+              <button key={p} type="button"
+                className={`btn ${Math.abs(lr - p) < 1e-9 ? "active" : ""}`}
+                onClick={() => setLrReset(p)} data-qa="lr-preset">
+                {p}
+              </button>
+            ))}
+            <span className="ml-auto" />
+            <button type="button" className="btn" disabled={n >= MAX_STEPS}
+              onClick={stepOnce} data-qa="step-btn">
+              走一步
+            </button>
+            <button type="button" className={`btn ${running ? "active" : ""}`}
+              onClick={() => setRunning((r) => !r)} data-qa="auto-btn">
+              {running ? "⏸ 暂停" : "▶ 自动"}
+            </button>
+            <button type="button" className="btn" onClick={reset}>↺ 重置</button>
+          </div>
+          <div className="reveal-box mt-3">
+            <p className="num">
+              第 <strong>{n}</strong> 步:w ={" "}
+              <strong style={{ color: "var(--accent-deep)" }}>{fmtW(wNow)}</strong>
+              {"   "}罚分 = <strong>{fmtW(loss(wNow))}</strong>
+            </p>
+            <p className="num mt-1.5">
+              误差每步乘的因子:1 − 2·lr·x² ={" "}
+              <strong>{factor >= 0 ? "+" : ""}{factor.toFixed(3)}</strong>
+            </p>
+            <p className="mt-1.5 text-xs leading-relaxed" data-qa="zone"
+              style={{ color: "var(--fg-muted)" }}>
+              {zoneOf(lr)}
+            </p>
+          </div>
+          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+            两条刻度线的来历:x=2 时 0&lt;lr&lt;0.125,因子在 0 与 1 之间(稳步);
+            lr=0.125 因子恰 0(一步到谷);0.125 到 0.25 因子在 −1 与 0 之间
+            (翻号但缩);0.25 因子 −1(永久来回);再大就发散。真实训练 lr=0.01,
+            深深踩在「稳步」区——稳,但慢,几千盘棋慢慢磨。
+          </p>
+        </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">部件 3-2</span>
-        右侧三张 0/1 面与 <span className="mono">encode()</span> 的输出逐格一致
-        ——这就是网络每次「看到」的东西,叠成 (3, 9, 9)。
+        每一步都是真梯度:w ← w − lr·2x(wx−z)(lib/foundations.ts 的{" "}
+        <span className="mono">linStep</span>)。学习率的全部数学就是那个因子
+        |1−2·lr·x²|:小于 1 收敛,等于 1 卡死,大于 1 发散。
       </figcaption>
     </figure>
   )

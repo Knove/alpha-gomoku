@@ -25,25 +25,25 @@ export default function Graduation() {
       <div className="eyebrow mb-3">毕业</div>
       <h1 className="text-2xl font-bold">沙盒:和它下一盘</h1>
       <p className="prose mt-4">
-        十课走完,图纸全在你手里了。最后一件事:坐到棋盘对面——你执子,
-        它用你看着长大的网络(真权重)和第 7 课的搜索,一手一手跟你下。
+        十三课走完,图纸全在你手里了。最后一件事:坐到棋盘对面——你执子,
+        它用你看着长大的网络(真权重)和第 11 课的搜索,一手一手跟你下。
       </p>
 
       <PlayGround />
       <SystemMap />
 
       <div className="card mt-12 p-6">
-        <h3 className="text-lg font-bold">带走的五件事</h3>
+        <h3 className="text-lg font-bold">带走的六件事</h3>
         <div className="prose mt-3">
           <p>
-            全系统图收的是它那十二个零件,这张单子收你的:五件散在各课、
+            全系统图收的是它那十二个零件,这张单子收你的:六件散在各课、
             换个舞台照样带得走的思维——括号里,是教会你它的那一课。
           </p>
           <ul>
             <li>
               <strong>能砌进结构的常识,别留给数据学。</strong>
               「三连要堵」写进棋盘和模板,网络就不用从几千盘棋里自己悟
-              (<a href="#/l04">第 4 课</a>)。
+              (<a href="#/l08">第 8 课</a>)。
             </li>
             <li>
               <strong>视角统一,一份功夫当两份用。</strong>
@@ -53,17 +53,22 @@ export default function Graduation() {
             <li>
               <strong>老师必须比学生强,飞轮才转得动。</strong>
               拿学生自己的答案当教材,它只能学到自己的偏见,飞轮原地空转
-              (<a href="#/l08">第 8 课</a>)。
+              (<a href="#/l12">第 12 课</a>)。
             </li>
             <li>
               <strong>损失会撒谎,对战才算数。</strong>
               判卷的分数量不出棋力,涨没涨要擂台上见
-              (<a href="#/l09">第 9 课</a>)。
+              (<a href="#/l13">第 13 课</a>)。
             </li>
             <li>
               <strong>对称性是免费的数据。</strong>
               转一下棋盘,一份棋谱当八份用,存储一分不花
-              (<a href="#/l08">第 8 课变换台</a>)。
+              (<a href="#/l12">第 12 课变换台</a>)。
+            </li>
+            <li>
+              <strong>答错了能找账。</strong>
+              误差沿网络逐层摊回每个旋钮,谁影响大谁多改——
+              所有『可训练』系统的通用账法(<a href="#/l06">第 6 课</a>)。
             </li>
           </ul>
         </div>
@@ -72,9 +77,9 @@ export default function Graduation() {
       <div className="card mt-12 p-6">
         <h3 className="text-lg font-bold">毕业词</h3>
         <p className="prose mt-3">
-          序里承诺过:11 节课之后,由你自己验收。现在你已经知道它每个零件
+          序里承诺过:15 节课之后,由你自己验收。现在你已经知道它每个零件
           为什么长这样——81 个数怎么装下一盘棋、一条视角铁约怎么贯穿全链、
-          模板怎么滑、层怎么叠、两个头怎么分工、四十遍怎么想、飞轮怎么转、
+          模板怎么滑、层怎么叠、账怎么摊、两个头怎么分工、四十遍怎么想、飞轮怎么转、
           晋升凭什么算数。它下得还很臭(才训到第 3 轮),但每一步烂棋,
           你都能说出它<em>为什么</em>这么烂——这比会下好棋更难得。
         </p>
@@ -185,7 +190,7 @@ function PlayGround() {
   const status = out !== null
     ? out === 0 ? "和棋——盘满,握手言和"
       : out === human ? "你赢了!验收通过——它才训到第 3 轮,别骄傲"
-      : "它赢了——把第 4 课的模板讲给它听"
+      : "它赢了——把第 8 课的模板讲给它听"
     : thinking ? "它想事情中(每手 20 次模拟 × 每次问一次网络)……"
     : humanTurn ? `轮到你(执${human === 1 ? "黑" : "白"})落子`
     : "轮到它……"
@@ -258,7 +263,7 @@ function PlayGround() {
                 </p>
               )}
               <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                条长按访问数(第一名拉满);Q 是每条边的平均得分——第 7 课的账本,
+                条长按访问数(第一名拉满);Q 是每条边的平均得分——第 11 课的账本,
                 原样搬来。看它把预算押在哪,你就知道它的「直觉」长在哪。
               </p>
             </>
@@ -290,20 +295,20 @@ interface SysNode {
 
 const BRAIN: SysNode[] = [
   { x: 12, name: "棋盘", sub: "81 个数", href: "#/l01" },
-  { x: 124, name: "三平面", sub: "己/敌/颜色", href: "#/l03" },
-  { x: 236, name: "模板", sub: "3×3 滑窗", href: "#/l04" },
-  { x: 348, name: "叠层", sub: "7 层看全盘", href: "#/l05" },
-  { x: 460, name: "双头", sub: "下哪+谁优", href: "#/l06" },
-  { x: 572, name: "搜索", sub: "再想 40 遍", href: "#/l07" },
+  { x: 124, name: "三平面", sub: "己/敌/颜色", href: "#/l07" },
+  { x: 236, name: "模板", sub: "3×3 滑窗", href: "#/l08" },
+  { x: 348, name: "叠层", sub: "7 层看全盘", href: "#/l09" },
+  { x: 460, name: "双头", sub: "下哪+谁优", href: "#/l10" },
+  { x: 572, name: "搜索", sub: "再想 40 遍", href: "#/l11" },
 ].map((n) => ({ ...n, y: 34 }))
 
 const LOOP: SysNode[] = [
-  { x: 300, y: 132, name: "自我对弈", sub: "左右互搏(L08)", href: "#/l08" },
-  { x: 492, y: 132, name: "(s, π, z)", sub: "每手三条记录(L08)", href: "#/l08" },
-  { x: 584, y: 222, name: "经验池", sub: "攒着混着批(L08)", href: "#/l08" },
-  { x: 404, y: 296, name: "训练", sub: "交叉熵+平方差(L08)", href: "#/l08" },
-  { x: 196, y: 296, name: "竞技场", sub: "6 局 ≥55%(L09)", href: "#/l09" },
-  { x: 16, y: 222, name: "best", sub: "现任冠军(L09)", href: "#/l09" },
+  { x: 300, y: 132, name: "自我对弈", sub: "左右互搏(L12)", href: "#/l12" },
+  { x: 492, y: 132, name: "(s, π, z)", sub: "每手三条记录(L12)", href: "#/l12" },
+  { x: 584, y: 222, name: "经验池", sub: "攒着混着批(L12)", href: "#/l12" },
+  { x: 404, y: 296, name: "训练", sub: "交叉熵+平方差(L12)", href: "#/l12" },
+  { x: 196, y: 296, name: "竞技场", sub: "6 局 ≥55%(L13)", href: "#/l13" },
+  { x: 16, y: 222, name: "best", sub: "现任冠军(L13)", href: "#/l13" },
 ]
 
 function SystemMap() {
@@ -321,8 +326,8 @@ function SystemMap() {
             </marker>
           </defs>
 
-          <text x={12} y={18} fontSize={11} className="mini-label">上半 · 造大脑(第 1-7 课)</text>
-          <text x={12} y={114} fontSize={11} className="mini-label">下半 · 飞轮(第 8-9 课,转个不停)</text>
+          <text x={12} y={18} fontSize={11} className="mini-label">上半 · 造大脑(第 1、7-11 课;脚下的数学是第 3-6 课地基篇)</text>
+          <text x={12} y={114} fontSize={11} className="mini-label">下半 · 飞轮(第 12-13 课,转个不停)</text>
 
           {BRAIN.slice(0, -1).map((n, i) => (
             <line key={`b${i}`} x1={n.x + 92} y1={n.y + 22} x2={BRAIN[i + 1].x - 2} y2={n.y + 22}
@@ -371,7 +376,7 @@ function SystemMap() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">毕业地图</span>
-        上半是零件(第 1-7 课亲手造的),下半是飞轮(第 8-9 课拧上的):
+        上半是零件(第 1、7-11 课亲手造的;脚下垫着的数学是第 3-6 课地基篇),下半是飞轮(第 12-13 课拧上的):
         12 个零件,每个你都拆过。点进去随便复习——门已全开。
       </figcaption>
     </figure>

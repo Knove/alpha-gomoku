@@ -3,7 +3,9 @@ export interface Progress {
   unlocked: number // 已解锁到第几课(索引,0 = 序)
   quizPassed: Record<string, boolean>
 }
-const KEY = "learn-progress-v1"
+// v2:课程从 11 课扩到 15 课(第 3-6 课地基篇),旧 v1 的 id 与新课撞名、
+// unlocked 索引也换了含义——干净重置,不做迁移(序里有改版说明)
+const KEY = "learn-progress-v2"
 
 export function loadProgress(): Progress {
   try {

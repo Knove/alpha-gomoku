@@ -1,156 +1,127 @@
-/** 第 8 课 · 飞轮:数据怎么转成棋力。
- *  节拍:谜题(数据从哪来?)→ 揭晓五小节(自我对弈 (s,π,z)/经验池/对称增广/
- *  损失两条/真数据卡)→ 部件((s,π,z) 解剖台·真数据 / 损失计算器+交叉熵手算 /
- *  8 对称变换台 / 真实曲线)→ 对账(selfplay·train·replay)→ 小测。 */
-import { useState } from "react"
+/** 第 8 课 · 模板:会滑的检测器。
+ *  节拍:谜题(常识怎么白送)→ 揭晓(模板=3×3 加权求和 / 同一张扫全盘=权重共享 /
+ *  为什么 3×3 / 48 张是训练拧出来的)→ 部件 1(滑窗 + 扫全盘热力图,conv2d 真算)→
+ *  部件 2(真模板墙:weights-best.json 前 8 张)→ 对账(model.py L33)→ 小测。 */
+import { useEffect, useMemo, useState } from "react"
 import { Quiz, usePassLesson } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
-import Board from "../lib/board"
-import { REAL } from "../data/real"
-import { dihedral, dihedralPi, emptyBoard, play, type GameState } from "../engine/game"
+import { MiniGrid9 } from "../lib/minigrid"
+import { conv2d, type Tensor } from "../engine/nn"
+import type { WeightsJson } from "../engine/model"
+import { loadWeights } from "../lib/weights"
 
-const GAME = REAL.selfplayGame
-const MOVES = GAME.moves
-const M = REAL.metrics
-
-/* 逐手重建局面(与序回放同款):states[i] = 第 i 手落下之前。 */
-const STATES: GameState[] = (() => {
-  const arr: GameState[] = [emptyBoard()]
-  for (const m of MOVES) arr.push(play(arr[arr.length - 1], m.y * 9 + m.x, m.player as 1 | -1))
-  return arr
+/* 横三连模板(同 L07 三张平面课):中间一行 1 1 1。 */
+const TEMPLATE = [0, 0, 0, 1, 1, 1, 0, 0, 0]
+/* 教学局面(同 archive/network.md 手算例):己方三连横排在 y=4,x=2..4。 */
+const THREE: [number, number][] = [
+  [2, 4],
+  [3, 4],
+  [4, 4],
+]
+const OWN81: number[] = (() => {
+  const b = new Array<number>(81).fill(0)
+  for (const [x, y] of THREE) b[y * 9 + x] = 1
+  return b
 })()
 
-/** z 永远站在「那一手的行棋方」:我赢 +1 / 我输 −1 / 和 0(终局才知道,统一补)。 */
-const zOf = (i: number) => {
-  const r = GAME.result
-  const p = MOVES[i].player
-  return r === 0 ? 0 : p === r ? 1 : -1
-}
+/** 81 个窗口得分:真引擎 conv2d(与 model.py stem 同一算子,pad=1 界外补 0)。 */
+const SCORES: number[] = (() => {
+  const own: Tensor = { data: Float64Array.from(OWN81), shape: [1, 9, 9] }
+  const tmpl: Tensor = { data: Float64Array.from(TEMPLATE), shape: [1, 1, 3, 3] }
+  return Array.from(conv2d(own, tmpl, null, 1).data)
+})()
 
-const LN = Math.log
-const coord = (a: number) => `(${a % 9},${Math.floor(a / 9)})`
-
-export default function L08() {
+export default function L04() {
   const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
       <div className="eyebrow mb-3">第 8 课</div>
-      <h1 className="text-2xl font-bold">飞轮:数据怎么转成棋力</h1>
+      <h1 className="text-2xl font-bold">模板:会滑的检测器</h1>
 
       <Quiz
         title="谜题 · 先选一个答案"
         questions={[
           {
-            q: "本站的网络从随机噪声起步——没人给它一盘人类棋谱。训练要吃的数据,从哪来?",
+            q: "「三连要堵」是每个会下五子棋的人都知道的常识。怎么把这条常识白送给网络——不用它从几千盘棋里自己悟?",
             options: [
-              "网上下载人类高手的棋谱",
-              "它自己跟自己下,棋谱一盘盘自己长出来",
-              "请人手工标注每一手的优劣",
+              "多喂棋谱:见的局面够多,自然就悟出来了",
+              "把常识砌进结构:造一批会满盘滑动的 3×3 模板,让「棋形是局部图案」天生成立",
+              "手写一条规则代码:「见到三连就堵」",
             ],
             answer: 1,
             explain:
-              "选 B。这正是「从零自学」的招牌:左右互搏,每盘棋的每一手都榨出一条作业,作业攒进池子喂训练,训练出的新网络再去下更多棋——飞轮转起来,棋谱自己长。A 违背「没有老师」的军令状;C 更不可能:要是有能力标注每一手,还要它学什么?",
+              "选 B。A 最贵——悟出「三连」要从数据里重新发现「相邻」和「成排」这些白送的几何;C 是老一代棋类 AI 的路,能写,但棋理写不全,而且「这个棋形值几分」它答不了。B 把「怎么认棋形」焊进结构白送,「这个棋形值几分」留给训练去拧——两个世界各干各的。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>揭晓 · 一盘棋榨出一条条作业</h3>
+        <h3>揭晓 · 三件事:模板、扫描、3×3</h3>
         <p>
-          <strong>① 自我对弈:每一手记三样。</strong>最新网络左右互搏,
-          每一手落子之前,系统记下一个三元组 <em>(s, π, z)</em>:<em>s</em> 是局面,
-          <em>π</em> 是搜索 40 次投出的访问分布(第 7 课的总结算),<em>z</em>{" "}
-          是这盘棋的最终胜负——下这手时谁也不知道,终局才统一补上。关键在{" "}
-          <strong>π 是比裸网强的老师</strong>:裸网只是「看一眼」的第一印象,
-          π 是「再想四十遍」之后的深思——拿 π 当作业答案,学生(网络)学的是
-          比自己强一截的走法,飞轮才转得动。z 逐手换视角:那一手轮到谁,
-          「我」就是谁——我赢 +1、我输 −1(黑白每换一手,符号翻一次,第 2 课的铁约)。
+          <strong>① 模板是什么。</strong>一张 3×3 的九个数,盖在棋盘某个 3×3 的小窗上,
+          对应格子相乘、九个乘积相加(第 4 课推的账、第 7 课算抵消用的就是它)。拿横三连模板手算:
+          盖在己方三连正上方,得 <strong className="num">3</strong>;往右挪一格,
+          得 <strong className="num">2</strong>;盖到全空的窗上,得{" "}
+          <strong className="num">0</strong>。哪里得数大,哪里就有「横排三个己方子」的嫌疑。
         </p>
         <p>
-          <strong>顺带还一笔第 7 课的债。</strong>那个一手成五的 F5,在没训几轮的
-          先验里前面压着 56 个点,40 次预算全被网络偏爱的点借走,拉到 770 次探索项
-          才把它送进来——搜索放大直觉,直觉弱时预算也追不回。还债的正是这只
-          飞轮:自我对弈里每撞见一个真终局,「成五就赢」就以 z 和 π 的样子
-          灌回训练——价值头先学会看见成五,先验跟着把成五的点抬上来。直觉
-          变准,压在 F5 前面的 56 个点才会让开,同样的 40 次预算才花得值。搜索
-          养在直觉上,飞轮养着直觉——第 7 课和这一课,本来就是一个零件的两半。
+          <strong>② 同一张模板,扫全盘。</strong>模板不是挑一个位置盖一次,而是
+          <em>每个位置都盖一次</em>:81 个得数排成一张 9×9 的「嫌疑地图」。
+          (棋盘外围虚拟补一圈 0——「界外无子」,于是 81 个格子每个都能当一次窗口中心,
+          地图不缩水。)这就是<strong>权重共享</strong>:天元的活三和边角的活三,
+          用<em>同一套权重</em>发现。要是每个位置单配一套,一张模板从 9 个数膨胀成
+          81 套,而且同一条棋理学 81 遍——省的不只是参数,是重复的学习。
         </p>
         <p>
-          <strong>② 经验池:作业攒着、混着批改。</strong>新下的棋不是现做现扔,
-          而是倒进一个滑动池子(写满一圈从头覆盖),每步训练从池里
-          <em>随机</em>抓一把。若只用刚下完的几盘训练,网络会全力模仿
-          「昨天的自己」——连怪着一起模仿,越学越像昨天。混着批,是防过拟合
-          昨天的自己的第一道闸。
+          <strong>③ 为什么恰好 3×3。</strong>三连是五子棋最小的好棋形,3×3 是
+          <em>装得下它的最小窗口</em>——横、竖、斜四种摆法一次看全;2×2 只看得出
+          「两子相邻」,看不出「成排待延」。那直接上 9×9 大核一步看全盘?一张 81 个数,
+          参数暴涨不说,还丢掉「先局部、后全局」的层次——全盘的事下一课用叠层解决。
         </p>
         <p>
-          <strong>③ 对称增广:一份棋谱八份用。</strong>五子棋的棋理对旋转镜像免疫:
-          同一个三连转 90° 还是三连,该下的点跟着转过去就是。于是每条样本上阵前
-          随机抽一种变换(4 种旋转 × 是否镜像,共 8 种),<em>棋盘和 π 同步转</em>
-          再喂给网络。「同步」是硬前提:π 是 81 个格子上的分布,棋盘转了,
-          每个概率都得跟着搬到新坐标——只转棋盘不转 π,等于把答案贴到无关的格子上。
-          z 是一个数,不用转。
+          最后一句要紧话:网络第一层(代码里叫 stem)就是 <strong className="num">48</strong>{" "}
+          张这样的模板<em>同时</em>在 9×9 上扫——但这 48 张没有一张是人按棋理画的:
+          每个权重都是训练从自我对弈的数据里拧出来的旋钮(第 3 课立过的词:
+          <strong className="num">48 × 27 = 1296</strong> 个,第 4 课拖过的正是它们)。
+          部件二带你看真家伙。
         </p>
-        <p>
-          <strong>④ 损失两条:判卷怎么判。</strong>训练时网络的答案和老师的答案差多少,
-          一条损失、两项判卷:<em>策略头离 π 有多远</em>(交叉熵:π 集中的地方,
-          网络的概率也得跟上)+ <em>价值头离 z 有多远</em>(平方差:网络说能赢,
-          结果输了,罚)。下面的部件让你亲手拖一拖这两笔罚分。
-        </p>
-        <p>
-          <strong>⑤ 真数据卡:第 2 轮的一圈飞轮。</strong>下面每个数字都来自那次
-          真实训练的 metrics 记录:
-        </p>
-        <div className="formula">
-          第 2 轮:自我对弈产出 <span className="hl">{M[2].buffer - M[1].buffer}</span>{" "}
-          条新样本 → 池子 {M[1].buffer} + {M[2].buffer - M[1].buffer} ={" "}
-          <span className="hl">{M[2].buffer}</span> 条;训练后价值损失{" "}
-          {M[1].value_loss!.toFixed(3)} → <span className="hl">{M[2].value_loss!.toFixed(3)}</span>;
-          竞技场 {M[2].arena_vs_best!.wins_a} 比 {M[2].arena_vs_best!.wins_b} 晋升
-          ——带着新网络回到自我对弈,转下一圈
-        </div>
       </div>
 
-      <SPZ />
-      <LossCalc />
-      <SymLab />
-      <MetricCharts />
+      <SlideWindow />
 
-      <Ledger title="selfplay.py L45-50(z 视角)、train.py L48-51(损失)、replay.py L25-44(池子)、train.py L38-40(增广)">
+      <RealTemplates />
+
+      <Ledger title="model.py L33(stem:第一层卷积)+ game.py L111-117(它吃的输入)">
         <div className="codewalk">
-          <pre>{`# selfplay.py L45-50  终局统一补 z:站在每一手行棋方的视角
-result = slot.game.outcome()
-for canon, pi, player in slot.samples:
-    z = 0 if result == 0 else (1 if player == result else -1)`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# train.py L48-51  一条损失,两项判卷:交叉熵 + 平方差
-value_loss = F.mse_loss(v, target_z)                 # 价值头离 z 有多远
-logp = F.log_softmax(logits, dim=-1)
-policy_loss = -(target_pi * logp).sum(dim=-1).mean() # 策略头离 π 有多远(减号=最大化)
-loss = value_loss + policy_loss`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# replay.py L25-44  滑动池子:写满一圈从头覆盖;每步随机抓一把
-def add_many(self, samples):
-    for canon, pi, player, z in samples:
-        ... self.pos = (self.pos + 1) % self.capacity
-def sample(self, batch_size, rng):
-    idx = rng.integers(0, self.size, size=batch_size)  # 均匀随机,新旧混批`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# train.py L38-40  对称增广:棋盘与 π 用同一个 k 转(8 种抽一种)
-aug_in[i] = dihedral_transform(inputs[i], k)
-aug_pi[i] = dihedral_transform_pi(pis[i], n, k)`}</pre>
+          <pre>{`# model.py L32-36  第一层(stem):48 张 3×3 模板同时在 9×9 上扫
+self.stem = nn.Sequential(
+    nn.Conv2d(3, channels, 3, padding=1, bias=False),  # L33
+    nn.BatchNorm2d(channels),
+    nn.ReLU(),
+)`}</pre>
         </div>
         <p className="mt-3">
-          四处指认:① z 的视角是「那一手的行棋方」,黑白交替所以同一盘棋的 z
-          逐手翻号;② 策略损失对 logits 做 <span className="mono">log_softmax</span>{" "}
-          而不是先 softmax 再取对数——对数域计算,大分数不溢出;
-          ③ 池子随机抓批,相隔数轮的局面同堂批卷;④ 增广的 k 棋盘与 π 共用,
-          本站引擎 <span className="mono">game.ts</span> 的{" "}
-          <span className="mono">dihedral / dihedralPi</span> 与 Python 端逐条对齐,
-          变换台转的就是它们。
+          行话对照:<span className="mono">Conv2d(3, 48, 3, padding=1)</span> 读作
+          「3 张输入面进来、48 张 3×3 模板扫一遍、界外补一圈 0」。
+          <strong>卷积 = 模板扫描,卷积核 = 模板</strong>——你在部件里按的每一下,
+          都是这行代码在做的事。那行{" "}
+          <span className="mono">nn.ReLU()</span> 也不再是天书:它是第 5 课的
+          弯折——先计票(卷积求和),再整体掰弯,一行不缺。本站引擎{" "}
+          <span className="mono">learn/src/engine/nn.ts</span> 的{" "}
+          <span className="mono">conv2d</span> 与它逐条对齐(部件的热力图就是它算的)。
+        </p>
+        <div className="codewalk">
+          <pre>{`# game.py L111-117  喂进第一层的,正是第 7 课那三张面
+canon = game.canonical_board()          # 我方 = +1
+cur  = (canon == 1).astype(np.float32)  # 平面 0 己方子
+opp  = (canon == -1).astype(np.float32) # 平面 1 对方子
+color = np.full_like(cur, ...)          # 平面 2 颜色面`}</pre>
+        </div>
+        <p className="mt-3">
+          (完整版在第 7 课对过账。)注意每个探测器其实是「3 张一套」:己方面、对方面、
+          颜色面各配一张 3×3,<strong className="num">27</strong> 个乘积一起相加——
+          所以部件二的每张真模板画了三个小格阵。
         </p>
       </Ledger>
 
@@ -159,37 +130,37 @@ aug_pi[i] = dihedral_transform_pi(pis[i], n, k)`}</pre>
         onAllCorrect={() => pass("l08")}
         questions={[
           {
-            q: "训练目标 π 为什么用搜索的访问分布,而不用网络自己的裸输出?",
+            q: "横三连模板盖在己方三连正上方得 3;窗口往右挪一格只得 2。为什么?",
             options: [
-              "访问分布是 81 个数,裸输出也是 81 个数,格式更配",
-              "老师必须比学生强:π 是「再想四十遍」的深思,比第一印象强;拿裸输出当老师,学生只能学到自己已有的偏见,飞轮原地空转",
-              "因为访问分布全是整数,算得更快",
+              "因为挪动之后模板变短了",
+              "因为窗口右边缘落在空格 (5,4) 上——那一格乘出来是 0,三个 1 只剩两个",
+              "因为 (4,4) 上的子被挡住了",
             ],
             answer: 1,
             explain:
-              "飞轮的全部动力来自「老师比学生强」这个不等式:π 里带着搜索撞见真终局的信息,是裸网没有的。拿裸输出当目标,等于让学生抄自己的卷子——偏见喂偏见,永远原地踏步。",
+              "模板没变、子也没动,变的只是窗口罩住哪些格:右边缘那格从「己方子(1)」换成「空(0)」,乘积从 1 变 0。每个得数都能像这样一格一格指认——部件里亲手挪一遍。",
           },
           {
-            q: "对称增广把棋盘转了 90°,π 为什么必须跟着转?",
+            q: "权重共享(同一张模板扫全盘)省下的到底是什么?",
             options: [
-              "为了保持 81 个数的总和等于 1",
-              "π 是 81 个格子上的分布:棋盘转了,每个概率都得搬到对应的新坐标——不同步,就把「该下的点」的答案贴到无关的格子上,作业全错",
-              "为了和 z 保持一致",
+              "省内存:棋盘可以存得更紧",
+              "省扫描时间:扫一遍更快",
+              "省参数、更省学习:一张模板 9 个数走遍全盘,同一条棋理不用在每个位置重学一遍",
             ],
-            answer: 1,
+            answer: 2,
             explain:
-              "「同步」是硬前提:答案长在格子上,题目(棋盘)转了答案必须跟着转。z 是一个数,棋盘怎么转它都不变——所以只有 π 要跟着搬。变换台的棋盘和热度是同一个 k 转出来的,你可以亲手验。",
+              "内存和算量没省几个钱——省的是两笔大账:参数从每个位置一套(81×9=729)瘦成一套(9);更贵的是「同一条棋理学 81 遍」这笔学习账。天元和边角的活三用同一套权重发现,一条样本教一处、处处都会。",
           },
           {
-            q: "黑胜的一盘棋,白走的那些手 z 记多少?为什么逐手翻号?",
+            q: "真模型第一层的 48 张模板,是谁设计的?",
             options: [
-              "全记 +1,赢的是这盘棋",
-              "白走的手记 −1:z 站在「那一手行棋方」的视角,「我」每手都在黑白换人——白方的输正是黑方的赢",
-              "白走的手记 0,只有黑方的手有 z",
+              "工程师按棋理手绘的:横三连、竖三连、斜三连……各画一张",
+              "没有人设计——48×27 个权重全是训练从自我对弈数据里拧出来的旋钮",
+              "网络自己写的代码生成的",
             ],
             answer: 1,
             explain:
-              "z 的视角契约贯穿全链:局面 s 是行棋方视角(canonical),z 也必须是——这样价值头学的时候 (v−z)² 这笔误差才可比。同一盘棋 z 逐手翻号,不是因为结局变了,是「我」换人了。",
+              "部件二看过:它们更像噪声,不像人画的图案。结构只送了两条天性(局部、处处通用),「该有哪些探测器、每个权重多大」全部交给训练——这正是谜题那句「常识砌进结构」的另一半:结构给的是空白的模板,内容自己长。第 4 课你在计票器里拖过的 1296 个旋钮,就是这里说的「全部权重」;谁拧的?训练的下山器(train.py optimizer,第 3 课对过账)。",
           },
         ]}
       />
@@ -197,393 +168,331 @@ aug_pi[i] = dihedral_transform_pi(pis[i], n, k)`}</pre>
   )
 }
 
-/* ============ 部件 8-1 · (s,π,z) 解剖台:真数据某一手,三样并排 ============ */
+/* ============ 部件 1 · 模板滑窗 + 扫全盘 ============ */
 
-const CHIPS: { i: number; label: string }[] = [
-  { i: REAL.heroIndex, label: "第 10 手·天元 40/40" },
-  { i: 1, label: "第 2 手·边角 40/40" },
-  { i: 0, label: "第 1 手·开局分散" },
-  { i: 16, label: "第 17 手·两个候选" },
+const N = 9
+const CELL = 46
+const MARGIN = CELL * 1.8
+const VB = MARGIN * 2 + (N - 1) * CELL
+const px = (x: number) => MARGIN + x * CELL
+const STARS: [number, number][] = [
+  [2, 2],
+  [2, 6],
+  [6, 2],
+  [6, 6],
+  [4, 4],
 ]
+/** 扫描顺序:逐列(先扫完 x=0 一列,再 x=1……)。i 格的扫描序号。 */
+const ORD = (i: number) => (i % 9) * 9 + Math.floor(i / 9)
 
-function SPZ() {
-  const [idx, setIdx] = useState(REAL.heroIndex)
-  const mv = MOVES[idx]
-  const prev = idx > 0 ? MOVES[idx - 1] : null
-  const top = [...mv.top].sort((a, b) => b.visits - a.visits).slice(0, 3)
-  const z = zOf(idx)
-  const topSum = mv.top.reduce((s, t) => s + t.visits, 0)
+function SlideWindow() {
+  const [cx, setCx] = useState(3)
+  const [cy, setCy] = useState(4)
+  // null = 未扫;0..80 = 正在扫第几个;81 = 扫完
+  const [scanIdx, setScanIdx] = useState<number | null>(null)
 
-  return (
-    <figure className="figure mt-8">
-      <div className="px-4 pt-3 sm:px-5">
-        <span className="mini-label">
-          部件 8-1 · (s, π, z) 解剖台——第 3 轮真实自我对局 {GAME.id}
-        </span>
-      </div>
-      <div className="flex flex-col gap-5 p-4 sm:flex-row sm:p-5">
-        <div className="min-w-0 flex-1">
-          <div data-qa="spz-board">
-            <Board
-              board={STATES[idx].board.flat()}
-              heat={mv.pi}
-              lastMove={prev ? { x: prev.x, y: prev.y } : null}
-            />
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button type="button" className="btn" disabled={idx === 0}
-              onClick={() => setIdx((i) => Math.max(0, i - 1))}>
-              ← 上一手
-            </button>
-            <button type="button" className="btn" disabled={idx >= MOVES.length - 1}
-              onClick={() => setIdx((i) => Math.min(MOVES.length - 1, i + 1))}>
-              下一手 →
-            </button>
-            <span className="num ml-auto text-sm" style={{ color: "var(--fg-faint)" }}>
-              第 {idx + 1} / {MOVES.length} 手
-            </span>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {CHIPS.map((c) => (
-              <button key={c.i} type="button"
-                className={`btn ${idx === c.i ? "active" : ""}`}
-                onClick={() => setIdx(c.i)} data-qa="spz-chip">
-                {c.label}
-              </button>
-            ))}
-          </div>
-        </div>
+  useEffect(() => {
+    if (scanIdx === null || scanIdx >= 81) return
+    const t = setTimeout(() => setScanIdx((k) => (k ?? 0) + 1), 45)
+    return () => clearTimeout(t)
+  }, [scanIdx])
 
-        <aside className="w-full sm:w-72 sm:flex-none">
-          <div className="mini-label">s:局面 —— 轮到{mv.player === 1 ? "黑" : "白"}棋下</div>
-          <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-            40 次模拟刚跑完、子还没落。这是它眼里的 s(存档时已换成行棋方视角)。
-          </p>
+  const scanning = scanIdx !== null && scanIdx < 81
+  const done = scanIdx === 81
+  // 扫描时窗口自动跟着走
+  const wx = scanning ? Math.floor(scanIdx / 9) : cx
+  const wy = scanning ? scanIdx % 9 : cy
 
-          <div className="mini-label mt-4">π:搜索的访问分布(top3,含访问数)</div>
-          <ol className="mt-2 space-y-1.5" data-qa="spz-top">
-            {top.map((t) => (
-              <li key={t.action} className="l00-top-row">
-                <span className="mono text-sm">{coord(t.action)}</span>
-                <span className="prob-track">
-                  <span className="prob-fill" style={{ width: `${t.prob * 100}%` }} />
-                </span>
-                <span className="num flex-none text-right text-xs" style={{ color: "var(--fg-faint)" }}>
-                  {t.visits}/{topSum}
-                </span>
-                <span className="num w-10 flex-none text-right text-sm" style={{ color: "var(--accent-deep)" }}>
-                  {Math.round(t.prob * 100)}%
-                </span>
-              </li>
-            ))}
-          </ol>
+  const sum = SCORES[wy * 9 + wx]
+  const outside = wx < 1 || wx > 7 || wy < 1 || wy > 7
 
-          <div className="mt-4 border-t pt-3" style={{ borderColor: "var(--hairline)" }}>
-            <div className="mini-label">v 与 z:当时的判断,和最后的答案</div>
-            <p className="num mt-1.5 text-lg font-bold" style={{ color: "var(--accent-deep)" }}>
-              v = {mv.value >= 0 ? "+" : ""}{mv.value.toFixed(2)}
-              <span className="ml-2 text-sm font-normal" style={{ color: "var(--fg-faint)" }}>
-                ({mv.player === 1 ? "黑" : "白"}方视角)
-              </span>
-            </p>
-            <p className="num mt-1 text-lg font-bold" data-qa="spz-z">
-              z = {z > 0 ? "+1" : z < 0 ? "−1" : "0"}
-            </p>
-            <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-              这盘棋{GAME.result === 1 ? "黑胜" : GAME.result === -1 ? "白胜" : "和棋"},
-              {mv.player === GAME.result
-                ? "这一手的行棋方是赢家:z = +1"
-                : "这一手的行棋方是输家:z = −1"}
-              。v 是下这手时的判断,z 是终局才补上的答案——训练要压小的就是
-              (v−z)²,策略头要对齐的是上面的 π。
-            </p>
-          </div>
-        </aside>
-      </div>
-      <figcaption className="figure-cap">
-        <span className="cap-no">真数据</span>
-        {GAME.id}(第 3 轮,共 {MOVES.length} 手):局面由引擎逐手重建,
-        π/v 直接读训练记录。切到「第 10 手」看天元拿 40/40——第 9 课会告诉你
-        为什么这个 40/40 不能读成「学会了天元」。
-      </figcaption>
-    </figure>
+  // 窗口内容(己方面视角;界外按 0 算)
+  const winVals = [0, 1, 2].flatMap((r) =>
+    [0, 1, 2].map((c) => {
+      const y = wy + r - 1,
+        x = wx + c - 1
+      return y < 0 || y > 8 || x < 0 || x > 8 ? 0 : OWN81[y * 9 + x]
+    }),
   )
-}
+  const winLabels = [0, 1, 2].flatMap((r) =>
+    [0, 1, 2].map((c) => {
+      const y = wy + r - 1,
+        x = wx + c - 1
+      return y < 0 || y > 8 || x < 0 || x > 8 ? "界" : winVals[r * 3 + c] ? "1" : "0"
+    }),
+  )
+  const products = TEMPLATE.map((t, i) => t * winVals[i])
 
-/* ============ 部件 8-2 · 损失计算器:亲手拖两笔罚分 ============ */
+  const move = (dx: number, dy: number) => {
+    if (scanning) return
+    setCx((v) => Math.min(8, Math.max(0, v + dx)))
+    setCy((v) => Math.min(8, Math.max(0, v + dy)))
+  }
 
-function LossCalc() {
-  const [v, setV] = useState(0.8)
-  const [z, setZ] = useState(-1)
-  const pen = (v - z) * (v - z)
-
-  // 抛物线 (v−z)²,v∈[−1,1],罚分上限 4
-  const W = 300, H = 150, PL = 34, PR = 12, PT = 12, PB = 30
-  const xOf = (t: number) => PL + ((t + 1) / 2) * (W - PL - PR)
-  const yOf = (p: number) => H - PB - (p / 4) * (H - PT - PB)
-  const pts = Array.from({ length: 41 }, (_, i) => {
-    const t = -1 + (i / 40) * 2
-    return `${xOf(t).toFixed(1)},${yOf((t - z) * (t - z)).toFixed(1)}`
-  }).join(" ")
-
-  // 交叉熵手算:π=[0.6,0.3,0.1] vs p=[0.5,0.3,0.2](以及两个参照)
-  const PI3 = [0.6, 0.3, 0.1]
-  const ce = (p: number[]) => -PI3.reduce((s, pi, i) => s + pi * LN(p[i]), 0)
-  const ceHand = ce([0.5, 0.3, 0.2])
-  const ceSelf = ce(PI3)
-  const ceUni = ce([1 / 3, 1 / 3, 1 / 3])
+  const heatCells: { i: number; v: number }[] = []
+  if (scanIdx !== null)
+    for (let i = 0; i < 81; i++)
+      if (ORD(i) <= scanIdx && SCORES[i] > 0) heatCells.push({ i, v: SCORES[i] })
 
   return (
     <figure className="figure mt-8">
-      <div className="px-4 pt-3 sm:px-5">
-        <span className="mini-label">部件 8-2 · 损失计算器:罚分是拖出来的</span>
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">部件 · 模板滑窗:一张模板,81 次盖章</span>
       </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
         <div className="min-w-0 flex-1">
-          <div className="mini-label">价值损失 (v − z)²:拖 v、选 z,一笔罚分</div>
-          <svg viewBox={`0 0 ${W} ${H}`} data-qa="loss-curve"
-            style={{ width: "100%", height: "auto", display: "block", maxWidth: 340 }}>
-            <line x1={PL} y1={H - PB} x2={W - PR} y2={H - PB}
-              style={{ stroke: "var(--hairline-strong)" }} strokeWidth={1} />
-            {[1, 2, 3, 4].map((p) => (
-              <g key={p}>
-                <line x1={PL} y1={yOf(p)} x2={W - PR} y2={yOf(p)}
-                  style={{ stroke: "var(--hairline)" }} strokeWidth={0.7} />
-                <text x={PL - 6} y={yOf(p) + 3} fontSize={9} textAnchor="end"
-                  className="num" style={{ fill: "var(--fg-faint)" }}>{p}</text>
+          <div
+            tabIndex={0}
+            role="application"
+            aria-label="模板滑窗:方向键移动窗口"
+            className="rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]"
+            onKeyDown={(e) => {
+              const k = e.key
+              if (k === "ArrowLeft") move(-1, 0)
+              else if (k === "ArrowRight") move(1, 0)
+              else if (k === "ArrowUp") move(0, -1)
+              else if (k === "ArrowDown") move(0, 1)
+              else return
+              e.preventDefault()
+            }}
+          >
+            <svg viewBox={`0 0 ${VB} ${VB}`} style={{ width: "100%", height: "auto", display: "block" }}
+              role="img" aria-label="9×9 棋盘上的模板窗口与嫌疑地图">
+              <rect
+                x={MARGIN - CELL * 0.62}
+                y={MARGIN - CELL * 0.62}
+                width={VB - 2 * (MARGIN - CELL * 0.62)}
+                height={VB - 2 * (MARGIN - CELL * 0.62)}
+                rx={12}
+                style={{ fill: "var(--board)" }}
+              />
+              <g style={{ stroke: "var(--board-line)" }} strokeWidth={1.1} opacity={0.85}>
+                {Array.from({ length: N }, (_, i) => (
+                  <line key={`v${i}`} x1={px(i)} y1={px(0)} x2={px(i)} y2={px(8)} />
+                ))}
+                {Array.from({ length: N }, (_, j) => (
+                  <line key={`h${j}`} x1={px(0)} y1={px(j)} x2={px(8)} y2={px(j)} />
+                ))}
               </g>
-            ))}
-            {[-1, 0, 1].map((t) => (
-              <text key={t} x={xOf(t)} y={H - PB + 14} fontSize={9.5} textAnchor="middle"
-                className="num"
-                style={{ fill: z === t ? "var(--accent-deep)" : "var(--fg-faint)" }}>
-                v={t > 0 ? "+" + t : t}
-              </text>
-            ))}
-            <polyline points={pts} fill="none" style={{ stroke: "var(--accent)" }} strokeWidth={2} />
-            <line x1={xOf(z)} y1={yOf(0)} x2={xOf(z)} y2={yOf(4)}
-              strokeDasharray="4 4" style={{ stroke: "var(--fg-faint)" }} strokeWidth={1} />
-            <circle cx={xOf(v)} cy={yOf(pen)} r={5.5} style={{ fill: "var(--accent-deep)" }} />
-            <text x={xOf(v)} y={yOf(pen) - 10} fontSize={10} textAnchor="middle" className="num"
-              style={{ fill: "var(--accent-deep)" }}>
-              {pen.toFixed(2)}
-            </text>
-          </svg>
+              <g style={{ fill: "var(--board-line)" }}>
+                {STARS.map(([sx, sy]) => (
+                  <circle key={`${sx}-${sy}`} cx={px(sx)} cy={px(sy)} r={Math.max(2.4, CELL * 0.09)} />
+                ))}
+              </g>
 
-          <div className="mini-label mt-3">网络的说法 v(拖我)</div>
-          <input type="range" min={-1} max={1} step={0.05} value={v}
-            onChange={(e) => setV(Number(e.target.value))}
-            aria-label="v 滑杆" style={{ ["--fill" as string]: `${((v + 1) / 2) * 100}%` }}
-            data-qa="loss-v" />
-          <div className="num mt-1 flex justify-between text-xs" style={{ color: "var(--fg-faint)" }}>
-            <span>−1 稳输</span><span>0</span><span>+1 稳赢</span>
+              {/* 嫌疑地图:每个窗口的得数,得分越高越红 */}
+              <g data-qa="heat">
+                {heatCells.map(({ i, v }) => (
+                  <g key={i}>
+                    <rect
+                      x={px(i % 9) - CELL * 0.44}
+                      y={px(Math.floor(i / 9)) - CELL * 0.44}
+                      width={CELL * 0.88}
+                      height={CELL * 0.88}
+                      rx={7}
+                      style={{ fill: "var(--heat)" }}
+                      opacity={0.45 + v * 0.16}
+                    />
+                    <text
+                      x={px(i % 9)}
+                      y={px(Math.floor(i / 9))}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      fontSize={CELL * 0.34}
+                      fontFamily="ui-monospace, SF Mono, Menlo, monospace"
+                      fill="#fdf6ee"
+                    >
+                      {v}
+                    </text>
+                  </g>
+                ))}
+              </g>
+
+              {/* 己方三连 */}
+              {THREE.map(([x, y]) => (
+                <circle key={`${x}-${y}`} cx={px(x)} cy={px(y)} r={CELL * 0.36}
+                  style={{ fill: "var(--stone-b)", stroke: "var(--stone-b-lo)", strokeWidth: 1.5 }} />
+              ))}
+
+              {/* 3×3 窗口 */}
+              <g style={{ transform: `translate(${px(wx - 1) - CELL * 0.48}px, ${px(wy - 1) - CELL * 0.48}px)`, transition: "transform 120ms ease" }}>
+                <rect
+                  width={2 * CELL + 0.96 * CELL}
+                  height={2 * CELL + 0.96 * CELL}
+                  rx={9}
+                  style={{ fill: "var(--accent)", stroke: "var(--accent)", strokeWidth: 2.5 }}
+                  fillOpacity={0.06}
+                  strokeDasharray={outside ? "8 6" : undefined}
+                />
+                {outside && (
+                  <text x={6} y={-8} fontSize={CELL * 0.26} style={{ fill: "var(--accent-deep)" }}
+                    fontFamily="ui-monospace, SF Mono, Menlo, monospace">
+                    窗口出界:界外按 0(空)算
+                  </text>
+                )}
+              </g>
+            </svg>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-xs" style={{ color: "var(--fg-faint)" }}>真实结局 z</span>
-            <span className="seg">
-              {[-1, 0, 1].map((t) => (
-                <button key={t} type="button"
-                  className={`seg-btn ${z === t ? "active" : ""}`}
-                  onClick={() => setZ(t)} data-qa="loss-z">
-                  {t === -1 ? "我输" : t === 0 ? "和" : "我赢"}
-                </button>
-              ))}
-            </span>
-            <span className="num ml-auto text-lg font-bold" data-qa="loss-readout"
-              style={{ color: "var(--accent-deep)" }}>
-              ({v.toFixed(2)} − {z > 0 ? "+" + z : z})² = {pen.toFixed(3)}
-            </span>
+            <button type="button" className="btn" disabled={scanning} onClick={() => move(-1, 0)} aria-label="窗口左移">←</button>
+            <button type="button" className="btn" disabled={scanning} onClick={() => move(0, -1)} aria-label="窗口上移">↑</button>
+            <button type="button" className="btn" disabled={scanning} onClick={() => move(0, 1)} aria-label="窗口下移">↓</button>
+            <button type="button" className="btn" disabled={scanning} onClick={() => move(1, 0)} aria-label="窗口右移">→</button>
+            <button type="button" className={`btn ${scanIdx === null ? "primary" : ""}`}
+              disabled={scanning}
+              onClick={() => setScanIdx(0)}
+              data-qa="scan-btn">
+              {scanning ? `正在扫第 ${scanIdx} / 81 格…` : done ? "↺ 再扫一遍" : "扫全盘:81 格逐列盖过去"}
+            </button>
           </div>
           <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            把 v 拖到 z 附近,罚分归零;嘴硬说稳赢却输了,罚到顶 4。
-            平方让正负误差都变罚分,差得越远罚得越狠。
+            内置局面:己方三连 (2,4)(3,4)(4,4)。点一下棋盘,也可以用方向键逐格挪窗口。
           </p>
         </div>
 
-        <div className="min-w-0 flex-1 md:max-w-[17rem]">
-          <div className="mini-label">策略损失:交叉熵手算(三选一的小盘子)</div>
-          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-            老师 π = [0.6, 0.3, 0.1](访问分布归一后),网络 p = [0.5, 0.3, 0.2]。
-            (ln 是「e 的几次方等于它」的反问:ln 0.5 ≈ −0.69,因为 e<sup>−0.69</sup> ≈ 0.5。
-            你只需记住 ln 把 0 到 1 的小数变成负数,越接近 1 越接近 0——和第 6 课
-            的 e 是一对正反运算。)
-          </p>
-          <div className="formula mt-2" style={{ fontSize: "0.72rem", textAlign: "left", whiteSpace: "normal" }}>
-            −Σ π·ln p = −(0.6·ln<span className="hl">0.5</span> + 0.3·ln0.3 + 0.1·ln0.2)
-            <br />= −(−0.416 − 0.361 − 0.161) = <span className="hl">{ceHand.toFixed(3)}</span>
+        <div className="min-w-0 flex-1">
+          <div className="mini-label">当前窗口的账</div>
+          <div className="mt-2 flex flex-wrap items-start gap-4">
+            <MiniGrid9 label="窗口(己方面)" cells={winLabels} tint={winVals.map((v) => v === 1)} />
+            <span className="mt-[4.7rem] text-lg" style={{ color: "var(--fg-faint)" }}>×</span>
+            <MiniGrid9 label="模板" cells={TEMPLATE.map(String)} tint={TEMPLATE.map((t) => t !== 0)} />
+            <span className="mt-[4.7rem] text-lg" style={{ color: "var(--fg-faint)" }}>=</span>
+            <MiniGrid9 label="乘积" cells={products.map(String)} tint={products.map((p) => p !== 0)} />
           </div>
-          <table className="l09-table mt-3 w-full">
-            <thead>
-              <tr><th>网络的 p</th><th>交叉熵</th><th>读法</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>= π(0.6, 0.3, 0.1)</td><td className="num">{ceSelf.toFixed(3)}</td><td>下限:老师自带的犹豫</td></tr>
-              <tr><td>0.5, 0.3, 0.2</td><td className="num">{ceHand.toFixed(3)}</td><td>手算:离老师远一点</td></tr>
-              <tr><td>均匀(各 1/3)</td><td className="num">{ceUni.toFixed(3)}</td><td>撒胡椒面,罚得最狠</td></tr>
-            </tbody>
-          </table>
-          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            式子前的减号,分两步看就直白了:第一步,损失是罚分,训练只求把它
-            压到最小;第二步,「−Σπ·ln p 压到最小」翻过来就是「Σπ·ln p 拉到
-            最大」——π 大的地方 p 跟着大,网络的分往老师给的方向靠,罚分自然小。
-            全对齐也到不了 0——老师自己就分了三份,这份「下限」是老师的犹豫,
-            不是网络的错。
-          </p>
+          <div className="reveal-box mt-4">
+            <p className="num text-lg font-bold">
+              和 = <span data-qa="win-sum" style={{ color: "var(--accent-deep)" }}>{sum}</span>
+              <span className="ml-3 text-sm font-normal" style={{ color: "var(--fg-muted)" }}>
+                (窗口中心 ({wx}, {wy}))
+              </span>
+            </p>
+            <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+              「界」= 窗口伸出棋盘外,那一格按 0 算(棋盘外虚拟补一圈 0)。
+            </p>
+          </div>
+          {done && (
+            <div className="reveal-box mt-4 text-sm leading-relaxed" data-qa="scan-done">
+              81 格盖完,得数落成一张「嫌疑地图」:<strong>3</strong> 只出现在三连正上方
+              (一处窗口),<strong>2</strong> 跟在两头,<strong>1</strong> 沿着这条线铺开,
+              其余全 0——同一张模板、同一套 9 个数,一次扫描把整条横排的嫌疑全标了出来。
+            </div>
+          )}
         </div>
+      </div>
+      <figcaption className="figure-cap">
+        <span className="cap-no">部件 8-1</span>
+        每个得数都由本站引擎 <span className="mono">conv2d</span>(model.py stem 同款算子)
+        现算——不是预录的动画。「扫全盘」= 权重共享:一张模板走遍 81 格。
+      </figcaption>
+    </figure>
+  )
+}
+
+/* ============ 部件 2 · 真家伙:训练拧出来的模板 ============ */
+
+const REAL_TPL_SHOWN = 8
+
+function RealTemplates() {
+  const [w, setW] = useState<WeightsJson | null>(null)
+  useEffect(() => {
+    let alive = true
+    loadWeights().then((x) => {
+      if (alive) setW(x)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const tpl = useMemo(() => {
+    if (!w) return null
+    const flat = w.tensors["stem.0.weight"]
+    const shape = w.shapes["stem.0.weight"] // [48, 3, 3, 3]
+    let maxAbs = 0
+    for (const v of flat) maxAbs = Math.max(maxAbs, Math.abs(v))
+    return { flat, shape, maxAbs }
+  }, [w])
+
+  return (
+    <figure className="figure mt-12">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">部件 · 真家伙:第一层的前 {REAL_TPL_SHOWN} 张真模板</span>
+      </div>
+      <div className="p-4 md:p-5">
+        {!tpl ? (
+          <p className="text-sm" style={{ color: "var(--fg-muted)" }}>
+            正在加载真权重(weights-best.json,约 1.2 MB,训练 checkpoint 导出)……
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
+              {Array.from({ length: REAL_TPL_SHOWN }, (_, ch) => (
+                <RealTemplate key={ch} ch={ch} flat={tpl.flat} maxAbs={tpl.maxAbs} />
+              ))}
+            </div>
+            <p className="mt-4 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+              这些不是示意图:每一格灰度都是{" "}
+              <span className="mono">weights-best.json</span> 里{" "}
+              <span className="mono">stem.0.weight</span> 的真权重(悬停可看数值)。
+              每张模板是「3 张一套」,分别作用在己方面 / 对方面 / 颜色面上;
+              越黑 = 正权重越大,越白 = 负权重越大,中灰 = 0。人眼看它们像噪声——
+              因为没有一张是人画的:<strong>全网络第一层共 48 张,48 × 27 = 1296
+              个权重,每一个都是训练拧出来的</strong>(第 4 课计票器拖过的那 27 个,
+              就在这里)。结构只承诺「局部 + 处处通用」,长出什么样的探测器,
+              是训练的事。
+            </p>
+          </>
+        )}
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">部件 8-2</span>
-        两笔罚分就是 train.py 的两条损失:左侧 (v−z)² 在真训练里天天在算;
-        右侧手算与真实第 0 轮策略损失 4.434 同一口径——只是把 81 格缩成 3 格
-        好手算(81 格均匀乱猜的交叉熵 = ln 81 ≈ 4.394,正是曲线部件里那条乱猜线)。
+        真数据:weights-best.json 由 scripts/export_weights.py 从训练 checkpoint 导出;
+        此处展示前 8 张 / 共 48 张。
       </figcaption>
     </figure>
   )
 }
 
-/* ============ 部件 8-3 · 8 对称变换台:棋盘与 π 同步转 ============ */
+const PLANE_TAGS = ["己", "敌", "色"]
 
-const SYM_IDX = 17 // 第 18 手:π 81% 集中在偏心的 (2,4),转起来看得清
-
-const argmaxPi = (pi: number[]) => {
-  let a = 0
-  for (let i = 1; i < 81; i++) if (pi[i] > pi[a]) a = i
-  return a
-}
-
-function SymLab() {
-  const [k, setK] = useState(0)
-  const mv = MOVES[SYM_IDX]
-  const boardK = dihedral(STATES[SYM_IDX].board, k).flat()
-  const piK = dihedralPi(mv.pi, k)
-  const arg0 = argmaxPi(mv.pi)
-  const argK = argmaxPi(piK)
-
+function RealTemplate({
+  ch,
+  flat,
+  maxAbs,
+}: {
+  ch: number
+  flat: number[]
+  maxAbs: number
+}) {
   return (
-    <figure className="figure mt-8">
-      <div className="px-4 pt-3 sm:px-5">
-        <span className="mini-label">部件 8-3 · 8 对称变换台:一份棋谱八份用</span>
+    <div data-qa="tpl">
+      <div className="mini-label mb-1.5">
+        模板 <span className="num">{ch}</span>
       </div>
-      <div className="flex flex-col gap-5 p-4 sm:flex-row sm:p-5">
-        <div className="w-full sm:w-64 sm:flex-none" data-qa="sym-board">
-          <Board board={boardK} heat={piK} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="mini-label">抽哪种变换 k?(0-7:转 k%4 次 90°,k≥4 再镜像)</div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {Array.from({ length: 8 }, (_, i) => (
-              <button key={i} type="button" className={`btn ${k === i ? "active" : ""}`}
-                style={{ minWidth: "2.4rem" }} onClick={() => setK(i)} data-qa="sym-k">
-                {i}
-              </button>
-            ))}
+      <div className="flex gap-2">
+        {PLANE_TAGS.map((tag, p) => (
+          <div key={tag}>
+            <div className="mb-1 text-center text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>
+              {tag}
+            </div>
+            <div className="l03-rows inline-block">
+              {[0, 1, 2].map((r) => (
+                <div key={r} className="flex">
+                  {[0, 1, 2].map((c) => {
+                    const v = flat[((ch * 3 + p) * 3 + r) * 3 + c]
+                    const n = v / maxAbs // −1..1
+                    const l = Math.round(128 - n * 115) // 1→黑,−1→白
+                    return (
+                      <span key={c} className="l03-gray" title={String(v)}
+                        style={{ background: `rgb(${l},${l},${l})` }} />
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
           </div>
-          <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-            这是第 18 手的真实局面与 π(轮白,约 {Math.round(mv.top[0].prob * 100)}%
-            押在 {coord(mv.top[0].action)})。点 k,棋子和热度用
-            <em>同一个 k</em> 一起转——转它们的是 <span className="mono">game.ts</span> 的{" "}
-            <span className="mono">dihedral</span>(棋盘)与{" "}
-            <span className="mono">dihedralPi</span>(π),真引擎同款。
-          </p>
-          <div className="reveal-box mt-3 text-sm" data-qa="sym-argmax">
-            <span className="num">
-              π 的最大点:k=0 时在 {coord(arg0)} → k={k} 时在{" "}
-              <span style={{ color: "var(--accent-deep)" }}>{coord(argK)}</span>
-            </span>
-            <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-              答案跟着题目走:棋形转到哪,该下的点就转到哪。要是只转棋盘不转 π,
-              热度还留在老坐标——同一道题配了别的题的答案,这份数据就废了。
-              z 是一个数,转不转都是它。
-            </p>
-          </div>
-        </div>
-      </div>
-      <figcaption className="figure-cap">
-        <span className="cap-no">部件 8-3</span>
-        训练时每条样本上阵前随机抽一个 k(train.py L38-40),不真复制八份——
-        存储一分不花,等效数据八倍多样。
-      </figcaption>
-    </figure>
-  )
-}
-
-/* ============ 部件 8-4 · 真实曲线:4 轮的 metrics,手绘折线 ============ */
-
-interface Series {
-  name: string
-  vals: number[]
-  dash?: number // 参照线(如乱猜线)
-  dashLabel?: string
-  fmt: (n: number) => string
-}
-
-function MetricCharts() {
-  const series: Series[] = [
-    { name: "总损失 loss", vals: M.map((r) => r.loss!), fmt: (n) => n.toFixed(2) },
-    { name: "策略损失", vals: M.map((r) => r.policy_loss!), dash: LN(81), dashLabel: "乱猜线 ln81", fmt: (n) => n.toFixed(3) },
-    { name: "价值损失", vals: M.map((r) => r.value_loss!), fmt: (n) => n.toFixed(3) },
-    { name: "经验池(条)", vals: M.map((r) => r.buffer), fmt: (n) => n.toFixed(0) },
-  ]
-
-  return (
-    <figure className="figure mt-8">
-      <div className="px-4 pt-3 sm:px-5">
-        <span className="mini-label">部件 8-4 · 真实曲线:4 轮训练的全部指标</span>
-      </div>
-      <div className="grid grid-cols-1 gap-5 p-4 sm:grid-cols-2 sm:p-5" data-qa="metric-charts">
-        {series.map((s) => (
-          <MiniChart key={s.name} s={s} />
         ))}
       </div>
-      <figcaption className="figure-cap">
-        <span className="cap-no">真数据</span>
-        metrics.jsonl 全部 4 轮,一个不落:总损失与策略损失贴着乱猜线松动,
-        价值损失第 2 轮下探到 {M[2].value_loss!.toFixed(3)} 又弹回{" "}
-        {M[3].value_loss!.toFixed(3)},池子每轮稳定涨。
-        <strong>只有 4 个点,读趋势、别读单点</strong>——下探一次不叫学会,
-        弹回一次也不叫白学;棋力到底涨没涨,第 9 课的竞技场说了算。
-      </figcaption>
-    </figure>
-  )
-}
-
-function MiniChart({ s }: { s: Series }) {
-  const W = 240, H = 120, PL = 42, PR = 10, PT = 14, PB = 22
-  const lo = Math.min(...s.vals, s.dash ?? Infinity)
-  const hi = Math.max(...s.vals, s.dash ?? -Infinity)
-  const pad = (hi - lo) * 0.15 || 0.1
-  const yOf = (n: number) => H - PB - ((n - (lo - pad)) / (hi + pad - (lo - pad))) * (H - PT - PB)
-  const xOf = (i: number) => PL + (i / (s.vals.length - 1)) * (W - PL - PR)
-  const pts = s.vals.map((n, i) => `${xOf(i).toFixed(1)},${yOf(n).toFixed(1)}`).join(" ")
-
-  return (
-    <div>
-      <div className="mini-label">{s.name}</div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
-        <line x1={PL} y1={H - PB} x2={W - PR} y2={H - PB}
-          style={{ stroke: "var(--hairline-strong)" }} strokeWidth={1} />
-        <text x={PL - 5} y={PT + 3} fontSize={8.5} textAnchor="end" className="num"
-          style={{ fill: "var(--fg-faint)" }}>{s.fmt(hi)}</text>
-        <text x={PL - 5} y={H - PB} fontSize={8.5} textAnchor="end" className="num"
-          style={{ fill: "var(--fg-faint)" }}>{s.fmt(lo)}</text>
-        {s.dash !== undefined && (
-          <>
-            <line x1={PL} y1={yOf(s.dash)} x2={W - PR} y2={yOf(s.dash)}
-              strokeDasharray="5 4" style={{ stroke: "var(--fg-faint)" }} strokeWidth={1} />
-            <text x={W - PR} y={yOf(s.dash) - 4} fontSize={8.5} textAnchor="end" className="num"
-              style={{ fill: "var(--fg-faint)" }}>{s.dashLabel}</text>
-          </>
-        )}
-        <polyline points={pts} fill="none" style={{ stroke: "var(--accent)" }} strokeWidth={2}
-          strokeLinejoin="round" strokeLinecap="round" />
-        {s.vals.map((n, i) => (
-          <circle key={i} cx={xOf(i)} cy={yOf(n)} r={3.4} style={{ fill: "var(--accent-deep)" }} />
-        ))}
-        {s.vals.map((_, i) => (
-          <text key={`x${i}`} x={xOf(i)} y={H - PB + 13} fontSize={8.5} textAnchor="middle"
-            className="num" style={{ fill: "var(--fg-faint)" }}>轮{i}</text>
-        ))}
-      </svg>
     </div>
   )
 }
