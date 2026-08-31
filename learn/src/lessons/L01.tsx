@@ -30,7 +30,7 @@ export default function L01() {
             ],
             answer: 1,
             explain:
-              "选 B。计算机能直接计算的最小材料是数:81 个交叉点,一点一个数,整盘棋就是一个 9×9 的数组。图片和文字最终也要先翻译成数才能算——那不如直接用数,还省掉翻译。",
+              "选第二项。数是电脑的积木:它只搬得动数,照片和文字都得先拆成数才搬得动。81 个交叉点,一点一个数,整盘棋就是一个 9×9 的数组——就是排成 9 行 9 列的一组数。既然绕不开数,不如一开始就用数,还省掉翻译这道工序。",
           },
         ]}
       />
@@ -39,20 +39,24 @@ export default function L01() {
         <h3>揭晓 1 · 一盘棋就是一个 9×9 数组</h3>
         <p>
           先把游戏本身说清(会下的可以跳这句):五子棋,黑白两方轮流在棋盘的空交叉点上
-          各放一颗自己的子,子落下之后不动、也不被吃掉;谁先让自己的
+          各放一颗自己的子。子落下之后不动、也不被吃掉。谁先让自己的
           <strong>五颗</strong>子横着、竖着或斜着连成一排,谁赢。棋盘是 9×9,
           共 81 个交叉点。
         </p>
         <p>
           现在把它变成数。给每个交叉点记一个数:<strong>0 = 空,1 = 黑,−1 = 白</strong>
-          。于是任何一个局面——开局、中盘、终局——都是同一个形状:9×9 = 81 个数。
-          为什么不用 (x, y) 坐标对或者「棋子对象」?语义上没区别,但
-          <em>下标即坐标</em>,数组的一切现成运算直接可用,没有翻译损耗。
+          。−1 是比 0 还小的数,像冬天的零下 1 度。黑是 1、白是 −1,一正一负正好一对,
+          这个安排后面有大用。于是任何一个局面——开局、中盘、终局——都是同一个形状:
+          9×9 = 81 个数。
+          为什么不用两个数——「第几行、第几列」——来记一个点?其实记的正是
+          这两个数,只是把它们<strong>拼成一个数</strong>(下一句的拼法),拼法
+          固定,想拆随时拆得回去,不用来回翻译。
         </p>
         <p>
-          一手棋也压成一个整数:<strong>action = y × 9 + x</strong>。y 是行号(从上往下,
+          一手棋也拼成一个整数:<strong>action = y × 9 + x</strong>(action 就是「动作」)。y 是行号(从上往下,
           从 0 数起),x 是列号(从左往右,从 0 数起)。棋盘正中间那颗点叫
-          <em>天元</em>,坐标 (y=4, x=4):4 × 9 + 4 = <strong>40</strong>。
+          <em>天元</em>,坐标 (x=4, y=4)——括号还是老规矩:第一个数对底边、第二个对左边。
+          4 × 9 + 4 = <strong>40</strong>。
           81 个格子恰好编号 0 到 80,一格一个数,一个不多一个不少——
           所以五子棋恰好有 81 个可能的动作。
         </p>
@@ -65,15 +69,16 @@ export default function L01() {
         </div>
         <figcaption className="figure-cap">
           <span className="cap-no">图 1-1</span>
-          天元 (y=4, x=4):4 × 9 + 4 = 40。x 向右,y 向下,都从 0 数起。
+          天元 (x=4, y=4):4 × 9 + 4 = 40。x 向右,y 向下,都从 0 数起。
         </figcaption>
       </figure>
 
       <div className="prose mt-8">
         <p>
-          落子这个动作,在数组眼里就是<strong>一次赋值</strong>:把那一格写成当前方的颜色。
-          上面这三行约定(0/1/−1、y×9+x、赋值落子)就是五子棋的全部「机器语法」。
-          下面亲手练熟它——注意右侧表格里,你点下的每一步都变成一个数。
+          落子这个动作,在数组眼里就是<strong>一次「赋值」</strong>:把那一格的数换成
+          当前方的数——黑落写 1,白落写 −1。上面这三行约定(0/1/−1、y×9+x、赋值落子)
+          就是五子棋的全部「机器语法」。下面亲手练熟它——注意右侧表格里,你点下的
+          每一步都变成一个数。
         </p>
       </div>
 
@@ -87,24 +92,31 @@ export default function L01() {
           别的棋子上一手就摆在那里,要是它们已经凑成五连,上一手就该判出来了,轮不到现在。
         </p>
         <p>
-          所以判胜只做一件事:以刚落的子为<strong>锚点</strong>,沿横、竖、两种斜共 4 个方向,
-          正着数一遍同色连子、反着数一遍:
+          所以判胜只做一件事:以刚落的子为<strong>锚点</strong>。锚就是钉住船的大铁钩——
+          数连子的起点,钉死在刚落的这颗子上。接着沿横、竖、两种斜共 4 个方向,
+          往一边数一遍同色连子、再往另一边数一遍:
         </p>
         <div className="formula">
-          连成数 = <span className="hl">1</span>(锚点)+ 正方向连子 + 反方向连子 ≥ 5 ?
+          连成数 = <span className="hl">1</span>(锚点)+ 一边的连子 + 另一边的连子 ≥ 5 ?
         </div>
         <p>
-          任何一个方向够 5,当场判胜。用手算一遍最踏实:横排上已有黑子 (2,4)、(3,4)、
-          (5,4),黑落 (4,4)——从 (4,4) 往左数到 2 颗、往右数到 1 颗:1 + 2 + 1 = 4,
-          还没赢。若黑接着落 (6,4),<em>锚点换成刚落的 (6,4)</em>:往左数到 4 颗、
-          往右 0 颗:1 + 4 + 0 = 5,黑胜。下面把这两手棋摆给你亲手数——
-          每按一次「数下一方向」,棋盘上就点亮那个方向数到的子。
+          式子末尾的 ≥ 读作「达到或超过」,在这里就是「够 5」的意思。任何一个方向
+          够 5,当场判胜。用手算一遍最踏实:括号里写成 (x, y)——前一个数是列 x、
+          后一个是行 y。横排上已有黑子 (2,4)、(3,4)、(5,4),黑落 (4,4)——从 (4,4)
+          往左数到 2 颗、往右数到 1 颗:1 + 2 + 1 = 4,还没赢。若黑接着落 (6,4),
+          <em>锚点换成刚落的 (6,4)</em>:往左数到 4 颗、往右 0 颗:1 + 4 + 0 = 5,
+          黑胜。下面把这两手棋摆给你亲手数——每按一次「数下一方向」,棋盘上就点亮
+          那个方向数到的子。
         </p>
       </div>
 
       <WinCount />
 
       <Ledger title="game.py(数组怎么存、怎么判胜)">
+        <p className="mt-0 mb-3">
+          (「对账」= 像核对账单一样,把课文讲的道理和真正的代码一行行对上。
+          下面这些代码是给大人和未来的你看的,现在跳过也行。)
+        </p>
         <div className="codewalk">
           <pre>{`# L6  一个数装一个格子
 EMPTY, BLACK, WHITE = 0, 1, -1`}</pre>
@@ -112,7 +124,7 @@ EMPTY, BLACK, WHITE = 0, 1, -1`}</pre>
         <div className="codewalk">
           <pre>{`# L49-63  落子 = 一次赋值 + 换手
 def play(self, action: int) -> None:
-    y, x = divmod(action, n)        # ← y×9+x 的逆运算:除 9 取整得 y,余数得 x
+    y, x = divmod(action, n)        # ← y×9+x 倒回去算:action ÷ 9,商是 y,余数是 x
     if self.board[y, x] != EMPTY:
         raise ValueError(f"square ({x}, {y}) is occupied")
     self.board[y, x] = self._current
@@ -140,8 +152,10 @@ def _is_win_at(self, y, x) -> bool:
     return False`}</pre>
         </div>
         <p className="mt-3">
-          本站引擎 <span className="mono">learn/src/engine/game.ts</span> 是这段 Python
-          的逐行镜像(Ledger 行号可对账;TS 侧语义单测见 tests/game.test.ts)。
+          「引擎」就是让游戏真正跑起来的那套程序。本站引擎 <span className="mono">learn/src/engine/game.ts</span> 是
+          照着上面这段 Python 一行一行写出来的。注释里标了行号(L6、L49-63 这些),
+          你可以自己数一数,看每行是不是真的对得上。给大人:tests/game.test.ts
+          里另有一套自动检查。
         </p>
       </Ledger>
 
@@ -166,11 +180,11 @@ def _is_win_at(self, y, x) -> bool:
             options: [
               "为了凑个整数,其实 80 或 82 也行",
               "棋盘 9×9 = 81 个交叉点,y×9+x 给每格一个 0…80 的编号,一格一个,恰好 81 个",
-              "因为网络只能输出 81 个数",
+              "因为「大脑」只装得下 81 个数",
             ],
             answer: 1,
             explain:
-              "81 个交叉点各占一个编号,一个不多一个不少。第 10 课你会看到网络的「策略头」也输出 81 个分数——每格一个,形状就是从棋盘这里定下的。",
+              "81 个交叉点各占一个编号,一个不多一个不少。第 10 课你会看到:那个学下棋的「大脑」也要给 81 个格子各打一个分。为什么也正好是 81 个?就是从棋盘这里定下的。",
           },
           {
             q: "判胜为什么只看最后一手就够?",
@@ -181,7 +195,7 @@ def _is_win_at(self, y, x) -> bool:
             ],
             answer: 1,
             explain:
-              "落子只新增一颗子,新出现的五连必含这颗新子。所以从落点往四个方向数连子即可:几行算术,代替每手几十倍工作量的全盘扫描——用一点观察换一大笔计算。",
+              "落子只新增一颗子,新出现的五连里一定有这颗新子。所以只要从落点往四个方向数连子:几行算术,就省下了每落一子都翻遍全盘的大工夫——用一点观察换一大笔计算。",
           },
         ]}
       />
@@ -232,7 +246,7 @@ function TapGrid() {
       setTarget(rnd81(target))
     } else {
       setHitCell(null)
-      setFeedback({ ok: false, msg: `你点的是 (${x},${y}):${y} × 9 + ${x} = ${a},不等于 ${target}。再想想:y 该是 ${target} ÷ 9 取整,x 是余数。` })
+      setFeedback({ ok: false, msg: `你点的是 (${x},${y}):${y} × 9 + ${x} = ${a},不等于 ${target}。再想想:y 该是 ${target} ÷ 9 的商,x 是余数。` })
     }
   }
 
@@ -280,12 +294,12 @@ function TapGrid() {
         <div className="min-w-0 flex-1">
           {mode === "place" ? (
             <div>
-              <div className="mini-label">棋盘的数值形态(同一步,两张脸)</div>
+              <div className="mini-label">棋盘写成数的样子(同一步,两张脸)</div>
               <div className="mt-2 overflow-x-auto">
                 <NumTable board={board} lastIdx={last} />
               </div>
               <div className="reveal-box mt-4">
-                <div className="mini-label">最后一手的算术展开</div>
+                <div className="mini-label">最后一手的算式</div>
                 {last === null ? (
                   <p className="mt-1.5 text-sm" style={{ color: "var(--fg-muted)" }}>
                     点棋盘任意交叉点,这里就会出现它的编号算式。
@@ -301,7 +315,7 @@ function TapGrid() {
                 <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
                   <span className="l01-hl-y">y</span> 行号(上下,红)、
                   <span className="l01-hl-x">x</span> 列号(左右,下划线);反着算:
-                  y = action ÷ 9 取整,x = 余数。
+                  y = action ÷ 9 的商(不带余数的那一半),x = 余数。
                 </p>
               </div>
             </div>
@@ -330,8 +344,8 @@ function TapGrid() {
       <figcaption className="figure-cap">
         <span className="cap-no">部件 1-1</span>
         {mode === "place"
-          ? "点交叉点落子(黑白轮替):右侧数组即时更新,最后一手给出 y×9+x 的算术展开。"
-          : "反向练习:给定 action 数字,点出它对应的格子——答对打勾换下一题。"}
+          ? "点交叉点落子(黑白轮流):右侧数组即时更新,最后一手给出 y×9+x 的算式。"
+          : "反向练习:给你一个 action 数字,点出它对应的格子——答对打勾换下一题。"}
       </figcaption>
     </figure>
   )
@@ -472,14 +486,14 @@ function WinCount() {
             </div>
           )}
           <p className="mt-4 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            演示为专注「数数」让黑棋连走两手(真实对局黑白轮流)。
+            为了让你专心看「数数」,这里让黑棋连走了两手(真实对局是黑白轮流的)。
             顺带:81 格填满仍无五连,判和棋。
           </p>
         </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">部件 1-2</span>
-        手算例子的可操作版:1 + 正 + 反 ≥ 5,锚点永远是刚落的那颗子。
+        手算例子的动手版:1 + 一边 + 另一边 ≥ 5,锚点永远是刚落的那颗子。
       </figcaption>
     </figure>
   )

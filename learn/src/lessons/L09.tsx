@@ -1,5 +1,5 @@
 /** 第 9 课 · 叠层:看见全盘。
- *  节拍:谜题(单层 3×3 怎么看全盘)→ 揭晓(视野每层 +2;层数 = 抽象层级;
+ *  节拍:谜题(单层 3×3 怎么看全盘)→ 揭晓(视野每层 +2;越深管的事越大;
  *  残差/BN 一句话)→ 部件 1(层深滑杆:视野框 3×3 → 15×15)→
  *  部件 2(真特征图墙:traceNet + weights-best,stem 与三个残差块各取前 6 通道)→
  *  对账(model.py ResBlock / blocks)→ 小测。 */
@@ -23,7 +23,7 @@ const STATE: GameState = (() => {
   return { board, current: 1, winner: 0, moveCount: 3, lastMove: null }
 })()
 
-export default function L05() {
+export default function L09() {
   const pass = usePassLesson()
 
   return (
@@ -35,15 +35,15 @@ export default function L05() {
         title="谜题 · 先选一个答案"
         questions={[
           {
-            q: "单张模板只看得见 3×3 的一小片,可「这边阵厚、那边势薄」是全盘的事。怎么让它看见全盘?",
+            q: "单张模板只看得见 3×3 的一小片,可「这边我子一大片、那边子很稀」是全盘的事。怎么让它看见全盘?",
             options: [
               "把模板做大:直接造一张 9×9 的大模板,一步看全",
-              "叠层:小模板一层层叠上去,视野每层 +2",
+              "叠层:小模板一层层叠上去,能看的范围每层大一圈",
               "没办法,模板天生只能看局部",
             ],
             answer: 1,
             explain:
-              "选 B。大模板一张 81 个权重、参数暴涨不说,还把「先认局部棋形、再拼全局形势」的层次压扁了。叠层让第二层的每个格子站在第一层的肩膀上:小窗还是 3×3,视野一圈圈长大——怎么长的,马上算给你看。",
+              "选第二项。一张 9×9 大模板要 81 个旋钮,旋钮太多、太难拧好;更要紧的是,它想一步到位认完所有东西,省掉了「先认小的、再拼大的」这段楼梯,反而学不稳。叠层让第二层的每个格子站在第一层的肩膀上:小窗还是 3×3,能看的一片却一圈圈变大——怎么变的,马上算给你看。",
           },
         ]}
       />
@@ -52,26 +52,30 @@ export default function L05() {
         <h3>揭晓 · 每叠一层,视野 +2</h3>
         <p>
           一层 3×3 只看 3×3;两层叠起来,第二层的每个格子拿第一层
-          <em>九个格子的得数</em>当原料——它的视野是 5×5。规律:
-          <strong>每多叠一层,视野边长 +2</strong>。本模型的主干:第一层(stem)1 层,
-         后面 3 个残差块 × 每块 2 层,共 <strong className="num">7</strong> 层:
+          <em>九个格子的得数</em>当原料。那九个格子紧挨着排成 3×3,每个又向外
+          多看一圈——拼起来,第二层的视野(能看多大的一片)恰好是 5×5。
+          规律:<strong>每多叠一层,视野边长 +2</strong>。本模型的第一层叫 stem,
+          后面还叠 6 层;每两层编成一组,一组叫一个「残差块」,一共 3 组。
+          合起来 <strong className="num">7</strong> 层:
         </p>
         <div className="formula">
           视野边长 = <span className="hl">3</span> + 2 × (层数 − 1) → 7 层:
           3 + 2×<span className="hl">6</span> = <span className="hl">15</span>
         </div>
+        <p>式子念出来:层数减 1,就是要多加几个 2。</p>
         <p>
-          15×15 盖过 9×9 全盘还有富余。而且层数买的不只是视野:
-          <strong>层数 = 抽象层级</strong>。浅层的模板认<em>子和形</em>——这三格挨着、
-          这里有个冲四;深层的模板拿浅层的得数当原料,认<em>势</em>——这一大片我厚敌薄。
-          小窗直接看「势」看不出来,一层层把局部拼装成全局。
+          15×15 比整张 9×9 棋盘还多出一大圈。层数买的不只是视野:
+          <strong>越深,管的事越大</strong>。浅层的模板认<em>子和形</em>——这三格挨着、
+          这里四颗子排好、再落一颗就赢(行话叫「冲四」);深层的模板拿浅层的得数当原料,
+          认<em>势</em>——势,就是一大片里谁强谁弱。小窗直接看「势」看不出来,
+          一层层把局部拼装成全局。
         </p>
         <p>
           两个工程细节,一句话各带过(代码在对账折叠里):①<em>残差</em>:每两层开一条
-          捷径,输出 = 输入 + 修正量——误差账(第 6 课的回摊:罚分沿网络反向
-          逐环摊到每个旋钮的账)沿捷径这条加法直路往回走,那段的账恰好是 1、
-          不参与连乘,几十层也摔不死;本模型只有 7 层,捷径是保险。②<em>BN</em>:
-          每层算完,先把数值的分布校准成标准形状再放出去,训练更稳
+          捷径,出来的一张 = 进去的那张 + 改了一点的量。第 6 课的误差账往回走时,
+          捷径这段是加法,不放大数,账恰好是 1。乘不到它头上,几十层也摔不死;
+          本模型只有 7 层,捷径是保险。②<em>BN</em>:每层算完,
+          先把一群忽高忽低的数拉回不高不矮的平常个头,再交给下一层,训练更稳
           (第 7 课说过它的另一份差事:抹掉输入里的恒定零头)。
         </p>
       </div>
@@ -81,6 +85,10 @@ export default function L05() {
       <FeatureWall />
 
       <Ledger title="model.py L18-21(ResBlock)、L37(blocks)">
+        <p className="text-sm">
+          下面几行是代码原文,看不懂符号没关系,只看中文注:x 是进去的那张图,
+          h 是「改了一点」的新图;最后一行 x + h 把两张加起来,捷径就在这儿。
+        </p>
         <div className="codewalk">
           <pre>{`# L18-21  残差块:两层 3×3 卷积 + 一条捷径(x + h)
 def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -95,7 +103,7 @@ self.blocks = nn.Sequential(*[ResBlock(channels) for _ in range(res_blocks)])`}<
         <p className="mt-3">
           每块两层 3×3 卷积 → 每过一块视野 +4(一层 +2);stem 之后叠 3 块,
           3 + 2×6 = 15。BN 就是上面 <span className="mono">bn1/bn2</span> 那两行:
-          校准形状的稳定器。本站引擎{" "}
+          正文说的「把忽高忽低的数拉回平常个头」,就是它们干的。本站引擎{" "}
           <span className="mono">learn/src/engine/model.ts</span> 的{" "}
           <span className="mono">resBlock</span> 与它逐条对齐——部件二的真特征图
           就是这个函数一层层算出来的。
@@ -111,11 +119,11 @@ self.blocks = nn.Sequential(*[ResBlock(channels) for _ in range(res_blocks)])`}<
             options: [
               "7 × 3 = 21 格",
               "3 + 2 × (7 − 1) = 15:第一层 3×3,每多叠一层边长 +2",
-              "算不出来,要看每张模板的权重才知道",
+              "算不出来,要看每张模板的旋钮才知道",
             ],
             answer: 1,
             explain:
-              "规律与权重无关,是结构给的:第 1 层看 3,第 2 层看 5,第 3 层看 7……每层把上一层的九个得数当原料,视野每层 +2。滑杆从 1 拨到 7 亲手数一遍:3、5、7、9、11、13、15。",
+              "规律与旋钮无关,是结构给的:第 1 层看 3,第 2 层看 5,第 3 层看 7……每层把上一层的九个得数当原料,视野每层 +2。滑杆从 1 拨到 7 亲手数一遍:3、5、7、9、11、13、15。",
           },
           {
             q: "浅层和深层各自认什么?",
@@ -126,7 +134,7 @@ self.blocks = nn.Sequential(*[ResBlock(channels) for _ in range(res_blocks)])`}<
             ],
             answer: 0,
             explain:
-              "部件二的真特征图墙上肉眼可见:stem 那一排的亮斑贴着三颗子;到第三块,亮暗已经连成大片。棋形证据全来自「己方/对方」两张面——canonical 早已把黑白抹平;颜色只剩输入侧那张恒定的颜色面(整面同一个数,只报轮到谁,变不出棋形)。",
+              "部件二的图墙上肉眼可见:stem 那一排的亮斑贴着三颗子;到第三块,亮暗已经连成大片。棋形证据全来自「己方/对方」两张面——canonical 早已把黑白抹平。剩下的颜色面整面是同一个数,只报轮到谁走,认不出棋形。",
           },
           {
             q: "残差的捷径(x + h)是干什么用的?",
@@ -137,7 +145,7 @@ self.blocks = nn.Sequential(*[ResBlock(channels) for _ in range(res_blocks)])`}<
             ],
             answer: 1,
             explain:
-              "捷径的本事是「什么都不做也打平」:修正量学成 0,输入原样通过,多出来的层不会拖后腿;误差往回传时,直路那段是加法、账恰好是 1、不参与连乘(第 6 课的 1+F′)。本模型 7 层,残差是保险;压通道是两个输出头的活(第 10 课)。",
+              "捷径的本事是「什么也不修,答案也不变差」:把修正量拧到 0 就行,多出来的层不拖后腿。误差往回传时,直路那段是加法、账恰好是 1、不参与连乘(第 6 课的 1+F′)。本模型 7 层,残差是保险;把 48 张图并成最后的答案,是第 10 课的事。",
           },
         ]}
       />
@@ -294,7 +302,10 @@ function FeatureWall() {
   return (
     <figure className="figure mt-12">
       <div className="px-4 pt-4 sm:px-5">
-        <span className="mini-label">部件 · 真特征图:同一局面,过一遍真网络</span>
+        <span className="mini-label">部件 · 真特征图:上一课的嫌疑地图,每层都有 48 张</span>
+        <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+          看亮的地方:第一排的亮斑贴着三颗子;到最后一排,亮暗连成大片。
+        </p>
       </div>
       <div className="overflow-x-auto p-4 md:p-5">
         {!trace ? (
@@ -321,9 +332,9 @@ function FeatureWall() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">部件 9-2</span>
-        真引擎 + 真权重:<span className="mono">traceNet</span>(model.ts)对三连局面做一次前向,
-        取主干每层的前 {CHANNELS_SHOWN} 个通道(每层共 48 张)。亮 = 该通道在这里激活强。
-        结果缓存,切换展示不重算。
+        真引擎 + 真权重:<span className="mono">traceNet</span>(model.ts)对三连局面从头到尾算一遍。
+        每层 48 张模板,就有 48 张得数小图,一张叫一个「通道」;这里每层摆出前 {CHANNELS_SHOWN} 张。
+        亮 = 这张图在这里得的分高。只算一遍,滚动看不卡。
       </figcaption>
     </figure>
   )

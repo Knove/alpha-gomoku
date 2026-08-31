@@ -83,12 +83,12 @@ export function Quiz({
       })}
       {gated && done && allRight && (
         <p className="mt-5 font-semibold" style={{ color: "var(--accent-deep)" }}>
-          ✓ 过关,下一课已解锁
+          ✓ 过关,下一课已解锁——点左侧目录接着走
         </p>
       )}
       {gated && wrongCount > 0 && (
         <p className="mt-5 flex flex-wrap items-center gap-3" style={{ color: "var(--fg-muted)" }}>
-          有答错的题已标出,想一想再往下读
+          有答错的题已标出,想好后点「重答」重新选(会清空这份小测的全部答案)
           <button type="button" className="btn" onClick={() => setPicked({})}>
             重答
           </button>

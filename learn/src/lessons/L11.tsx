@@ -60,7 +60,7 @@ export default function L11() {
             ],
             answer: 1,
             explain:
-              "选 B。A 和 C 都在给「看一眼」加料——但看一眼终究是看一眼:再大的网络、再多的棋谱,看一眼仍只是第一印象,直觉再强也不会自己推演「我下这、对手应那」——推演是搜索的事,不是直觉的事。B 不换眼睛,换用法:让网络当向导,顺着它指的方向把「我下这、对手应那」真的走几遍,把每条路的结果记成账,几十次之后统计说了算。这就是本课的搜索——它不另买算力,只花预算。",
+              "选第二项。第一项和第三项都在给「看一眼」加料——但看一眼终究是看一眼:再大的网络、再多的棋谱,看一眼仍只是第一印象,直觉再强也不会自己推演「我下这、对手应那」——推演是搜索的事,不是直觉的事。第二项不换眼睛,换用法:让网络当向导,顺着它指的方向把「我下这、对手应那」真的走几遍,把每条路的结果记成账,几十次之后统计说了算。这就是本课的搜索——它不换更大的网络,只花固定的几十次「想」的次数。",
           },
         ]}
       />
@@ -71,18 +71,23 @@ export default function L11() {
           <strong>① 模拟 = 一次推演。</strong>推演的产物长成一棵<em>树</em>:
           节点是局面,边是落子,根就是现在要下的局面。一次推演(
           <em>模拟</em>)从根出发,每个岔口挑「目前最值得看」的那条边往下走,
-          走到<em>没见过的局面</em>就停,问网络的看法。老派搜索在这里靠随机乱下到终局
-          ——五子棋里随机终局几乎不含信息;这里的做法:一撞见新局面就停,
-          网络的估值直接当「终局替身」。一次模拟最多问网络一次,40 次模拟笔记本扛得住。
+          走到<em>没见过的局面</em>就停(走到头的这个局面叫<em>叶子</em>,树的最末端),
+          问网络的看法。老派搜索在这里靠随机乱下到终局
+          ——随机下完的那盘,输赢纯靠瞎碰,说明不了哪手好;这里的做法:一撞见新局面就停,
+          网络的估值直接当「终局替身」(替身=这盘没下完,先拿网络的打分顶上)。
+          一次模拟最多问网络一次,40 次模拟笔记本扛得住。
         </p>
         <p>
-          <strong>② PUCT:每条边一本账。</strong>每条边记两个数:<em>N</em>
+          <strong>② 岔口公式(行话叫 PUCT):每条边一本账。</strong>每条边记两个数:<em>N</em>
           (被看过几次)和 <em>W</em>(历次得分总和),商 W/N 记作 <em>Q</em>
           (历史平均)。岔口怎么挑?一行公式两头都照顾:
         </p>
         <div className="formula">
           score(a) = <span className="hl">Q(a)</span>(历史平均,裁判)+
           c · P(a) · √ΣN / (1 + N(a))(没看过的加分,探索)
+          (a 指某一条边、某一手:N(a) 就是这条边记的 N,每条边各套一遍这个公式;
+          ΣN=各条边看过的次数统统加起来;√ 根号只是让这个数长得慢一点,
+          这里不用管怎么算)
         </div>
         <p>
           P 是<em>网络先验</em>——网络说这里值得先看(第 10 课那 81 个分数派上用场了)。
@@ -90,10 +95,10 @@ export default function L11() {
           公式里的 c 是探索强度的旋钮(本站取 1.5):c 越大,越爱试冷门的
           没看过的手;c 越小,越死磕眼下最赚的那条。
           没看过的手(N 小)探索分高,<em>总会轮到</em>;看得多的手探索分自然衰减,
-          最后由 Q 说了算。两个都不偏:纯认 Q 是一棵树上吊死,纯均匀是撒胡椒面。
+          最后由 Q 说了算。两个都不偏:纯认 Q 是一棵树上吊死,纯均匀是撒胡椒面(每处撒一点,哪处都没看够)。
         </p>
         <p>
-          <strong>③ 逐层取负:账要对得上视角。</strong>所有数值都站在
+          <strong>③ 逐层取负(= 每爬一层,正负号翻一次):账要对得上视角。</strong>所有数值都站在
           「当前轮到谁下」的视角(第 2 课的铁约)。我的大优就是对面的劣势:
           黑白每换一手,符号翻一次。所以叶估值往回记的时候,<em>每爬一层翻一次符号</em>
           ——叶子说「我(行棋方)+1」,记到上一层的边上是 −1(对那边是劣),
@@ -105,7 +110,7 @@ export default function L11() {
           <strong>④ 访问数说了算。</strong>40 次推演跑完,哪手被反复看最多就下哪。
           为什么不直接挑 Q 最高?一个候选若只被撞见 1 次、碰巧拿了 +1,Q 也是满分,
           和被检验 20 次平均出来的 +1 长得一模一样——<em>Q 分不清底气,N 分得清</em>
-          。访问数把先验的方向、Q 的成色、检验的次数炖成一锅,是整个过程的总结算。
+          。访问数把先验的方向、Q 的可靠程度、检验的次数炖成一锅,是整个过程的总结算。
         </p>
       </div>
 
@@ -140,12 +145,12 @@ def best_action(self):
     return int(np.argmax(masked))`}</pre>
         </div>
         <p className="mt-3">
-          部件的三键 <span className="mono">①选择 → ②展开 → ③回传</span> 正是
+          上面这几段代码是给大人对账用的——看不懂可以直接跳过,不影响学。部件的三键{" "}
+          <span className="mono">①选择 → ②展开 → ③回传</span> 走的正是
           <span className="mono">select → needsEval/leafInput → expandAndBackup</span>
-          的协议;本站引擎 <span className="mono">learn/src/engine/mcts.ts</span>{" "}
-          与这份 Python 逐行镜像(Ledger 行号可对账)。唯一的界面差异:Python
-          端 Predictor 先做 softmax 再交概率,TS 端 evalFn 吐裸 logits、
-          由 expandAndBackup 内部做 softmax——数学同一件事。
+          这同一套流程;本站引擎 <span className="mono">learn/src/engine/mcts.ts</span>{" "}
+          和这份 Python 一行一行对得上(Ledger 行号可对账)。唯一的小差别:两边把
+          softmax(把分数变成概率那一步)放在先后不同的位置做——算法一字不差。
         </p>
       </Ledger>
 
@@ -173,18 +178,18 @@ def best_action(self):
             ],
             answer: 1,
             explain:
-              "所有数值都站在「当前轮到谁」的视角:叶子轮到白,白输 −1;往上一层是黑的账,黑赢当然记 +1。回传每爬一层 v = −v 翻一次,整条链每条边的 Q 才都站在「选这条边的那一方」视角,不自相矛盾。",
+              "所有数值都站在「当前轮到谁」的视角:叶子轮到白,白输 −1;往上一层是黑的账,黑赢当然记 +1。回传每爬一层就把 v 的正负号翻一次(代码记作 v = −v——那个等号是「变成」的意思,不是「两边相等」),整条链每条边的 Q 才都站在「选这条边的那一方」视角,不自相矛盾。",
           },
           {
             q: "40 次推演跑完,为什么按访问数 N 落子,而不是挑 Q 最高的?",
             options: [
               "因为 N 计算起来更简单",
-              "因为 Q 分不清底气:只被看过 1 次、碰巧 +1 的候选,和被检验 20 次平均出来的 +1 长得一模一样;N 把先验方向、Q 成色、检验次数炖成一锅",
+              "因为 Q 分不清底气:只被看过 1 次、碰巧 +1 的候选,和被检验 20 次平均出来的 +1 长得一模一样;N 把先验方向、Q 的可靠程度、检验次数炖成一锅",
               "因为 Q 有正有负,N 永远是正数",
             ],
             answer: 1,
             explain:
-              "Q 是平均,平均分不清「一次的运气」和「二十次的底气」。访问数高的手,是被先验领来、又被 Q 留下的手——三种信息它都收到。训练时干脆拿 N/ΣN 当老师(π),第 12 课的飞轮就从这里起转。",
+              "Q 是平均,平均分不清「一次的运气」和「二十次的底气」。访问数高的手,是被先验领来、又被 Q 留下的手——三种信息它都收到。训练时干脆拿 N/ΣN 当老师(π;意思是「这一手占全部次数的几分之几」——这个 π 不是圆周率,只是给这个比例起的名字)。第 12 课的飞轮(自己下棋→训练→再下,像轮子越转越快)就从这里起转。",
           },
         ]}
       />
@@ -330,7 +335,7 @@ function Simulator() {
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
         <span className="mini-label">部件 · 单步模拟器:真引擎一步一步走</span>
         <span className="num text-sm" style={{ color: "var(--fg-faint)" }} data-qa="sim-count-wrap">
-          已推演 <span data-qa="sim-count">{sims}</span> / 40 次
+          已推演 <span data-qa="sim-count">{sims}</span> 次(40 次够下结论,最多 100 次)
         </span>
       </div>
 
@@ -341,8 +346,9 @@ function Simulator() {
             <Board board={POS_FLAT} marks={[{ x: 5, y: 4, anchor: true }]} />
           </div>
           <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            教学手摆局面(黑 5 白 4 却轮黑,奇偶不合真实对局——搜索照样跑)。
-            朱砂环标的是 F5 = (5,4) = action 41:黑落这里,横排 (1,4)…(5,4) 成五,
+            教学手摆局面:黑 5 白 4 却轮黑。真实对局里,黑=白才轮黑;黑恰好多一,
+            是黑刚落完、该白走——这盘不合规矩,搜索照样跑。
+            红圈标的是 F5 = (5,4) = action 41:黑落这里,横排 (1,4)…(5,4) 成五,
             一手赢棋。
           </p>
 
@@ -386,7 +392,7 @@ function Simulator() {
           </div>
           <div className="mt-2 flex items-center gap-2">
             <span className="text-xs" style={{ color: "var(--fg-faint)" }}>
-              根噪声(先验掺 Dirichlet,ε=0.25)
+              根噪声:先验掺 25% 随机
             </span>
             <span className="seg" data-qa="noise-toggle">
               <button type="button" className={`seg-btn ${eps === 0 ? "active" : ""}`} disabled={busy} onClick={() => { seedRef.current += 1; setEps(0) }}>
@@ -398,26 +404,30 @@ function Simulator() {
             </span>
           </div>
           <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            反面演示「偏见锁死」:关噪声时,搜索全信网络先验,只在它偏爱的几个点打转
-            ——偏见喂偏见。开了噪声,根先验掺 25% Dirichlet 随机(只掺根:整棵树乱抖
-            就没了章法)。对照着看账本的 <strong>P 列</strong>(先验):关噪声时 F5 永远
-            是 1.3%——同一网络同一局面,先验是死的;开了噪声,每次搜索的先验都不
-            一样(F5 在 1.0%~1.6% 间波动,别的点同理有涨有落)。这就是「多样性」
-            的本义:不是单方向抬高冷门点,而是让每局走不同的路。但 <strong>N 列</strong>
-            (访问)未必跟着摊——这局 Q 的历史账太强势,40 次预算仍会集中;噪声防
-            的是成千上万手自我对弈里的原地打转,不是一手里的均摊。切换即重置换
-            种子,可多试几次。
+            做个对照实验,看「偏见锁死」:关噪声时,搜索全信网络先验,只在它偏爱的
+            几个点打转——偏见喂偏见。开了噪声,根的先验里掺 25% 随机(这招行话叫
+            Dirichlet 噪声,掺多少记作 ε=0.25——ε 是个希腊字母,读「艾普西隆」,
+            只是「掺多少」的记号;只掺根,整棵树都乱抖就没章法了)。
+            对照着看账本的 <strong>P 列</strong>(先验):关噪声时 F5 永远是 1.3%
+            ——同一网络同一局面,先验是死的;开了噪声,每次搜索的先验都不一样
+            (F5 在 1.0%~1.6% 间波动,别的点同理有涨有落)。这就是「多样性」的本义:
+            不是单方向抬高冷门点,而是让每局走不同的路。但 <strong>N 列</strong>(访问)
+            未必跟着摊——这局 Q 的历史账太强势,40 次「想」的名额仍会集中。噪声防的是
+            另一个坑:自我对弈几千盘,每盘都走同一条路,等于反复学同一招;噪声让每盘
+            换条路走。一切换开关就整盘重来:换一粒新种子(种子=随机路线的起头),
+            路线跟着换,可多试几次。
           </p>
 
           {busy && (
             <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
-              推演中(每次模拟问一次网络,约 16 ms)……
+              推演中(每次模拟问一次网络,约 16 毫秒——1 毫秒是千分之一秒)……
             </p>
           )}
           {stage === 0 && !busy && sims === 0 && (
             <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-              按「① 选择」:模拟器从根沿 PUCT 挑一条路走到叶子;
+              按「① 选择」:模拟器从根按岔口公式(PUCT)挑一条路走到叶子;
               「② 展开」问真网络要先验和估值;「③ 回传」记账、树长大一节。
+              三键连着按完一轮,才是揭晓里说的「一次模拟」。
             </p>
           )}
 
@@ -439,7 +449,7 @@ function Simulator() {
                     <p className="num" style={{ color: "var(--accent-deep)" }}>
                       v = {ans.value >= 0 ? "+" : ""}{ans.value.toFixed(3)}
                       <span className="ml-2 font-normal" style={{ color: "var(--fg-faint)" }}>
-                        ({ans.leaf.current === 1 ? "黑" : "白"}方视角,{ans.ms.toFixed(1)} ms)
+                        ({ans.leaf.current === 1 ? "黑" : "白"}方视角,{ans.ms.toFixed(1)} 毫秒)
                       </span>
                     </p>
                     <p className="mt-1.5">先验 top3(这局面的向导):</p>
@@ -488,11 +498,11 @@ function Simulator() {
 
           <div className="mt-5 border-t pt-3" style={{ borderColor: "var(--hairline)" }}>
             <div className="mini-label">
-              根账本 · top 候选
+              根账本 · top 候选(最右一列 = 访问占比,即 N/ΣN)
               {tree && sims > 0 && (
                 <span className="num ml-2" style={{ color: "var(--fg-faint)" }}>
                   ΣN={sumN}(首次推演只展开根,不记边)v̄={rootV >= 0 ? "+" : ""}
-                  {rootV.toFixed(2)}(黑方视角)
+                  {rootV.toFixed(2)}(v̄=历次 v 的平均,黑方视角)
                 </span>
               )}
             </div>
@@ -513,7 +523,7 @@ function Simulator() {
 
           {sims >= 40 && (
             <div className="reveal-box mt-4 text-sm leading-relaxed" data-qa="f5-box">
-              <div className="mini-label">收敛演示 · F5 的真实战绩</div>
+              <div className="mini-label">真网络实测:40 次为什么还没轮到 F5</div>
               <p className="mt-1.5">
                 40 次推演后,F5((5,4),一手成五)的访问占比:{" "}
                 <span className="num font-bold" style={{ color: "var(--accent-deep)" }} data-qa="f5-share">
@@ -524,14 +534,14 @@ function Simulator() {
                 </span>
               </p>
               <p className="mt-2" style={{ color: "var(--fg-muted)" }}>
-                诚实口径:explainer 用的教学评估器(棋形启发式替身)50 次能收到
-                93.9%;这里站着的是真权重——它才训到第 3 轮,F5 在它的先验里前面
-                压着 56 个点(它自己只有 0.012,最高的点 0.021),40 次预算全被
-                网络偏爱的点借走,一次也没轮到 F5。实测把预算拉到 770 次(先验
-                原样、种子固定),探索项才第一次把它送进来——进来之后终局直传,
-                Q 立刻 +1。
-                <strong>搜索放大直觉:直觉弱时,预算也追不回</strong>
-                ——这笔债,第 12 课的飞轮来还。
+                老实交代:这里站着的是真网络——它才训到第 3 轮,F5 在它的先验里
+                只有 1.2%,排它前面的还有 56 个点(最高的点才 2.1%),40 次
+                「想」的名额全被网络偏爱的点借走,一次也没轮到 F5。实测把次数拉到
+                770 次(先验原样、种子固定),「没看过的加分」才第一次把它送进来
+                ——进来之后终局直传,Q 立刻 +1。
+                <strong>搜索放大直觉:直觉强,越想才越准;直觉弱,给的次数再多也追不回</strong>
+                ——这笔债,第 12 课的飞轮来还(飞轮=自己下棋→训练→再下,
+                像轮子越转越快,下课细讲)。
               </p>
             </div>
           )}
@@ -539,11 +549,13 @@ function Simulator() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">部件 11-1</span>
-        真引擎 <span className="mono">SearchTree</span>(mcts.ts)三键走的是 select →
-        leafInput/evalFn → expandAndBackup 的真协议;叶评估器是{" "}
+        这段图注给大人对账,看不懂直接跳过。真引擎 <span className="mono">SearchTree</span>(mcts.ts)三键走的是 select →
+        leafInput/evalFn → expandAndBackup 这套真流程;叶评估器是{" "}
         <span className="mono">loadNet</span>(真权重,weights-best.json)——
-        这是本站对 explainer 的升级:那边站着的还是启发式替身。随机数用固定序列
-        (mulberry32,初始种子 42,重置时顺次换粒),同一局面重放同一步,结果一致。
+        这是对最早那版演示页(explainer)的升级:那边打分的还是人手写规则的
+        简易替身,不是真网络(那版讲稿里,50 次就能把 93.9% 的次数收到 F5 上)。
+        随机数用固定序列(mulberry32,初始种子 42,重置
+        一次换下一粒),同一局面重放同一步,结果一致。
       </figcaption>
     </figure>
   )

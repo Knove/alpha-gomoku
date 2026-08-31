@@ -27,6 +27,7 @@ export default function Graduation() {
       <p className="prose mt-4">
         十三课走完,图纸全在你手里了。最后一件事:坐到棋盘对面——你执子,
         它用你看着长大的网络(真权重)和第 11 课的搜索,一手一手跟你下。
+        这一页没有谜题也没有小测,随便下、随便玩。
       </p>
 
       <PlayGround />
@@ -36,8 +37,8 @@ export default function Graduation() {
         <h3 className="text-lg font-bold">带走的六件事</h3>
         <div className="prose mt-3">
           <p>
-            全系统图收的是它那十二个零件,这张单子收你的:六件散在各课、
-            换个舞台照样带得走的思维——括号里,是教会你它的那一课。
+            全系统图收它的十二个零件。这张单子收你的六件思维——
+            散在各课,换个舞台照样带得走。括号里,是教会你它的那一课。
           </p>
           <ul>
             <li>
@@ -68,7 +69,8 @@ export default function Graduation() {
             <li>
               <strong>答错了能找账。</strong>
               误差沿网络逐层摊回每个旋钮,谁影响大谁多改——
-              所有『可训练』系统的通用账法(<a href="#/l06">第 6 课</a>)。
+              所有『可训练』系统都用这套账法:认得出照片里的猫、
+              听得懂你说话的,也是这种能拧旋钮的机器(<a href="#/l06">第 6 课</a>)。
             </li>
           </ul>
         </div>
@@ -77,15 +79,16 @@ export default function Graduation() {
       <div className="card mt-12 p-6">
         <h3 className="text-lg font-bold">毕业词</h3>
         <p className="prose mt-3">
-          序里承诺过:15 节课之后,由你自己验收。现在你已经知道它每个零件
-          为什么长这样——81 个数怎么装下一盘棋、一条视角铁约怎么贯穿全链、
-          模板怎么滑、层怎么叠、账怎么摊、两个头怎么分工、四十遍怎么想、飞轮怎么转、
-          晋升凭什么算数。它下得还很臭(才训到第 3 轮),但每一步烂棋,
+          序里承诺过:15 节课之后,由你自己考一考它——序、十三课、这页毕业,正好凑满 15 节。
+          现在你已经知道它每个零件为什么长这样——81 个数怎么装下一盘棋、
+          一条视角铁约怎么从头贯到尾、模板怎么滑、层怎么叠、账怎么摊。
+          两个头怎么分工、四十遍怎么想、飞轮怎么转、晋升凭什么算数。
+          它下得还很臭(才训到第 3 轮),但每一步烂棋,
           你都能说出它<em>为什么</em>这么烂——这比会下好棋更难得。
         </p>
         <p className="prose mt-3">
           往下走:<a href="../explainer/">介绍站(explainer)</a>有一篇更长的图文漫游;
-          四卷深度参考在仓库 <span className="mono">learn/archive/</span>:
+          另有四篇更深的讲义(写给大人的版本),点下面四个门进去:
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           {[
@@ -214,9 +217,9 @@ function PlayGround() {
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="seg">
               <button type="button" className={`seg-btn ${human === 1 ? "active" : ""}`}
-                onClick={() => reset(1)} data-qa="pick-black">我执黑(先行)</button>
+                onClick={() => reset(1)} data-qa="pick-black">我执黑(先行,会重开)</button>
               <button type="button" className={`seg-btn ${human === -1 ? "active" : ""}`}
-                onClick={() => reset(-1)} data-qa="pick-white">我执白</button>
+                onClick={() => reset(-1)} data-qa="pick-white">我执白(会重开)</button>
             </span>
             <button type="button" className="btn" disabled={thinking || moves.length === 0}
               onClick={undo} data-qa="undo">悔棋</button>
@@ -230,13 +233,13 @@ function PlayGround() {
           </div>
           <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
             {weights
-              ? "AI = SearchTree(mcts.ts) + loadNet(model.ts) 真前向,落子取访问数最大——和训练时同一个大脑,只是预算减半。"
+              ? "AI = SearchTree(搜索树)+ loadNet(装网络),每手真算一遍;落子取访问数最大——和训练时同一个大脑:训练时每手想 40 遍,这里想 20 遍,省一半。"
               : "正在加载真权重(weights-best.json,约 1.2 MB)……"}
           </p>
         </div>
 
         <aside className="w-full sm:w-64 sm:flex-none">
-          <div className="mini-label">它的思考 · 最近一手的访问 top3</div>
+          <div className="mini-label">它的思考 · 最近一手访问数前三名</div>
           {!aiTop ? (
             <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
               {thinking ? "20 次模拟跑着,马上回来……" : "它落一子,这里就亮出那手搜索投给谁。"}
@@ -259,12 +262,12 @@ function PlayGround() {
               </ol>
               {aiMs !== null && (
                 <p className="num mt-2 text-xs" style={{ color: "var(--fg-faint)" }}>
-                  20 次模拟共 {aiMs.toFixed(0)} ms
+                  20 次模拟共 {aiMs.toFixed(0)} 毫秒
                 </p>
               )}
               <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                条长按访问数(第一名拉满);Q 是每条边的平均得分——第 11 课的账本,
-                原样搬来。看它把预算押在哪,你就知道它的「直觉」长在哪。
+                条的长短 = 访问数 N(第一名拉满);Q 是每条边的平均得分——
+                第 11 课的账本,原样搬来。看它把预算押在哪,你就知道它的「直觉」长在哪。
               </p>
             </>
           )}
@@ -276,8 +279,9 @@ function PlayGround() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">真家伙</span>
-        每一步都是现场真算:点击 → play(game.ts)落子;AI 手 = new SearchTree →
-        run(20) → bestAction。判胜用 game.ts 的 outcome,悔棋只是回退重放。
+        每一步都是现场真算:点击 → play(game.ts)落子;它那手 = new SearchTree
+        (建棵搜索树)→ run(20)(真跑 20 次模拟)→ bestAction(挑访问数最大的)。
+        判胜用 game.ts 的 outcome,悔棋只是回退重放。
       </figcaption>
     </figure>
   )
@@ -307,7 +311,7 @@ const LOOP: SysNode[] = [
   { x: 492, y: 132, name: "(s, π, z)", sub: "每手三条记录(L12)", href: "#/l12" },
   { x: 584, y: 222, name: "经验池", sub: "攒着混着批(L12)", href: "#/l12" },
   { x: 404, y: 296, name: "训练", sub: "交叉熵+平方差(L12)", href: "#/l12" },
-  { x: 196, y: 296, name: "竞技场", sub: "6 局 ≥55%(L13)", href: "#/l13" },
+  { x: 196, y: 296, name: "竞技场", sub: "6 局至少赢 55%(L13)", href: "#/l13" },
   { x: 16, y: 222, name: "best", sub: "现任冠军(L13)", href: "#/l13" },
 ]
 
@@ -376,7 +380,8 @@ function SystemMap() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">毕业地图</span>
-        上半是零件(第 1、7-11 课亲手造的;脚下垫着的数学是第 3-6 课地基篇),下半是飞轮(第 12-13 课拧上的):
+        上半是零件(第 1、7-11 课亲手造的;脚下垫着的数学是第 3-6 课地基篇),下半是飞轮(第 12-13 课拧上的)。
+        小字里的 L12、L13 就是第 12、13 课;「交叉熵+平方差」=两个头各算一笔错账。
         12 个零件,每个你都拆过。点进去随便复习——门已全开。
       </figcaption>
     </figure>

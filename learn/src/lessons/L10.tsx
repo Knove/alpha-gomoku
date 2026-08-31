@@ -48,7 +48,7 @@ function askNet(
   return { probs, top, value, ms }
 }
 
-export default function L06() {
+export default function L10() {
   const pass = usePassLesson()
 
   return (
@@ -68,7 +68,7 @@ export default function L06() {
             ],
             answer: 1,
             explain:
-              "选 B。A 白学一遍:判断「这里该下」和「这局我优」,看的是同一批棋形——理解只该学一次。C 连「同一套权重读出两种形状的答案」都做不到:81 个分数和 1 个数,读法本身就不同,各配各的读法层(头)。A、C 的共同错误:把「两个问题」当成了「两份理解」。",
+              "选第二项。第一项白学一遍:判断「这里该下」和「这局我优」,看的是同一批棋形——理解只该学一次。第三项连「同一套权重读出两种形状的答案」都做不到:81 个分数和 1 个数,读法本身就不同,各配各的读法层(头)。一、三两项的共同错误:把「两个问题」当成了「两份理解」。",
           },
         ]}
       />
@@ -77,27 +77,30 @@ export default function L06() {
         <h3>揭晓 · 一份理解,两种读法</h3>
         <p>
           <strong>① 为什么共用主干。</strong>「这里该下」和「这局我优」问的是同一盘棋:
-          三连该堵、这边的势厚不厚,是同一批棋形证据。让两个网络各学各的,
-          等于把「认棋形」这门课学两遍——参数翻倍还在其次,更贵的是数据:
+          三连该堵、这边的势强不强,是同一批棋形证据。让两个网络各学各的,
+          等于把「认棋形」这门课学两遍——参数翻倍只算小事,更贵的是数据:
           本站每一盘训练对局都是自己下出来的,一份理解教两个头,样本不涨价。
-          还有个顺带的好处:价值头逼着主干学「形势判断」,
-          这份理解策略头也拿去用——两个头互相当老师。
+          还有个顺带的好处:价值头(管「谁优」)逼着主干学「形势判断」,
+          这份理解策略头(管「下哪」)也拿去用——两个头互相当老师。
         </p>
         <p>
           <strong>② 两个头,两种读法。</strong>主干(第 8、9 课那 7 层卷积)吐出
           48 张 9×9 的理解地图;两个头各自把它读成自己的答案。
           <em>策略头逐点读</em>:先用 1×1 卷积把 48 通道压到 2 通道
-          (1×1 不看邻域,只在每个交叉点上把 48 个数做一次加权求和),
-          再读成 81 个分数——每个格子一个,棋盘的空间分辨率一分不丢。
+          (1×1 不看旁边的格子,只在每个交叉点上把 48 个数各乘各的音量再相加
+          ——行话叫「加权求和」,就是第 4 课那套计票),
+          再读成 81 个分数——每个格子都留着自己的分数,一格不合并。
           <em>价值头整盘读</em>:压到 1 通道后要把 81 个数收成 1 个数,落差太大,
           中间先过一层 64 个数的台阶,再收成 1。逐点的归逐点,整盘的归整盘。
         </p>
         <p>
           <strong>③ 两个收尾动作。</strong>策略头的 81 个原始分数(logits)要变成
           「概率」:过 <span className="mono">softmax</span>——每个分数取 e
-          的这个次方,再各自除以总和。这里的 e 是一个固定的底数,约等于 2.718:
-          取 e 的次方就像 2³ = 2×2×2,只是把底数 2 换成 e——指数越大,结果
-          涨得越猛,分数差一点,次方之后就拉开一大截。手算三个分数:
+          的这个次方,再各自除以总和。这里的 e 是一个固定的底数,约等于 2.718
+          (右上角放的小数字,行话叫「指数」;被连乘的那个大数叫「底数」——
+          2³ 里,3 是指数、2 是底数):
+          取 e 的次方就像 2³ = 2×2×2,只是把底数 2 换成 e——放在右上角的
+          分数越大,结果涨得越猛,分数差一点,次方之后就拉开一大截。手算三个分数:
         </p>
         <div className="formula">
           分数 <span className="hl">2</span> / 1 / 0 → e 的次方 7.39 / 2.72 / 1.00
@@ -105,12 +108,13 @@ export default function L06() {
           ——加起来正好 1
         </div>
         <p>
-          每格占多少、全盘加起来 1,这就是部件里 top5 的那行百分比。价值头收成的
-          1 个数要过 <span className="mono">tanh</span>:把任意数压进 −1 到 +1
+          这个「除以总和、凑成 1」的动作,行话叫「归一」。每格占多少,就是
+          部件里 top5 的那行百分比。价值头收成的 1 个数要过
+          <span className="mono">tanh</span>:把任意数压进 −1 到 +1
           ——这是赢面标尺(+1 稳赢、−1 稳输、0 五五开),
           和训练目标「终局我赢 +1 / 我输 −1」同一把尺子,误差才可比
-          (第 3 课的玩具估价器没装量纲,正是等这台 tanh;罚分 (v−z)²
-          你在第 3 课拖过、第 6 课摊过账,第 12 课它天天在真训练里算)。
+          ——第 3 课的玩具估价器没装这把尺子,它等的就是这台 tanh。罚分 (v−z)²
+          你在第 3 课拖过、第 6 课摊过账,第 12 课它天天在真训练里算。
           注意视角:两个头都站在<em>当前轮到的那一方</em>回答,黑白一换手,符号翻一次
           (第 2 课的铁约,一路贯穿到这里)。
         </p>
@@ -143,12 +147,14 @@ def forward(self, x):
         <p className="mt-3">
           两处值得指认:①两个头读的是<em>同一个</em> <span className="mono">h</span>
           ——「一份理解」在代码里就是这一个变量;②forward 里找不到 softmax:
-          归一化外置在训练(<span className="mono">log_softmax</span>)和推理(
-          <span className="mono">softmax</span>)各自进行,网络只吐裸 logits,一身轻。
+          「凑成 1」这件事(③里那个归一),训练时和下棋时各做各的——训练用
+          <span className="mono">log_softmax</span>(带对数的同一场归一,第 12
+          课对账),下棋用
+          <span className="mono">softmax</span>,网络只吐裸 logits,一身轻。
           本站引擎 <span className="mono">learn/src/engine/model.ts</span> 的{" "}
-          <span className="mono">loadNet</span> 与 forward 逐条对齐——网络的 TS 前向
-          与 torch 逐张量对拍(tests/parity.test.ts),部件里「问网络」按下的每一下
-          都是它算的。
+          <span className="mono">loadNet</span> 与 forward 逐条对齐——网页这一版
+          (model.ts)和 torch 版各算一遍、逐个数对答案(行话叫「对拍」,tests/parity.test.ts),
+          部件里「问网络」按下的每一下都是它算的。
         </p>
       </Ledger>
 
@@ -165,7 +171,7 @@ def forward(self, x):
             ],
             answer: 1,
             explain:
-              "内存和数据都不是主因,主因是「同一份理解」:判断该下哪和判断谁占优,证据是同一批棋形。分开学等于「认棋形」这门课学两遍;合在一起,价值头学到的形势判断还反哺策略头。省参数省算力(一次前向两个答案)是顺带的账。",
+              "内存和数据都不是主因,主因是「同一份理解」:判断该下哪和判断谁占优,证据是同一批棋形。分开学等于「认棋形」这门课学两遍;合在一起,价值头学到的形势判断还回过头来帮策略头。省参数、省计算(一次前向两个答案)是顺带的账。",
           },
           {
             q: "策略头和价值头的读法差在哪?",
@@ -176,7 +182,7 @@ def forward(self, x):
             ],
             answer: 1,
             explain:
-              "逐点的归逐点、整盘的归整盘:策略头保住棋盘的空间分辨率(每格一个分数,第 1 课的 81 个动作一一对应);价值头要把整盘收成一个赢面数,81→64→1 的台阶就是给这个落差修的坡。",
+              "逐点的归逐点、整盘的归整盘:策略头把棋盘一格一格的细节全保住(每格一个分数,第 1 课的 81 个动作一一对应);价值头要把整盘收成一个赢面数,81→64→1 的台阶就是给这个落差修的坡。",
           },
           {
             q: "价值头的输出为什么要过 tanh?",
@@ -187,7 +193,7 @@ def forward(self, x):
             ],
             answer: 1,
             explain:
-              "tanh 不做归一(那是策略头 softmax 的活),它定量纲:把任意数压进 [−1,+1] 的赢面标尺。尺子对了,(v−z)² 这笔误差才有意义——这笔罚分第 3 课的打靶器拖过、第 6 课的两层账本摊过账;有界输出还顺带稳住了训练。想读成胜率,按 (v+1)/2 换算。",
+              "tanh 不做归一(那是策略头 softmax 的活),它管的是尺子:把任意数压进 −1 到 +1 的赢面标尺。尺子对了,(v−z)² 这笔误差才有意义——这笔罚分第 3 课的打靶器拖过、第 6 课的两层账本摊过账;数字永远出不了 −1 到 +1 这个圈,还顺带稳住了训练。想读成胜率,按 (v+1)/2 换算:先加 1、再除以 2,比如 v=+0.6,(0.6+1)÷2=0.8,约八成胜算。",
           },
         ]}
       />
@@ -264,7 +270,7 @@ function AskBoard() {
             }}
             data-qa="cmp-toggle"
           />
-          对照未训练网络(baseline,随机初始化)
+          对照未训练网络(baseline,权重还是随机数)
         </label>
       </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
@@ -296,7 +302,7 @@ function AskBoard() {
             </button>
           </div>
           <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            红色热度 = 策略头的概率(空格上重新归一,已占格不参与)。摆子颜色同时是
+            红色热度 = 策略头的概率(只在空格里重新凑成 100%,已占格不参与)。摆子颜色同时是
             「轮到谁」——网络站在它这边看棋盘、报估值。
           </p>
         </div>
@@ -305,11 +311,11 @@ function AskBoard() {
           {!res ? (
             <p className="text-sm" style={{ color: "var(--fg-muted)" }}>
               初始是第 8 课的三连局面。随手摆几个子(黑白随便,不用轮流),
-              按「问网络」:一次真前向(约 16 ms),两个头当场交卷。
+              按「问网络」:一次真前向(约 16 毫秒,快过眨一下眼),两个头当场交卷。
             </p>
           ) : (
             <>
-              <div className="mini-label">策略头 · 下哪:top5(坐标,概率)</div>
+              <div className="mini-label">策略头 · 下哪:top5((列 x,行 y),概率)</div>
               <ol className="mt-2 space-y-1.5">
                 {res.best.top.map((t) => (
                   <li key={t.a} className="l00-top-row" data-qa="top-row">
@@ -329,7 +335,7 @@ function AskBoard() {
 
               <div className="mt-4 border-t pt-3" style={{ borderColor: "var(--hairline)" }}>
                 <div className="mini-label">
-                  价值头 · 谁优:<span className="num">一次前向 {res.best.ms.toFixed(1)} ms</span>
+                  价值头 · 谁优:<span className="num">一次前向 {res.best.ms.toFixed(1)} 毫秒</span>
                 </div>
                 <p className="num mt-1.5 text-2xl font-bold" data-qa="v-best" style={{ color: "var(--accent-deep)" }}>
                   v = {res.best.value >= 0 ? "+" : ""}
@@ -353,10 +359,10 @@ function AskBoard() {
 
           {cmp && (
             <div className="mt-5 border-t pt-3" style={{ borderColor: "var(--hairline)" }} data-qa="cmp-panel">
-              <div className="mini-label">对照组 · 未训练(baseline:训练开始前冻结的随机初始化)</div>
+              <div className="mini-label">对照组 · 未训练(baseline:训练开始前冻住的随机数权重)</div>
               {!res?.untrained ? (
                 <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
-                  {wUntrained ? "按「问网络」,两个网络同题同考。" : "正在加载未训练权重(独立分块,约 1.2 MB)……"}
+                  {wUntrained ? "按「问网络」,两个网络同题同考。" : "正在加载未训练权重(单独一份文件,约 1.2 MB)……"}
                 </p>
               ) : (
                 <div className="mt-2 flex flex-col gap-4 sm:flex-row">
@@ -391,10 +397,10 @@ function AskBoard() {
                 </div>
               )}
               <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                同一局面、同一架构,只差训练。未训练的(baseline,纯随机初始化):策略头近乎均匀撒胡椒面——
-                初始三连局面实测最热一格才 1.4%(均匀线 1/81≈1.2%),估值贴着 0
+                同一局面、同一副网络骨架,只差训练。未训练的(baseline,权重还是一堆随机数):策略头几乎把票平分给 81 格——
+                初始三连局面实测最热一格才 1.4%(81 格平摊、每格约 1.2%),估值贴着 0
                 (实测 +0.02,换哪个局面都基本贴着 0 小幅漂)。训练过的(才训到第 3 轮)已有态度:
-                同一局面 v=−0.31、最热 2.0%——离懂棋还远,但已经不是均匀的噪声了。
+                同一局面 v=−0.31、最热 2.0%——离懂棋还远,但已经不是一片均匀的乱数了。
               </p>
             </div>
           )}
@@ -404,7 +410,7 @@ function AskBoard() {
         <span className="cap-no">部件 10-1</span>
         真引擎 + 真权重:<span className="mono">encode</span>(game.ts)→{" "}
         <span className="mono">loadNet</span>(model.ts)前向,softmax 在站内现算。
-        训练后 weights-best.json;对照 weights-untrained.json(baseline,独立懒加载,打开开关才下载)。
+        训练后 weights-best.json;对照 weights-untrained.json(baseline,单独一份文件,打开开关才下载)。
       </figcaption>
     </figure>
   )

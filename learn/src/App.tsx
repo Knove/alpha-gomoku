@@ -52,7 +52,7 @@ export default function App() {
             学会下棋的机器
           </a>
           <span className="mini-label num" style={{ flex: 1 }}>
-            第 {Math.min(progress.unlocked + 1, LESSONS.length)}/{LESSONS.length} 课
+            已解锁 {Math.min(progress.unlocked + 1, LESSONS.length)}/{LESSONS.length} 课
           </span>
           <button
             type="button"
@@ -114,7 +114,8 @@ export default function App() {
               <div className="card p-6">
                 <h1 className="text-xl font-bold">这一课还没解锁</h1>
                 <p className="mt-3" style={{ color: "var(--fg-muted)" }}>
-                  先通关上一课,这里才会打开。
+                  先通关上一课,这里才会打开——序是点「开始第 1 课」按钮,
+                  其它课是做对结尾的小测。
                 </p>
                 {prev && (
                   <a className="btn primary mt-5" href={`#/${prev.meta.id}`}>
