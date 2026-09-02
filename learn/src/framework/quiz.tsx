@@ -14,7 +14,7 @@ export const usePassLesson = () => useContext(PassLessonContext)
 /**
  * 谜题(承诺装置)与小测共用:
  * - 谜题不传 onAllCorrect —— 答错也揭晓(reveal-box),不设门禁;
- * - 小测传 onAllCorrect —— 答错不揭晓,「重答」到全对为止才放行。
+ * - 小测传 onAllCorrect —— 首错先给检索提示，二错给完整解释；答对才放行。
  */
 export function Quiz({
   questions,
@@ -26,14 +26,11 @@ export function Quiz({
   title?: string
 }) {
   const [picked, setPicked] = useState<Record<number, number>>({})
+  const [wrongAttempts, setWrongAttempts] = useState<Record<number, number>>({})
   const fired = useRef(false)
   const gated = !!onAllCorrect
   const allRight = questions.every((q, i) => picked[i] === q.answer)
   const done = Object.keys(picked).length === questions.length
-  const wrongCount = questions.reduce(
-    (n, q, i) => (picked[i] !== undefined && picked[i] !== q.answer ? n + 1 : n),
-    0,
-  )
 
   // 全对回调走 useEffect + ref 防重,不在渲染期 setState
   useEffect(() => {
@@ -51,7 +48,17 @@ export function Quiz({
         const sel = picked[i]
         const answered = sel !== undefined
         const right = sel === q.answer
-        const reveal = answered && (right || !gated)
+        const attempts = wrongAttempts[i] ?? 0
+        // 谜题立即揭晓；关卡小测则保留一次“自己回去找因果链”的检索机会，
+        // 第二次错误一定给完整解释，避免只靠猜选项过关。
+        const reveal = answered && (right || !gated || attempts >= 2)
+        const retryOne = () => {
+          setPicked((p) => {
+            const next = { ...p }
+            delete next[i]
+            return next
+          })
+        }
         return (
           <div key={i} className="quiz-card mt-4">
             <p className="font-semibold">
@@ -67,7 +74,11 @@ export function Quiz({
                   type="button"
                   className={`quiz-option ${cls}`}
                   disabled={answered}
-                  onClick={() => setPicked((p) => ({ ...p, [i]: j }))}
+                  onClick={() => {
+                    setPicked((p) => ({ ...p, [i]: j }))
+                    if (j !== q.answer)
+                      setWrongAttempts((a) => ({ ...a, [i]: (a[i] ?? 0) + 1 }))
+                  }}
                 >
                   {opt}
                 </button>
@@ -76,6 +87,20 @@ export function Quiz({
             {reveal && (
               <div className="reveal-box mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
                 {q.explain}
+                {gated && !right && (
+                  <button type="button" className="btn mt-3" onClick={retryOne}>
+                    带着解释重答这一题
+                  </button>
+                )}
+              </div>
+            )}
+            {gated && answered && !right && !reveal && (
+              <div className="reveal-box mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
+                <strong>提示：</strong>先回到本章“揭晓”和互动部件，找出这道题问的那条
+                “因为 → 所以”链；再试一次。第二次答错会给完整因果解释。
+                <button type="button" className="btn mt-3" onClick={retryOne}>
+                  重答这一题
+                </button>
               </div>
             )}
           </div>
@@ -84,14 +109,6 @@ export function Quiz({
       {gated && done && allRight && (
         <p className="mt-5 font-semibold" style={{ color: "var(--accent-deep)" }}>
           ✓ 过关,下一课已解锁——点左侧目录接着走
-        </p>
-      )}
-      {gated && wrongCount > 0 && (
-        <p className="mt-5 flex flex-wrap items-center gap-3" style={{ color: "var(--fg-muted)" }}>
-          有答错的题已标出,想好后点「重答」重新选(会清空这份小测的全部答案)
-          <button type="button" className="btn" onClick={() => setPicked({})}>
-            重答
-          </button>
         </p>
       )}
     </section>

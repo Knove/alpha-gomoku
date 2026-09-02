@@ -58,7 +58,7 @@ export function twoLayer(w1: number, w2: number, x: number, z: number): TwoLayer
   }
 }
 
-/** 「走一步」(lr 固定 0.1):w1、w2 各按账挪一点。第 6 课彩蛋。 */
+/** 「走一步」(lr 固定 0.1):w1、w2 各按账挪一点。第 11 课彩蛋。 */
 export function twoLayerStep(
   w1: number,
   w2: number,

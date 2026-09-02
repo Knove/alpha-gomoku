@@ -1,4 +1,4 @@
-/** 第 9 课 · 叠层:看见全盘。
+/** 第 8 课 · 叠层:看见全盘。
  *  节拍:谜题(单层 3×3 怎么看全盘)→ 揭晓(视野每层 +2;越深管的事越大;
  *  残差/BN 一句话)→ 部件 1(层深滑杆:视野框 3×3 → 15×15)→
  *  部件 2(真特征图墙:traceNet + weights-best,stem 与三个残差块各取前 6 通道)→
@@ -6,11 +6,12 @@
 import { useEffect, useMemo, useState } from "react"
 import { Quiz, usePassLesson } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
+import { LessonGuide } from "../framework/lesson-guide"
 import { encode, type GameState } from "../engine/game"
 import { traceNet, type WeightsJson } from "../engine/model"
 import { loadWeights } from "../lib/weights"
 
-/* 与第 8 课同一局面:己方三连 (2,4)(3,4)(4,4),轮己方走。
+/* 与第 7 课同一局面:己方三连 (2,4)(3,4)(4,4),轮己方走。
  * encode 只读 board + current,直接构造状态(教学局面:只摆三连,演示用)。 */
 const THREE: [number, number][] = [
   [2, 4],
@@ -28,8 +29,21 @@ export default function L09() {
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
-      <div className="eyebrow mb-3">第 9 课</div>
+      <div className="eyebrow mb-3">第 8 课</div>
       <h1 className="text-2xl font-bold">叠层:看见全盘</h1>
+
+      <LessonGuide
+        question="3×3 模板只能看一小块时，网络怎样逐步理解整盘棋的形势？"
+        why="局部三连很重要，但“哪一边整体更强、两处威胁是否能连起来”需要更大的视野。把小模板直接做成全盘大小既笨重又难学。"
+        chain={[
+          "浅层模板先发现局部棋子和小棋形",
+          "下一层把相邻位置的发现再组合",
+          "每多叠一层，能回看的区域向外扩一圈",
+          "深层把局部证据汇成整盘形势",
+        ]}
+        takeaway="层数不是为了“越多越神奇”，而是让机器按“先局部、后整体”的顺序扩大视野。"
+        boundary="7 层得到 15×15 是本课程的 3×3 玩具网络计算；真实网络的有效视野和训练效果还会受权重、连接方式等因素影响。"
+      />
 
       <Quiz
         title="谜题 · 先选一个答案"
@@ -43,7 +57,7 @@ export default function L09() {
             ],
             answer: 1,
             explain:
-              "选第二项。一张 9×9 大模板要 81 个旋钮,旋钮太多、太难拧好;更要紧的是,它想一步到位认完所有东西,省掉了「先认小的、再拼大的」这段楼梯,反而学不稳。叠层让第二层的每个格子站在第一层的肩膀上:小窗还是 3×3,能看的一片却一圈圈变大——怎么变的,马上算给你看。",
+              "选第二项。单张输入面上的 9×9 模板就要 81 个旋钮；本模型有三张输入面，一套全盘模板会有 243 个。更要紧的是，它想一步认完所有东西，跳过了“先认局部、再组合整体”的楼梯。叠层让第二层站在第一层结果上：窗口仍是 3×3，能回看的范围却一圈圈变大。",
           },
         ]}
       />
@@ -55,7 +69,8 @@ export default function L09() {
           <em>九个格子的得数</em>当原料。那九个格子紧挨着排成 3×3,每个又向外
           多看一圈——拼起来,第二层的视野(能看多大的一片)恰好是 5×5。
           规律:<strong>每多叠一层,视野边长 +2</strong>。本模型的第一层叫 stem,
-          后面还叠 6 层;每两层编成一组,一组叫一个「残差块」,一共 3 组。
+          后面还叠 6 层；每两层编成一组，一组叫一个“残差块”，一共 3 组。
+          这是本课程演示权重的配置，其他训练可以选不同深度。
           合起来 <strong className="num">7</strong> 层:
         </p>
         <div className="formula">
@@ -64,19 +79,14 @@ export default function L09() {
         </div>
         <p>式子念出来:层数减 1,就是要多加几个 2。</p>
         <p>
-          15×15 比整张 9×9 棋盘还多出一大圈。层数买的不只是视野:
-          <strong>越深,管的事越大</strong>。浅层的模板认<em>子和形</em>——这三格挨着、
-          这里四颗子排好、再落一颗就赢(行话叫「冲四」);深层的模板拿浅层的得数当原料,
-          认<em>势</em>——势,就是一大片里谁强谁弱。小窗直接看「势」看不出来,
-          一层层把局部拼装成全局。
+          15×15 已覆盖整张 9×9 棋盘。更深的层<strong>有能力</strong>把更大范围的信息组合起来：
+          浅层常更容易对局部子形敏感，深层可能整合成更大的局面线索。但这是一种常见倾向，
+          不是“第几层必定懂什么”的承诺；每个通道实际学到的内容要看训练结果。
         </p>
         <p>
-          两个工程细节,一句话各带过(代码在对账折叠里):①<em>残差</em>:每两层开一条
-          捷径,出来的一张 = 进去的那张 + 改了一点的量。第 6 课的误差账往回走时,
-          捷径这段是加法,不放大数,账恰好是 1。乘不到它头上,几十层也摔不死;
-          本模型只有 7 层,捷径是保险。②<em>BN</em>:每层算完,
-          先把一群忽高忽低的数拉回不高不矮的平常个头,再交给下一层,训练更稳
-          (第 7 课说过它的另一份差事:抹掉输入里的恒定零头)。
+          两个工程零件先只认用途。<em>残差</em>让每两层学习“在输入上修一点”，而不是从头重写
+          一张图；这让“什么也不改”也成为容易做到的选择。<em>BN</em>是训练时帮助各层数值保持
+          合适尺度的稳定器。为什么这些设计会影响错误信号的回传，等到第 11 课看到完整的两种错误后再拆开。
         </p>
       </div>
 
@@ -111,7 +121,7 @@ self.blocks = nn.Sequential(*[ResBlock(channels) for _ in range(res_blocks)])`}<
       </Ledger>
 
       <Quiz
-        title="小测 · 过关解锁第 10 课"
+        title="小测 · 过关解锁第 9 课"
         onAllCorrect={() => pass("l09")}
         questions={[
           {
@@ -126,26 +136,26 @@ self.blocks = nn.Sequential(*[ResBlock(channels) for _ in range(res_blocks)])`}<
               "规律与旋钮无关,是结构给的:第 1 层看 3,第 2 层看 5,第 3 层看 7……每层把上一层的九个得数当原料,视野每层 +2。滑杆从 1 拨到 7 亲手数一遍:3、5、7、9、11、13、15。",
           },
           {
-            q: "浅层和深层各自认什么?",
+            q: "从结构上看，叠深网络最稳妥的说法是什么？",
             options: [
-              "浅层认子和形(局部棋形),深层拿浅层的得数当原料,认势(大片区域的形势)",
+              "深层可以组合更大范围的局部证据；浅层偏局部、深层偏整体是常见倾向，但具体通道学到什么要由训练结果决定",
               "浅层认黑子,深层认白子",
               "层层都一样,只是通道数不同",
             ],
             answer: 0,
             explain:
-              "部件二的图墙上肉眼可见:stem 那一排的亮斑贴着三颗子;到第三块,亮暗已经连成大片。棋形证据全来自「己方/对方」两张面——canonical 早已把黑白抹平。剩下的颜色面整面是同一个数,只报轮到谁走,认不出棋形。",
+              "每多一层，理论视野就扩大一圈，因此深层有条件把更多局部证据放在一起。特征图里有些亮区看起来贴着棋子、有些连成大片，但这只提供观察线索，不能把单张图直接命名为“它一定在认某种棋形”。",
           },
           {
-            q: "残差的捷径(x + h)是干什么用的?",
+            q: "残差的捷径在这章最该先记住什么?",
             options: [
               "让棋盘刷新得更快",
-              "让每层只学「在上一层答案上修一点」,误差信号沿捷径直通底层——几十层也训得动",
+              "让每层学习“在上一层答案上修一点”；修正量接近 0 时，输入就能大致原样通过",
               "把 48 个通道压缩成 2 个",
             ],
             answer: 1,
             explain:
-              "捷径的本事是「什么也不修,答案也不变差」:把修正量拧到 0 就行,多出来的层不拖后腿。误差往回传时,直路那段是加法、账恰好是 1、不参与连乘(第 6 课的 1+F′)。本模型 7 层,残差是保险;把 48 张图并成最后的答案,是第 10 课的事。",
+              "捷径使“什么也不修”成为容易学到的选择：修正量 h 接近 0 时，x+h 大致保留输入。它常让深网络更容易训练；具体的错误信号为什么会更好传，第 11 课会在你看见策略、价值两种错误后再说明。",
           },
         ]}
       />
@@ -195,7 +205,7 @@ function FovSlider() {
                 <line key={`h${j}`} x1={px5(0)} y1={px5(j)} x2={px5(8)} y2={px5(j)} />
               ))}
             </g>
-            {/* 己方三连(与第 8 课同一局面) */}
+            {/* 己方三连(与第 7 课同一局面) */}
             {THREE.map(([x, y]) => (
               <circle key={`${x}-${y}`} cx={px5(x)} cy={px5(y)} r={CELL5 * 0.36}
                 style={{ fill: "var(--stone-b)", stroke: "var(--stone-b-lo)", strokeWidth: 1.5 }} />
@@ -245,7 +255,7 @@ function FovSlider() {
               <span data-qa="fov-side" style={{ color: "var(--accent-deep)" }}>{side}</span>
             </p>
             <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-              {layers === 1 && "第 1 层:窗口 3×3,装得下一个三连(第 8 课的模板)。"}
+              {layers === 1 && "第 1 层：窗口 3×3，只能看一个短局部片段。"}
               {layers > 1 && layers < 7 && `叠到第 ${layers} 层:盖住 ${side}×${side}。`}
               {layers === 7 &&
                 "7 层 = stem 1 层 + 残差块 3 × 2 层(真模型的配置):15×15 盖过 9×9 全盘。"}
@@ -261,13 +271,13 @@ function FovSlider() {
       <figcaption className="figure-cap">
         <span className="cap-no">部件 9-1</span>
         每叠一层,该层的每个格子拿上一层 3×3 的得数当原料——窗口还是 3×3,
-        视野边长却 +2。棋盘上仍是第 8 课那个三连局面。
+        视野边长却 +2。棋盘上仍是第 7 课那个三连局面。
       </figcaption>
     </figure>
   )
 }
 
-/* ============ 部件 2 · 真特征图:浅层认子,深层认势 ============ */
+/* ============ 部件 2 · 真特征图:观察各层怎样保留与组合信号 ============ */
 
 const CHANNELS_SHOWN = 6
 
@@ -292,19 +302,20 @@ function FeatureWall() {
   const rows: { label: string; sub: string; planes: Float64Array }[] = useMemo(() => {
     if (!trace) return []
     return [
-      { label: "第 1 层 · stem", sub: "认子和形", planes: trace.stemOut.data },
+      { label: "第 1 层 · stem", sub: "局部响应", planes: trace.stemOut.data },
       { label: "第 2-3 层 · 残差块 1", sub: "", planes: trace.blockOuts[0].data },
       { label: "第 4-5 层 · 残差块 2", sub: "", planes: trace.blockOuts[1].data },
-      { label: "第 6-7 层 · 残差块 3", sub: "认势", planes: trace.blockOuts[2].data },
+      { label: "第 6-7 层 · 残差块 3", sub: "更大范围的组合", planes: trace.blockOuts[2].data },
     ]
   }, [trace])
 
   return (
     <figure className="figure mt-12">
       <div className="px-4 pt-4 sm:px-5">
-        <span className="mini-label">部件 · 真特征图:上一课的嫌疑地图,每层都有 48 张</span>
+        <span className="mini-label">部件 · 真特征图:每层都有 48 张局面响应图</span>
         <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          看亮的地方:第一排的亮斑贴着三颗子;到最后一排,亮暗连成大片。
+          观察亮区如何随层变化：有的贴近棋子，有的覆盖更大区域。它们是训练后数值响应，
+          不是已经被人命名好的“棋理标签”。
         </p>
       </div>
       <div className="overflow-x-auto p-4 md:p-5">
@@ -334,7 +345,7 @@ function FeatureWall() {
         <span className="cap-no">部件 9-2</span>
         真引擎 + 真权重:<span className="mono">traceNet</span>(model.ts)对三连局面从头到尾算一遍。
         每层 48 张模板,就有 48 张得数小图,一张叫一个「通道」;这里每层摆出前 {CHANNELS_SHOWN} 张。
-        亮 = 这张图在这里得的分高。只算一遍,滚动看不卡。
+        亮 = 这张图在这里的相对响应高。每张图都按<strong>自己</strong>的最大值着色，所以不同通道的亮度不能直接比较大小。只算一遍，滚动看不卡。
       </figcaption>
     </figure>
   )

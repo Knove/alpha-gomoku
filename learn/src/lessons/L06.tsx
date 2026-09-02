@@ -1,13 +1,14 @@
-/** 第 6 课 · 回摊:责任怎么找到每个旋钮(地基篇 4/4)。
- *  节拍:谜题(罚分怎么落到旋钮头上)→ 揭晓(还第 5 课的账/一层责任=用掉的证据/
- *  变化率接力·手推数字例/梯度死/残差)→ 部件(两层账本:拖 w₁/w₂ 前向反向
- *  联动,拖 w₁ 穿 0 看账目熄灯;lr=0.1 走一步)→ 对账(train.py backward)→ 小测。 */
+/** 第 11 课 · 回摊:两种错误怎样改动所有旋钮。
+ *  节拍:谜题(π/z 两位老师怎么一起改网络)→ 揭晓(两笔罚分→最小两旋钮显微镜→
+ *  变化率接力)→ 部件(拖 w₁/w₂ 前向反向联动)→ 想深挖(门/梯度消失/残差)→
+ *  对账(train.py backward)→ 小测。 */
 import { useState } from "react"
 import { Quiz, usePassLesson } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
+import { LessonGuide } from "../framework/lesson-guide"
 import { twoLayer, twoLayerStep } from "../lib/foundations"
 
-/* 手推例固定:x=2(窗口里己方子数)、z=+1(这盘我赢);
+/* 手推例固定:x=2(窗口里己方子数)、z=+1(假设这盘训练对局后来由我赢);
  * w₁、w₂ 可拖,默认正例 0.5 / 1.5。 */
 const X = 2
 const Z = 1
@@ -19,104 +20,99 @@ export default function L06() {
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
-      <div className="eyebrow mb-3">第 6 课</div>
-      <h1 className="text-2xl font-bold">回摊:责任怎么找到每个旋钮</h1>
+      <div className="eyebrow mb-3">第 11 课</div>
+      <h1 className="text-2xl font-bold">回摊:两种错误怎样改动所有旋钮</h1>
+
+      <LessonGuide
+        question="搜索给出 π、终局给出 z 后，这两种错误怎样不靠猜测地回到约 14.5 万颗旋钮？"
+        why="你现在已经看见完整机器：双头给出落子分和赢面，搜索把落子分变成更丰富的 π，终局给出 z。下一问自然是：这些老师答案怎样真的改变整张网络？"
+        chain={[
+          "双头给出落子分和赢面 v",
+          "搜索的 π 与终局 z 分别指出两类错误",
+          "从两笔罚分倒着沿计算路径分账",
+          "每颗旋钮按自己的方向微调，下一轮判断才可能更准",
+        ]}
+        takeaway="反向传播不是平分罚分，而是沿实际计算路径回溯影响；策略和价值两笔错误加在一起，给每颗旋钮各算一笔方向账。"
+        boundary="两旋钮例子只是显微镜，并故意省略了第 9 课价值头最后的 tanh；它的原始分 r 可以超过 ±1，不能和真实价值输出 v 混为一谈。门关死、梯度消失、残差的精确数学放在本页“想深挖”。"
+      />
 
       <Quiz
         title="谜题 · 先选一个答案"
         questions={[
           {
-            q: "玩具网络答错了一道题:它说 v=1.5,真答案 z=1,罚了 0.25 分。这道题经过了两个旋钮(w₁、w₂)。这笔罚分,该怎么落到每个旋钮头上?",
+            q: "第 9 课的双头给出两类答案，第 10 课的搜索给出 π，终局给出 z。两笔罚分要怎样改变全部旋钮？",
             options: [
-              "平摊:两个旋钮各记一半,公平",
-              "按影响摊:谁对答案的影响大,谁多担——「影响」怎么算,正是要揭晓的账法",
-              "不用摊:把两个旋钮都重置成随机数,重新来",
+              "平摊：每颗旋钮各记一半，听起来最公平",
+              "按影响回摊：谁对两笔答案影响大，谁收到的更新信号就大",
+              "重置：把所有旋钮都设回随机数，重新来",
             ],
             answer: 1,
             explain:
-              "选第二项。平摊听着公平,其实冤枉人:一个旋钮可能只顺路搭了句话,另一个才是主谋。按影响摊,要回答「这个旋钮拧一点点,罚分会变多少」——这正是第 3 课立的账目。账目怎么穿过层层运算找到每个旋钮,就是本课的「回摊」。答错了也照样放行。",
+              "选第二项。平摊听着公平，其实会冤枉人：一颗旋钮可能只顺路参与，另一颗才大幅改变答案。训练要问的是“我把这颗旋钮调一点，两笔罚分会怎样变？”第 3 课立过这本方向账；本课把它穿过真实的多层机器。答错了也照样放行。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>揭晓 · 变化率接力,逐环相乘</h3>
+        <h3>揭晓 · 两位老师都说“错了”，但各颗旋钮不能平均挨罚</h3>
         <p>
-          <strong>先还第 5 课一笔账。</strong>纯乘纯加的两层,叠了白叠
-          (w₂·(w₁·x) = (w₂·w₁)·x)——所以真网络在每次求和之后都插一道弯折,
-          本课的例子就带弯折。<em>一层看子、一层看势</em>:第一层把「窗口里
-          己方子数」(x)折成形势分,第二层把形势分读成赢面 v。玩具长这样:
+          先把上一课见过的完整机器接起来。策略头给每个落点一个分，搜索把这些分和推演结果
+          变成老师 <span className="mono">π</span>；价值头给出赢面 <span className="mono">v</span>，
+          终局给出老师 <span className="mono">z</span>。训练会计算“落子答案离 π 多远”和
+          “赢面答案离 z 多远”两笔罚分，再把它们加成一张总账。
         </p>
         <div className="formula">
-          h = ReLU(w₁·x) → v = w₂·h → 罚分 = (v − z)²
+          策略：落子分 ↔ π　＋　价值：v ↔ z　→　总罚分 → 更新全部旋钮
         </div>
         <p>
-          <strong>① 一层的责任 = 它用掉的那份证据。</strong>第 4 课判过:每个权重的账,
-          恰好是它乘的那份输入。要把「罚分对 v 的账」摊回 w₁、w₂,只需沿网络
-          <em>反向</em>把变化率(就是第 3 课立的账目:那边拧一点点,这边变
-          多少)一环环乘回去——教科书叫链式法则,本站叫<strong>变化率接力</strong>。
+          <strong>回摊要解决的不是“有没有错”，而是“该改谁、改哪边”。</strong>第 4 课已经看过：
+          一个权重改一点，它所乘的证据会决定分数改多少。现在从总罚分倒着走，沿实际计算路径
+          逐段追问“这一处小变化会传多远”。教科书叫它反向传播；这里把它叫<strong>变化率接力</strong>。
         </p>
         <p>
-          <strong>② 自己动手算一遍(行话叫「手推」:拿真数字一步步算,不玩
-          字母公式)。</strong>x=2、w₁=0.5、w₂=1.5、z=1。
-          先顺着算一遍(行话叫<em>前向</em>:从子数一路算到罚分),
-          s=w₁·x=<strong className="num">1</strong>,h=ReLU(1)=
-          <strong className="num">1</strong>,v=w₂·h=<strong className="num">1.5</strong>,
-          罚分=(1.5−1)²=<strong className="num">0.25</strong>。再反向接力,
-          从罚分那头往回走四环:
+          <strong>先用两颗旋钮看清规则。</strong>令 <span className="mono">x=2</span> 是一条教学读数，
+          <span className="mono">w₁=0.5、w₂=1.5</span>，并假设终局标签是 <span className="mono">z=+1</span>。
+          这台玩具故意省略 tanh，前向计算得到原始分 <span className="mono">h=1、r=1.5</span>，所以罚分是
+          <span className="mono">(1.5−1)²=0.25</span>。现在从这 0.25 分倒着问：两颗旋钮各要承担多少？
         </p>
         <div className="formula">
-          ∂罚/∂w₁ = <span className="hl">2(v−z)</span> ×{" "}
-          <span className="hl">w₂</span> × <span className="hl">门</span> ×{" "}
-          <span className="hl">x</span> = 1 × 1.5 × 1 × 2 ={" "}
-          <span className="hl">3</span>
-          <br />∂罚/∂w₂ = 2(v−z) × h = 1 × 1 ={" "}
-          <span className="hl">1</span>
+          w₁ 的方向账 = <span className="hl">3</span>　　w₂ 的方向账 = <span className="hl">1</span>
         </div>
         <p>
-          公式里两个新面孔,先认一认:∂ 不用会念,整个 ∂罚/∂w₁ 就读
-          「罚分对 w₁ 的账」。「门」= ReLU 里那道「如果」,像一道闸门:
-          正分区(s 是正数的那边)放行、记 1,负分区(s 是负数的那边)
-          拦死、记 0。
+          这里 <span className="mono">w₁</span> 的方向账更大，因为它的影响会继续穿过
+          <span className="mono">w₂</span> 和输入 <span className="mono">x</span>；两颗旋钮不是各分一半。
+          方向账为正，训练就把旋钮往能减小罚分的反方向调；为负则反过来。网页部件让你亲手拖动，
+          看前向答案、两本方向账和“一步更新”同时变化。
         </p>
-        <p>
-          四环分别是谁的账?①环头上的 2:罚分是差的平方,平方的账=先把差
-          乘 2——第 3 课「误差每步乘的因子」里那个 2,就是它。②环的 w₂:
-          v=w₂·h,h 拧 1 格,v 动 w₂ 格,这环的账就是 w₂。③④两环是 ReLU
-          拆开的:<em>门</em>的账乘<em>输入</em>的账 x——负分区门关死,
-          后面乘什么都归 0。这套接力沿 7 层真网络一路乘到底,就是「反向
-          传播」:14.5 万个旋钮,每个各领到自己的账,一次算清。
-        </p>
-        <p>
-          <strong>③ 梯度死:整条样本失声。</strong>先认两个行话:梯度就是
-          账;一道训练题,行话叫一条样本。把 w₁ 拧到 −0.5:s=−1、
-          h=0、v=0、罚分=1——但两个旋钮的账<strong>全是 0</strong>:w₂ 的账
-          恰好是它乘的 h(=0);接力链断在「门」那环。网络一层层摞到七层
-          (行话叫<em>深栈</em>:很多层摞起来的深网络),负分区容易连成
-          一大片,信号就死在里面。部件里拖 w₁ 穿过 0,亲眼看账目熄灯。
-        </p>
-        <p>
-          <strong>④ 深栈的另一种死:账越乘越小。</strong>七层接力,每环的账
-          多半是不到 1 的小数(比如 0.5)。小数连乘会越乘越小:
-          0.5×0.5×0.5×0.5×0.5×0.5×0.5 ≈ <strong className="num">0.008</strong>
-          ——账还没走到底层,已经缩得快没了。底层的旋钮像一排「罚分送不到的
-          信箱」:明明有责任要摊,账单却在半路缩没了。这种死法行话叫
-          <em>梯度消失</em>(消失=缩成 0),和③的门关死是两种不同的死。
-        </p>
-        <p>
-          <strong>解药:给每层留一条绕过去的直路。</strong>真网络每一层都修了
-          一条「跨层直达道」。输入有两条路可走:一条是<em>弯路</em>,层层
-          计票、层层弯折;另一条是<em>直路</em>,不经过任何旋钮,抄近路
-          直达出口。两条路在出口<strong>相加</strong>。直路是纯加法。加法
-          只是原样搬运:那边拧 0.1,这边也动 0.1;0.1÷0.1=1,所以加法对
-          输入的账恰好是 <strong className="num">1</strong>。这份 1 不跟
-          任何小数相乘,一分不少、永不缩水。总账 = 直路的 1 + 弯路的账
-          (行话写成 F′,念「F 撇」,就是弯路的账)。哪怕弯路七层全学废、
-          账学成 0(这块啥也不修),总账还剩 1:信号原样通过——网络摔不死,
-          靠的就是这条直路。这个「直路 + 弯路」的设计,行话叫<em>残差</em>
-          ——第 9 课带你进真网络里亲眼看它,这里记住画面就够了:每层都有
-          条摔不死的直达道。
-        </p>
+        <details className="account-book mt-5">
+          <summary>想深挖 · 四段变化率怎样乘成上面的两本账</summary>
+          <div className="formula mt-3">
+            ∂罚/∂w₁ = <span className="hl">2(r−z)</span> × <span className="hl">w₂</span> ×
+            <span className="hl">门</span> × <span className="hl">x</span> = 1 × 1.5 × 1 × 2 =
+            <span className="hl">3</span>
+            <br />∂罚/∂w₂ = 2(r−z) × h = 1 × 1 = <span className="hl">1</span>
+          </div>
+          <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
+            ∂罚/∂w₁ 读作“罚分对 w₁ 的方向账”。四段依次是：平方罚分怎样响应误差、
+            中间量怎样影响原始分 r、ReLU 的门是否放行、输入 x 怎样影响第一颗旋钮。真实网络把同样的
+            接力沿许多层和通道自动算完，这就是 <span className="mono">loss.backward()</span>。
+          </p>
+        </details>
+        <details className="account-book mt-3">
+          <summary>想深挖 · 门关死、方向变弱与残差捷径</summary>
+          <div className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
+            <p>
+              若把 w₁ 拧到 −0.5，玩具中的 ReLU 会让 <span className="mono">h=0</span>；这条路径上
+              两颗旋钮的方向账都变为 0，叫“梯度死”的最小例子。真实网络有其他通道和路径，不能据此
+              说整条样本完全失声。
+            </p>
+            <p className="mt-2">
+              深层里很多小于 1 的影响连续相乘也会让早层更新变弱。第 8 课见过的残差连接让一层学习
+              <span className="mono">x + F(x)</span> 的小修正；当末端门打开时，直路能帮助信号传递。
+              它是常见缓解手段，不是永远有效的保证。
+            </p>
+          </div>
+        </details>
       </div>
 
       <TwoLayerBook />
@@ -135,52 +131,51 @@ loss.backward()                   # 回摊:罚分沿网络反向接力,
 optimizer.step()                  # 下山:每个旋钮按账挪 lr 那么多`}</pre>
         </div>
         <p className="mt-3">
-          网络一次交两份答案:v 是赢面,logits 是每个落子格的分;罚分也就
-          有两笔,加成一笔总账再一起回摊。<span className="mono">loss.backward()</span>
-          就是本课整套变化率接力——torch 把四环乘法沿 7 层网络自动接完,
-          你手推的正是它内部的账法。到这儿,四门地基课凑齐了:第 3 课立
-          「账目」、第 4 课给第一个公式(∂s/∂w=x)、本课把账接成链——「学习」
-          的全部机制你已经亲手算过一遍。下一课回到棋盘,看这套机制怎么吃掉
-          「三张平面」。
+          网络一次交两份答案：<span className="mono">v</span> 是赢面，<span className="mono">logits</span>
+          是每个落子格的分；罚分也有两笔，加成总账后一起回摊。
+          <span className="mono">loss.backward()</span> 就是本课的变化率接力——软件把同样的
+          规则沿整张网络自动算完。现在你已把第 3–5 课的旋钮、计票、弯折，和第 6–10 课的
+          输入、双头、搜索接成了一条“老师答案 → 更新旋钮”的链。下一课会把很多盘这样的作业攒起来，
+          让链条变成飞轮。
         </p>
       </Ledger>
 
       <Quiz
-        title="小测 · 过关解锁第 7 课"
+        title="小测 · 过关解锁第 12 课"
         onAllCorrect={() => pass("l06")}
         questions={[
           {
-            q: "回摊(反向传播)在干什么?",
+            q: "回摊（反向传播）在干什么？",
             options: [
               "把罚分平分给每个旋钮",
-              "变化率接力:罚分对答案的账,沿网络反向逐环相乘,摊到每个旋钮——谁影响大,谁的账大",
+              "变化率接力：两笔罚分对答案的影响，沿网络反向逐环相乘，摊到每个旋钮——谁影响大，谁的更新信号大",
               "把答错的题存起来下次重考",
             ],
             answer: 1,
             explain:
-              "接力链四环:2(v−z) × w₂ × 门 × x——每一环都是「那边拧一点点,这边变多少」。平摊冤枉人:重置随机数更糟,把学到的全扔了。",
+              "核心不是平摊，而是沿实际路径计影响：某颗旋钮调一点会怎样改变输出，输出又会怎样改变总罚分。两笔训练目标最后一起形成更新信号；两旋钮的公式只是把这条规则放大给你看。",
           },
           {
-            q: "w₁ 拧成负的(s<0),为什么两个旋钮的账全变 0?",
+            q: "在两旋钮玩具里，w₁ 拧成负的（s&lt;0）时，为什么两个方向账都变 0？",
             options: [
               "因为负权重不许训练",
-              "ReLU 门关死:h=0,而 w₂ 的账恰好是它乘的 h;接力链又断在「门」那环——这条样本对两个旋钮全部失声(梯度死)",
+              "在这个两旋钮玩具里，ReLU 门关死：h=0，而 w₂ 的账恰好乘 h；w₁ 的路径也断在门上，所以两颗旋钮的账都为 0",
               "因为罚分太小,四舍五入成 0",
             ],
             answer: 1,
             explain:
-              "两层一起哑:往 w₂ 方向,v=w₂·h 里 h=0,拧 w₂ 纹丝不动;往 w₁ 方向,门的账是 0,接力断链。深栈里负分区连成一大片,整块网络学不到东西——门关死和账越乘越小,是残差要治的两种死。",
+              "在这个玩具中：往 w₂ 的方向，r=w₂·h 里 h=0，拧 w₂ 不改变原始分；往 w₁ 的方向，门的影响是 0，接力断链。真实网络还有其他路径，不能直接推出整张网络都没有信号；这个例子只让你看清“门关上时，这条路径不会更新”。",
           },
           {
-            q: "残差的「摔不死」,力量从哪来?",
+            q: "为什么真实训练会把策略和价值两笔罚分加成总账，再一起回摊？",
             options: [
-              "直路让网络层数变少、算得快",
-              "直路是加法,对输入的账恰好是 1、不参与连乘:总账=1+F′,F′ 学成 0 时信号原样通过",
-              "直路自带一个额外的训练信号",
+              "因为只要把两个数字相加，训练速度一定翻倍",
+              "同一组旋钮同时影响“下哪”和“谁优”；把两份反馈合起来，主干才能同时朝两种目标调整",
+              "因为终局 z 和搜索 π 本来就是同一个数",
             ],
             answer: 1,
             explain:
-              "加法的账不多不少正是 1——网络摞多深,这份 1 都原样传到底。注意:总账是 1+F′,别写成「永远等于 1」;F′ 若是负的,加上它等于往回减,总账就不到 1。但直路这份 1 不掺任何旋钮、永不缩水——这正是「摔不死」的底气。",
+              "双头各有自己的老师：π 指出搜索后更值得尝试的落子，z 指出最终输赢。它们读的是同一份主干理解，因此总账会把两种反馈一起交给同一批旋钮；这不是把两个目标混为一谈，而是让共享部分同时收到两种信号。",
           },
         ]}
       />
@@ -188,7 +183,7 @@ optimizer.step()                  # 下山:每个旋钮按账挪 lr 那么多`}<
   )
 }
 
-/* ============ 部件 6-1 · 两层账本:前向反向联动 + 走一步 ============ */
+/* ============ 部件 11-1 · 两层账本:前向反向联动 + 走一步 ============ */
 
 const boxStyle = {
   border: "1px solid var(--hairline)",
@@ -257,9 +252,9 @@ function TwoLayerBook() {
 
           <div className="reveal-box mt-4">
             <p className="text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-              x = 2(这扇窗里有 2 颗己方子)、z = +1(这盘我赢)。拖 w₁
-              <strong>穿过 0</strong>:看反向的账目列整体熄灯——那条样本
-              对两个旋钮全部失声,梯度死。
+              x = 2（这扇窗里有 2 颗己方子）、z = +1（假设训练对局后来我赢）。拖 w₁
+              <strong>穿过 0</strong>：看这道<strong>两旋钮玩具题</strong>的反向账目列整体熄灯——
+              ReLU 门关上后，这条路径不会更新。
             </p>
           </div>
 
@@ -276,7 +271,7 @@ function TwoLayerBook() {
                 w₁ {f2(last.b1)} → {f2(last.n1)}、w₂ {f2(last.b2)} → {f2(last.n2)}
               </p>
               <p className="num mt-0.5">
-                v {f2(last.before.v)} → {f2(last.after.v)}
+                玩具原始分 r {f2(last.before.v)} → {f2(last.after.v)}
                 {last.after.v < Z && last.before.v > Z ? "(跨过了 z=1)" : ""}、
                 罚分 {last.before.loss.toFixed(3)} → {last.after.loss.toFixed(3)}
               </p>
@@ -289,7 +284,7 @@ function TwoLayerBook() {
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="mini-label">前向:x → s → h → v → 罚分</div>
+          <div className="mini-label">前向:x → s → h → r(玩具原始分) → 罚分</div>
           <div className="mt-2 flex flex-wrap items-center gap-2" data-qa="fwd-chain">
             <div style={boxStyle}>
               <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>x 子数</div>
@@ -309,12 +304,12 @@ function TwoLayerBook() {
             </div>
             {arrow}
             <div style={boxStyle}>
-              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>v = w₂·h</div>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>r = w₂·h</div>
               <div className="num font-bold">{g.v.toFixed(2)}</div>
             </div>
             {arrow}
             <div style={{ ...boxStyle, borderColor: "var(--accent)" }}>
-              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>罚分 (v−z)²</div>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>罚分 (r−z)²</div>
               <div className="num font-bold" style={{ color: "var(--accent-deep)" }}>
                 {g.loss.toFixed(3)}
               </div>
@@ -324,12 +319,12 @@ function TwoLayerBook() {
           <div className="mini-label mt-5">反向:罚分 → 接力四环 → w₁ 的账</div>
           <div className="mt-2 flex flex-wrap items-center gap-2" data-qa="bwd-chain">
             <div style={{ ...boxStyle, ...dim }}>
-              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>① 罚对 v</div>
-              <div className="num font-bold">2(v−z) = {g.dv.toFixed(2)}</div>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>① 罚对 r</div>
+              <div className="num font-bold">2(r−z) = {g.dv.toFixed(2)}</div>
             </div>
             <span style={{ color: "var(--fg-faint)", ...dim }}>×</span>
             <div style={{ ...boxStyle, ...dim }}>
-              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>② v 对 h</div>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>② r 对 h</div>
               <div className="num font-bold">w₂ = {w2.toFixed(2)}</div>
             </div>
             <span style={{ color: "var(--fg-faint)", ...dim }}>×</span>
@@ -369,9 +364,9 @@ function TwoLayerBook() {
               style={{ borderColor: "var(--accent)", color: "var(--accent-deep)" }}>
               <strong>门关死:梯度死。</strong>s 掉到 0 或 0 以下(记号写作
               s ≤ 0),h=0——w₂ 的账恰好是它乘的 h(0),w₁ 的接力断在
-              第③环(门=0)。这条样本对两个旋钮
-              <strong>全部失声</strong>:罚分明明是 {g.loss.toFixed(2)},
-              却没有一个旋钮知道该动。把 w₁ 拖回正的,账目复明。
+              第③环(门=0)。在这道<strong>两旋钮玩具题</strong>里，两个旋钮都暂时
+              <strong>收不到方向账</strong>：罚分明明是 {g.loss.toFixed(2)}，却没有一个旋钮知道该动。
+              把 w₁ 拖回正的，账目复明。
             </div>
           ) : (
             <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
@@ -384,7 +379,7 @@ function TwoLayerBook() {
         </div>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">部件 6-1</span>
+        <span className="cap-no">部件 11-1</span>
         前向与反向同一套数(lib/foundations.ts 的{" "}
         <span className="mono">twoLayer</span>):拖任何一个旋钮,两本账同时更新。
         「走一步」就是真训练的那一步:w ← w − 0.1×账;手推例的数字(3、1、

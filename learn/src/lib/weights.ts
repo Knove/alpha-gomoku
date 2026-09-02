@@ -13,7 +13,7 @@ export function loadWeights(): Promise<WeightsJson> {
 }
 
 /** 未训练(weights-untrained,baseline.pt:训练开始前随机初始化后冻结的权重,
- *  一步 SGD 都没走过):第 6 课的对照组。 */
+ *  一步 SGD 都没走过):第 11 课的对照组。 */
 export function loadWeightsUntrained(): Promise<WeightsJson> {
   cachedUntrained ??= import("../data/weights-untrained.json").then((m) => m.default as WeightsJson)
   return cachedUntrained

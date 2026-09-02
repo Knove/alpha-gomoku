@@ -1,10 +1,11 @@
-/** 第 11 课 · 搜索:再想四十遍。
+/** 第 10 课 · 搜索:再想四十遍。
  *  节拍:谜题(第一印象会错)→ 揭晓四小节(模拟 / PUCT / 逐层取负 / 访问数)→
  *  部件(单步模拟器:真引擎 SearchTree + 真权重叶评估,三键单步 select→eval→
  *  expandAndBackup;树图 / 根账本 / F5 收敛 / 根噪声开关)→ 对账(mcts.py)→ 小测。 */
 import { useEffect, useRef, useState } from "react"
 import { Quiz, usePassLesson } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
+import { LessonGuide } from "../framework/lesson-guide"
 import Board from "../lib/board"
 import { legalMoves, type GameState } from "../engine/game"
 import { loadNet, type WeightsJson } from "../engine/model"
@@ -12,8 +13,9 @@ import { SearchTree, type MctsConfig, type MctsNode } from "../engine/mcts"
 import { softmax } from "../engine/nn"
 import { loadWeights } from "../lib/weights"
 
-/* 教学手摆局面(archive/mcts.md 手算例):黑四连 (1..4,4)、白堵左端 (0,4)、
- * 白三 (2,1)(3,1)(4,1)、黑闲子 (6,2),轮黑。F5 = (5,4) = action 41 一手成五。 */
+/* 教学手摆局面:黑四连 (1..4,4)、白堵左端 (0,4)、
+ * 白三 (2,1)(3,1)(4,1)、双方各一枚闲子，黑白各 5 子，轮黑。
+ * F5 = (5,4) = action 41，一手成五。 */
 const F5 = 41
 const POS: GameState = (() => {
   const board = Array.from({ length: 9 }, () => new Array<number>(9).fill(0))
@@ -21,7 +23,8 @@ const POS: GameState = (() => {
   board[4][0] = -1
   for (const x of [2, 3, 4]) board[1][x] = -1
   board[2][6] = 1
-  return { board, current: 1, winner: 0, moveCount: 9, lastMove: null }
+  board[7][7] = -1
+  return { board, current: 1, winner: 0, moveCount: 10, lastMove: null }
 })()
 const POS_FLAT = POS.board.flat()
 
@@ -45,8 +48,21 @@ export default function L11() {
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
-      <div className="eyebrow mb-3">第 11 课</div>
+      <div className="eyebrow mb-3">第 10 课</div>
       <h1 className="text-2xl font-bold">搜索:再想四十遍</h1>
+
+      <LessonGuide
+        question="网络已经给出第一判断后，为什么还要在落子前把几条后续走法再想一遍？"
+        why="“看一眼”容易漏掉强制应手、陷阱或一手成五。搜索不替换网络，而是让网络当向导，把有限的思考次数花在更值得检查的分支上。"
+        chain={[
+          "网络先提示哪些落点值得优先看",
+          "搜索沿候选走几步，在新局面再问网络",
+          "每条路把结果和被检查次数记到账本",
+          "多轮后按经过充分检验的访问数选择落子",
+        ]}
+        takeaway="搜索把“第一印象”变成“经过多次推演的选择”：先验负责带路，实际推演的记录负责纠偏。"
+        boundary="40 次是本演示的预算，不是搜索必然正确的保证；网络很弱或预算太少时，搜索仍可能漏掉关键手。"
+      />
 
       <Quiz
         title="谜题 · 先选一个答案"
@@ -78,24 +94,27 @@ export default function L11() {
           一次模拟最多问网络一次,40 次模拟笔记本扛得住。
         </p>
         <p>
-          <strong>② 岔口公式(行话叫 PUCT):每条边一本账。</strong>每条边记两个数:<em>N</em>
-          (被看过几次)和 <em>W</em>(历次得分总和),商 W/N 记作 <em>Q</em>
-          (历史平均)。岔口怎么挑?一行公式两头都照顾:
+          <strong>② 岔口怎么选：旧成绩 + 少看补偿。</strong>每条候选边有一本小账：
+          <span className="mono">N</span> 是看过几次，<span className="mono">W</span> 是历次结果的总和，
+          <span className="mono">Q=W/N</span> 是平均成绩。只看 Q，会让一开始碰巧赢的路霸占预算；
+          只平均分配，又会每条路都看得太浅。因此搜索同时看“历史平均更好”和“还没怎么检查”。
         </p>
-        <div className="formula">
-          score(a) = <span className="hl">Q(a)</span>(历史平均,裁判)+
-          c · P(a) · √ΣN / (1 + N(a))(没看过的加分,探索)
-          (a 指某一条边、某一手:N(a) 就是这条边记的 N,每条边各套一遍这个公式;
-          ΣN=各条边看过的次数统统加起来;√ 根号只是让这个数长得慢一点,
-          这里不用管怎么算)
-        </div>
+        <details className="account-book mt-4">
+          <summary>进阶 · 把“旧成绩 + 少看补偿”写成 PUCT 公式</summary>
+          <div className="formula mt-3">
+            score(a) = <span className="hl">Q(a)</span>(历史平均) +
+            c · P(a) · √ΣN / (1 + N(a))(少看补偿)
+          </div>
+          <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
+            P 是网络给的“先看哪里”的先验，c 控制探索力度，ΣN 是所有候选被看过的次数之和。
+            首次阅读不必记公式；看懂它把“已有证据”和“别忘了查冷门”放在一起即可。
+          </p>
+        </details>
         <p>
-          P 是<em>网络先验</em>——网络说这里值得先看(第 10 课那 81 个分数派上用场了)。
-          先验是<em>向导</em>,只管先往哪看;Q 是<em>裁判</em>,管往哪走。
-          公式里的 c 是探索强度的旋钮(本站取 1.5):c 越大,越爱试冷门的
-          没看过的手;c 越小,越死磕眼下最赚的那条。
-          没看过的手(N 小)探索分高,<em>总会轮到</em>;看得多的手探索分自然衰减,
-          最后由 Q 说了算。两个都不偏:纯认 Q 是一棵树上吊死,纯均匀是撒胡椒面(每处撒一点,哪处都没看够)。
+          P 是<em>网络先验</em>：网络说“这里值得先看”。它是向导，不是判决书；Q 是已经
+          推演出的历史平均。c 是探索强度的旋钮：越大越愿意给冷门候选机会，越小越专注当前热门。
+          在预算足够时，少看的候选通常会得到更多机会；预算很小或先验很偏时，仍可能来不及轮到它——
+          下面的 F5 正是例子。
         </p>
         <p>
           <strong>③ 逐层取负(= 每爬一层,正负号翻一次):账要对得上视角。</strong>所有数值都站在
@@ -107,11 +126,19 @@ export default function L11() {
           这是搜索能拿到的最硬的信号。
         </p>
         <p>
-          <strong>④ 访问数说了算。</strong>40 次推演跑完,哪手被反复看最多就下哪。
+          <strong>④ 在给定预算内，访问数说了算。</strong>40 次只是本页演示预算；跑完后，
+          系统在已检查过的候选中选访问最多的一手。
           为什么不直接挑 Q 最高?一个候选若只被撞见 1 次、碰巧拿了 +1,Q 也是满分,
           和被检验 20 次平均出来的 +1 长得一模一样——<em>Q 分不清底气,N 分得清</em>
           。访问数把先验的方向、Q 的可靠程度、检验的次数炖成一锅,是整个过程的总结算。
         </p>
+      </div>
+
+      <div className="reveal-box mt-8 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+        <strong>现在回看序章的两个仪表。</strong>棋盘上的红色热度，就是搜索把有限访问次数
+        分给候选落点后形成的 <span className="mono">π</span>；旁边的
+        <span className="mono">v</span> 是网络给当前局面的价值判断。它们当时只是预告，
+        现在已经有了来源：<a href="#/prologue">回到序章回放</a>，再看会是另一幅画面。
       </div>
 
       <Simulator />
@@ -155,7 +182,7 @@ def best_action(self):
       </Ledger>
 
       <Quiz
-        title="小测 · 过关解锁第 12 课"
+        title="小测 · 过关解锁第 11 课"
         onAllCorrect={() => pass("l11")}
         questions={[
           {
@@ -189,7 +216,7 @@ def best_action(self):
             ],
             answer: 1,
             explain:
-              "Q 是平均,平均分不清「一次的运气」和「二十次的底气」。访问数高的手,是被先验领来、又被 Q 留下的手——三种信息它都收到。训练时干脆拿 N/ΣN 当老师(π;意思是「这一手占全部次数的几分之几」——这个 π 不是圆周率,只是给这个比例起的名字)。第 12 课的飞轮(自己下棋→训练→再下,像轮子越转越快)就从这里起转。",
+              "Q 是平均，平均分不清「一次的运气」和「二十次的底气」。访问数高的手，是被先验领来、又被 Q 留下的手——三种信息它都收到。训练会把 N/ΣN 记成 π（这一手占全部访问次数的几分之几）。现在 π 与终局结果 z 这两位老师都有了；下一课就追问：它们怎样回到每颗旋钮。",
           },
         ]}
       />
@@ -335,7 +362,7 @@ function Simulator() {
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
         <span className="mini-label">部件 · 单步模拟器:真引擎一步一步走</span>
         <span className="num text-sm" style={{ color: "var(--fg-faint)" }} data-qa="sim-count-wrap">
-          已推演 <span data-qa="sim-count">{sims}</span> 次(40 次够下结论,最多 100 次)
+          已推演 <span data-qa="sim-count">{sims}</span> 次(40 次用于观察，最多 100 次；不保证找到赢手)
         </span>
       </div>
 
@@ -346,8 +373,7 @@ function Simulator() {
             <Board board={POS_FLAT} marks={[{ x: 5, y: 4, anchor: true }]} />
           </div>
           <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            教学手摆局面:黑 5 白 4 却轮黑。真实对局里,黑=白才轮黑;黑恰好多一,
-            是黑刚落完、该白走——这盘不合规矩,搜索照样跑。
+            教学手摆局面：黑白各 5 子，轮黑，符合轮流落子的规则。
             红圈标的是 F5 = (5,4) = action 41:黑落这里,横排 (1,4)…(5,4) 成五,
             一手赢棋。
           </p>
@@ -404,6 +430,12 @@ function Simulator() {
             </span>
           </div>
           <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+            这个开关只用于观察：在根部加入一点小扰动，让不同对局有机会先检查不同分支。
+            搜索主线不依赖它；参数、种子和它怎样帮助自我对弈多样化，收进下面的实验室。
+          </p>
+          <details className="account-book mt-2">
+            <summary>实验室 · 根噪声怎样改变先验与对局多样性</summary>
+            <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
             做个对照实验,看「偏见锁死」:关噪声时,搜索全信网络先验,只在它偏爱的
             几个点打转——偏见喂偏见。开了噪声,根的先验里掺 25% 随机(这招行话叫
             Dirichlet 噪声,掺多少记作 ε=0.25——ε 是个希腊字母,读「艾普西隆」,
@@ -416,7 +448,8 @@ function Simulator() {
             另一个坑:自我对弈几千盘,每盘都走同一条路,等于反复学同一招;噪声让每盘
             换条路走。一切换开关就整盘重来:换一粒新种子(种子=随机路线的起头),
             路线跟着换,可多试几次。
-          </p>
+            </p>
+          </details>
 
           {busy && (
             <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
@@ -534,14 +567,11 @@ function Simulator() {
                 </span>
               </p>
               <p className="mt-2" style={{ color: "var(--fg-muted)" }}>
-                老实交代:这里站着的是真网络——它才训到第 3 轮,F5 在它的先验里
-                只有 1.2%,排它前面的还有 56 个点(最高的点才 2.1%),40 次
-                「想」的名额全被网络偏爱的点借走,一次也没轮到 F5。实测把次数拉到
-                770 次(先验原样、种子固定),「没看过的加分」才第一次把它送进来
-                ——进来之后终局直传,Q 立刻 +1。
-                <strong>搜索放大直觉:直觉强,越想才越准;直觉弱,给的次数再多也追不回</strong>
-                ——这笔债,第 12 课的飞轮来还(飞轮=自己下棋→训练→再下,
-                像轮子越转越快,下课细讲)。
+                老实交代：这个训练快照很弱，F5 可能在先验里排得很靠后。上面的 N 和占比会直接
+                告诉你，40 次预算有没有来得及检查这手必赢棋。若没有，这不是搜索实现出错，而是
+                固定预算先花在了网络更偏爱的候选上。增加预算会提高补查的机会，但不保证每次都及时找到。
+                <strong>搜索会放大已有直觉，也受固定预算限制。</strong>下一课会把搜索留下的 π
+                和终局给出的 z 接到同一张总账上，看看它们怎样更新旋钮；之后才会把许多盘作业攒成飞轮。
               </p>
             </div>
           )}

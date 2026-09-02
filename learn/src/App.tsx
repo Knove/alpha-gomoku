@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import { LESSONS } from "./framework/lesson"
 import { loadProgress, passQuiz, saveProgress, type Progress } from "./framework/progress"
 import { PassLessonContext } from "./framework/quiz"
@@ -80,42 +80,56 @@ export default function App() {
 
       <div className="mx-auto flex max-w-6xl flex-col lg:flex-row">
         <nav className="lesson-nav" aria-label="课程">
-          {LESSONS.map((l, i) => {
+          {(() => {
+            let previousPhase = ""
+            return LESSONS.map((l, i) => {
             const itemLocked = i > progress.unlocked
+            const startsPhase = l.meta.phase !== previousPhase
+            previousPhase = l.meta.phase
             return (
-              <a
-                key={l.meta.id}
-                href={`#/${l.meta.id}`}
-                className={`lesson-item${i === idx ? " current" : ""}${itemLocked ? " lesson-locked" : ""}`}
-                aria-current={i === idx ? "page" : undefined}
-                aria-disabled={itemLocked ? "true" : undefined}
-                tabIndex={itemLocked ? -1 : 0}
-              >
-                <span className="num lesson-no">{l.meta.num}</span>
-                <span className="lesson-title">{l.meta.title}</span>
-                {itemLocked && (
-                  <span className="lock-badge">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
-                      <rect x="4.5" y="10.5" width="15" height="10" rx="2" />
-                      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
-                    </svg>
-                    锁
-                  </span>
-                )}
-              </a>
+              <Fragment key={l.meta.id}>
+                {startsPhase && <div className="lesson-phase">{l.meta.phase}</div>}
+                <a
+                  href={`#/${l.meta.id}`}
+                  className={`lesson-item${i === idx ? " current" : ""}${itemLocked ? " lesson-locked" : ""}`}
+                  aria-current={i === idx ? "page" : undefined}
+                  aria-label={itemLocked ? `${l.meta.title}，尚未解锁，可查看预告` : undefined}
+                  tabIndex={0}
+                >
+                  <span className="num lesson-no">{l.meta.num}</span>
+                  <span className="lesson-title">{l.meta.title}</span>
+                  {itemLocked && (
+                    <span className="lock-badge">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+                        <rect x="4.5" y="10.5" width="15" height="10" rx="2" />
+                        <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+                      </svg>
+                      锁
+                    </span>
+                  )}
+                </a>
+              </Fragment>
             )
-          })}
+            })
+          })()}
         </nav>
 
         <main id="main" className="min-w-0 flex-1">
           {!lesson ? null : locked ? (
             <section className="mx-auto max-w-3xl px-6 py-16">
               <div className="card p-6">
-                <h1 className="text-xl font-bold">这一课还没解锁</h1>
+                <div className="eyebrow mb-2">{lesson.meta.phase}</div>
+                <h1 className="text-xl font-bold">下一站预告 · {lesson.meta.num} {lesson.meta.title}</h1>
                 <p className="mt-3" style={{ color: "var(--fg-muted)" }}>
-                  先通关上一课,这里才会打开——序是点「开始第 1 课」按钮,
-                  其它课是做对结尾的小测。
+                  {lesson.meta.preview}
+                </p>
+                <p className="mt-3 text-sm" style={{ color: "var(--fg-faint)" }}>
+                  它会从这个问题开始：{lesson.meta.puzzle}
+                </p>
+                <p className="mt-5 text-sm" style={{ color: "var(--fg-muted)" }}>
+                  先通关上一课，这一站的完整内容就会打开。预告始终可见，是为了让你知道
+                  眼前这一步最终会用在哪里。
                 </p>
                 {prev && (
                   <a className="btn primary mt-5" href={`#/${prev.meta.id}`}>

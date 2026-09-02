@@ -359,6 +359,230 @@ body {
   margin-bottom: 0.35em;
 }
 
+/* ============================================================
+   每课认知地图：先给问题、用途和因果，再进入谜题与术语
+   ============================================================ */
+
+.lesson-guide {
+  background: var(--card);
+  border: 1px solid var(--hairline-strong);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.lesson-guide-kicker {
+  padding: 0.7rem 1rem;
+  background: var(--accent-wash);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--accent-deep);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.lesson-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.lesson-guide-grid > div {
+  padding: 0.85rem 1rem 0.95rem;
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.lesson-guide-grid > div:nth-child(2) {
+  border-right: 0;
+}
+
+.lesson-guide-grid > .lesson-guide-takeaway {
+  grid-column: 1 / -1;
+  border-bottom: 0;
+  border-right: 0;
+}
+
+.lesson-guide dt {
+  margin-bottom: 0.25rem;
+  color: var(--fg-faint);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.lesson-guide dd {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.92rem;
+  line-height: 1.7;
+}
+
+.lesson-guide-chain {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  padding: 0.8rem 1rem 0.9rem;
+  background: var(--card-sunken);
+}
+
+.lesson-guide-chain > span {
+  flex: none;
+  color: var(--accent-deep);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.lesson-guide-chain ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lesson-guide-chain li {
+  color: var(--fg-muted);
+  font-size: 0.87rem;
+  line-height: 1.6;
+}
+
+.lesson-guide-chain li:not(:last-child)::after {
+  content: "→";
+  margin-left: 0.5rem;
+  color: var(--accent-deep);
+}
+
+.lesson-guide-boundary {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--hairline);
+  color: var(--fg-faint);
+  font-size: 0.82rem;
+  line-height: 1.65;
+}
+
+.lesson-guide-boundary strong {
+  color: var(--fg-muted);
+}
+
+/* ============================================================
+   序章系统预览：先看到闭环，后续章节逐一拆开
+   ============================================================ */
+
+.system-preview {
+  margin-inline: 0;
+  background: var(--card);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.system-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--card-sunken);
+}
+
+.system-preview ol {
+  display: flex;
+  align-items: stretch;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 1rem;
+  list-style: none;
+  overflow-x: auto;
+}
+
+.system-preview li {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1 0 7.3rem;
+}
+
+.system-preview a {
+  display: flex;
+  min-height: 4.65rem;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--hairline);
+  border-radius: 9px;
+  color: var(--fg);
+  text-decoration: none;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.system-preview a:hover {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.system-preview a strong {
+  color: var(--accent-deep);
+  font-size: 0.88rem;
+}
+
+.system-preview a span {
+  margin-top: 0.16rem;
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.system-preview li > i {
+  color: var(--accent-deep);
+  font-style: normal;
+}
+
+.system-preview figcaption {
+  padding: 0.72rem 1rem 0.82rem;
+  border-top: 1px solid var(--hairline);
+  color: var(--fg-muted);
+  font-size: 0.84rem;
+  line-height: 1.65;
+}
+
+@media (max-width: 38rem) {
+  .system-preview ol {
+    padding-inline: 0.75rem;
+  }
+}
+
+@media (max-width: 38rem) {
+  .lesson-guide-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lesson-guide-grid > div,
+  .lesson-guide-grid > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .lesson-guide-grid > .lesson-guide-takeaway {
+    grid-column: auto;
+  }
+
+  .lesson-guide-chain {
+    display: block;
+  }
+
+  .lesson-guide-chain ol {
+    margin-top: 0.4rem;
+  }
+}
+
 .tl-dr {
   display: flex;
   gap: 0.9rem;
@@ -951,7 +1175,6 @@ input[type="range"]::-moz-range-thumb {
 .lesson-locked {
   opacity: 0.45;
   filter: grayscale(0.6);
-  pointer-events: none;
 }
 .lock-badge {
   display: inline-flex;
@@ -1003,6 +1226,19 @@ details.account-book summary {
   transition: color 160ms ease, background 160ms ease;
 }
 
+.lesson-phase {
+  margin: 0.7rem 0.35rem 0.1rem;
+  color: var(--accent-deep);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.lesson-phase:first-child {
+  margin-top: 0.1rem;
+}
+
 .lesson-item:hover {
   color: var(--fg);
   background: var(--accent-wash);
@@ -1047,6 +1283,10 @@ details.account-book summary {
 
   .lesson-item {
     white-space: normal;
+  }
+
+  .lesson-phase {
+    margin-top: 0.95rem;
   }
 }
 
@@ -1372,4 +1612,3 @@ details.account-book summary {
   font-size: 9.5px;
   fill: var(--fg-faint);
 }
-
