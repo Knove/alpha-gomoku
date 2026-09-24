@@ -95,7 +95,7 @@ function ArenaReplay() {
 
   const trend = useMemo(() => {
     if (!game) return []
-    return game.moves.map((m) => (m.player === 1 ? m.value : -m.value))
+    return game.moves.map((m) => (m.player === 1 ? m.rootValue : -m.rootValue))
   }, [game])
 
   if (!game) {

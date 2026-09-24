@@ -53,7 +53,7 @@ test("reluAbs:ReLU(t)+ReLU(−t) = |t|(t=2,−3,0 徒手验)", () => {
   assert.equal(reluAbs(0), 0);
 });
 
-test("twoLayer 正例:x=2, w1=0.5, w2=1.5, z=1(第 11 课手推数字)", () => {
+test("twoLayer 正例:x=2, w1=0.5, w2=1.5, z=1(反向传播课手推数字)", () => {
   const g = twoLayer(0.5, 1.5, 2, 1);
   assert.equal(g.s, 1);
   assert.equal(g.h, 1);

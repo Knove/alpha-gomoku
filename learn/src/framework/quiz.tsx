@@ -7,32 +7,31 @@ export interface QuizQ {
   explain: string
 }
 
-/** 过关接线:App 提供,课内 Quiz 用 `onAllCorrect={() => passLesson("l01")}` 解锁下一课。 */
+/** 过关接线：App 提供，课内 Quiz 用 `onAllCorrect={() => passLesson("l01")}` 解锁下一课。 */
 export const PassLessonContext = createContext<(lessonId: string) => void>(() => {})
 export const usePassLesson = () => useContext(PassLessonContext)
 
 /**
- * 谜题(承诺装置)与小测共用:
- * - 谜题不传 onAllCorrect —— 答错也揭晓(reveal-box),不设门禁;
- * - 小测传 onAllCorrect —— 首错先给检索提示，二错给完整解释；答对才放行。
+ * 思考题(承诺装置)与习题共用：
+ * - 思考题不传 onAllCorrect : 答错也给完整解释(reveal-box),不设门禁；
+ * - 习题传 onAllCorrect : 首错立即给完整因果解释，再用同题重试；答对才放行。
  */
 export function Quiz({
   questions,
   onAllCorrect,
-  title = "小测",
+  title = "习题",
 }: {
   questions: QuizQ[]
   onAllCorrect?: () => void
   title?: string
 }) {
   const [picked, setPicked] = useState<Record<number, number>>({})
-  const [wrongAttempts, setWrongAttempts] = useState<Record<number, number>>({})
   const fired = useRef(false)
   const gated = !!onAllCorrect
   const allRight = questions.every((q, i) => picked[i] === q.answer)
   const done = Object.keys(picked).length === questions.length
 
-  // 全对回调走 useEffect + ref 防重,不在渲染期 setState
+  // 全对回调走 useEffect + ref 防重，不在渲染期 setState
   useEffect(() => {
     if (done && allRight && onAllCorrect && !fired.current) {
       fired.current = true
@@ -48,10 +47,8 @@ export function Quiz({
         const sel = picked[i]
         const answered = sel !== undefined
         const right = sel === q.answer
-        const attempts = wrongAttempts[i] ?? 0
-        // 谜题立即揭晓；关卡小测则保留一次“自己回去找因果链”的检索机会，
-        // 第二次错误一定给完整解释，避免只靠猜选项过关。
-        const reveal = answered && (right || !gated || attempts >= 2)
+        // 第一次作答就给完整因果解释；答错后带着解释重试，避免把挫败当检索训练。
+        const reveal = answered
         const retryOne = () => {
           setPicked((p) => {
             const next = { ...p }
@@ -74,11 +71,7 @@ export function Quiz({
                   type="button"
                   className={`quiz-option ${cls}`}
                   disabled={answered}
-                  onClick={() => {
-                    setPicked((p) => ({ ...p, [i]: j }))
-                    if (j !== q.answer)
-                      setWrongAttempts((a) => ({ ...a, [i]: (a[i] ?? 0) + 1 }))
-                  }}
+                  onClick={() => setPicked((p) => ({ ...p, [i]: j }))}
                 >
                   {opt}
                 </button>
@@ -94,21 +87,12 @@ export function Quiz({
                 )}
               </div>
             )}
-            {gated && answered && !right && !reveal && (
-              <div className="reveal-box mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
-                <strong>提示：</strong>先回到本章“揭晓”和互动部件，找出这道题问的那条
-                “因为 → 所以”链；再试一次。第二次答错会给完整因果解释。
-                <button type="button" className="btn mt-3" onClick={retryOne}>
-                  重答这一题
-                </button>
-              </div>
-            )}
           </div>
         )
       })}
       {gated && done && allRight && (
         <p className="mt-5 font-semibold" style={{ color: "var(--accent-deep)" }}>
-          ✓ 过关,下一课已解锁——点左侧目录接着走
+          ✓ 过关，下一章已解锁。点左侧目录接着走
         </p>
       )}
     </section>

@@ -1,34 +1,32 @@
-/** 第 10 课 · 搜索:再想四十遍。
- *  节拍:谜题(第一印象会错)→ 揭晓四小节(模拟 / PUCT / 逐层取负 / 访问数)→
- *  部件(单步模拟器:真引擎 SearchTree + 真权重叶评估,三键单步 select→eval→
- *  expandAndBackup;树图 / 根账本 / F5 收敛 / 根噪声开关)→ 对账(mcts.py)→ 小测。 */
+/** 第 10 课 · 搜索：一次模拟怎样来回走一遍。
+ *  节拍：思考题（第一印象会错）→ 根到叶的选择/求值/扩展 → 逐层取负回传 →
+ *  N/W/Q 与 root_value → 例 10-1 一次模拟 / 例 10-2 子树复用 → 对证 → 习题。 */
 import { useEffect, useRef, useState } from "react"
 import { Quiz, usePassLesson } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
+import { ChapterEnd, Def } from "../framework/def"
 import Board from "../lib/board"
-import { legalMoves, type GameState } from "../engine/game"
+import { type GameState } from "../engine/game"
 import { loadNet, type WeightsJson } from "../engine/model"
-import { SearchTree, type MctsConfig, type MctsNode } from "../engine/mcts"
-import { softmax } from "../engine/nn"
+import { SearchTree, type MctsConfig } from "../engine/mcts"
 import { loadWeights } from "../lib/weights"
 
-/* 教学手摆局面:黑四连 (1..4,4)、白堵左端 (0,4)、
- * 白三 (2,1)(3,1)(4,1)、双方各一枚闲子，黑白各 5 子，轮黑。
- * F5 = (5,4) = action 41，一手成五。 */
-const F5 = 41
+/* 教学局面是合法交替落子后的 6 手，轮黑。它只负责演示一趟搜索，
+ * 第 11 课用专门局面研究 PUCT、噪声、温度和有限预算失败。 */
 const POS: GameState = (() => {
   const board = Array.from({ length: 9 }, () => new Array<number>(9).fill(0))
-  for (const x of [1, 2, 3, 4]) board[4][x] = 1
-  board[4][0] = -1
-  for (const x of [2, 3, 4]) board[1][x] = -1
-  board[2][6] = 1
-  board[7][7] = -1
-  return { board, current: 1, winner: 0, moveCount: 10, lastMove: null }
+  for (const [x, y, p] of [
+    [4, 4, 1], [3, 4, -1], [5, 4, 1], [4, 3, -1], [4, 5, 1], [5, 5, -1],
+  ] as [number, number, number][]) board[y][x] = p
+  return { board, current: 1, winner: 0, moveCount: 6, lastMove: 5 * 9 + 5 }
 })()
-const POS_FLAT = POS.board.flat()
 
-/** 固定种子的确定性随机(mulberry32,与 tests/mcts.test.ts 同款)——噪声可复现。 */
+const CFG: MctsConfig = { cPuct: 1.5, dirichletEps: 0, dirichletAlpha: 0.3 }
+const coord = (a: number) => `(${a % 9},${Math.floor(a / 9)})`
+
+type NetFn = (planes: number[][][]) => { logits: number[]; value: number }
+
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0
   return () => {
@@ -40,183 +38,244 @@ function mulberry32(seed: number): () => number {
   }
 }
 
-const MAX_SIMS = 100
-const coord = (a: number) => `(${a % 9},${Math.floor(a / 9)})`
-
 export default function L11() {
   const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
       <div className="eyebrow mb-3">第 10 课</div>
-      <h1 className="text-2xl font-bold">搜索:再想四十遍</h1>
+      <h1 className="text-2xl font-bold">搜索：一次模拟怎样来回走一遍</h1>
 
       <LessonGuide
-        question="网络已经给出第一判断后，为什么还要在落子前把几条后续走法再想一遍？"
-        why="“看一眼”容易漏掉强制应手、陷阱或一手成五。搜索不替换网络，而是让网络当向导，把有限的思考次数花在更值得检查的分支上。"
+        question="网络给出第一眼判断后，一次搜索模拟怎样沿棋路前进，再把结果正确地带回根？"
+        why="只看眼前棋盘会漏掉对手回应。搜索要真的走到后续局面；但如果回传时搞错黑白视角，再多模拟也只会把输赢记反。"
         chain={[
-          "网络先提示哪些落点值得优先看",
-          "搜索沿候选走几步，在新局面再问网络",
-          "每条路把结果和被检查次数记到账本",
-          "多轮后按经过充分检验的访问数选择落子",
+          "从根沿已经展开的边走到一个叶节点",
+          "终局叶直接给答案；普通新叶交给网络，得到 v_net",
+          "扩展新叶，并沿原路径逐层取负回传（negamax）",
+          "每条边更新 N、W、Q，根另记搜索汇总 root_value",
         ]}
-        takeaway="搜索把“第一印象”变成“经过多次推演的选择”：先验负责带路，实际推演的记录负责纠偏。"
-        boundary="40 次是本演示的预算，不是搜索必然正确的保证；网络很弱或预算太少时，搜索仍可能漏掉关键手。"
+        takeaway="一次模拟只有一趟往返：向前选择到叶，取得一个值，再逐层换视角记回统计。"
+        boundary="本课只学搜索分哪几步、每步按什么顺序做、怎样把结果记回来。下一课才完整手算 PUCT，并解释（下一课的）访问配比 π、根噪声、温度和实际落子。"
       />
 
       <Quiz
-        title="谜题 · 先选一个答案"
+        title="思考题 · 先选一个答案"
         questions={[
           {
-            q: "网络看一眼棋盘就报答案,快是快,但那只是第一印象——没算过「我下这、对手应那、我再下」的后续。第一印象会错,怎么办?",
+            q: "搜索走到一个从未展开、又没有结束的局面后，下一步应该做什么？",
             options: [
-              "换更大的网络:参数多十倍,看得更准",
-              "多想几步:沿「目前最值得看」的路线一次次推演,用统计把直觉磨准",
-              "背更多棋谱:见过的局面多了,第一印象自然就对",
+              "立刻把它当成胜局，给所有边加一分",
+              "让网络评价这个叶局面，再展开并沿来路回传",
+              "删除整棵树，从根重新随机落子",
             ],
             answer: 1,
-            explain:
-              "选第二项。第一项和第三项都在给「看一眼」加料——但看一眼终究是看一眼:再大的网络、再多的棋谱,看一眼仍只是第一印象,直觉再强也不会自己推演「我下这、对手应那」——推演是搜索的事,不是直觉的事。第二项不换眼睛,换用法:让网络当向导,顺着它指的方向把「我下这、对手应那」真的走几遍,把每条路的结果记成账,几十次之后统计说了算。这就是本课的搜索——它不换更大的网络,只花固定的几十次「想」的次数。",
+            explain: "选第二项。非终局的新叶没有真实输赢，网络先给出各着点概率（先验 prior，搜索开始前网络给出的各着点概率 P），再给一个局面分数 v_net；随后叶节点展开，这个分数才沿选择路径逐层换视角记回。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>揭晓 · 四件事:模拟、记账、取负、落子</h3>
+        <h3>一次模拟是一趟向前、一趟向后的往返</h3>
         <p>
-          <strong>① 模拟 = 一次推演。</strong>推演的产物长成一棵<em>树</em>:
-          节点是局面,边是落子,根就是现在要下的局面。一次推演(
-          <em>模拟</em>)从根出发,每个岔口挑「目前最值得看」的那条边往下走,
-          走到<em>没见过的局面</em>就停(走到头的这个局面叫<em>叶子</em>,树的最末端),
-          问网络的看法。老派搜索在这里靠随机乱下到终局
-          ——随机下完的那盘,输赢纯靠瞎碰,说明不了哪手好;这里的做法:一撞见新局面就停,
-          网络的估值直接当「终局替身」(替身=这盘没下完,先拿网络的打分顶上)。
-          一次模拟最多问网络一次,40 次模拟笔记本扛得住。
+          网络给出第一眼判断之后，搜索还要真的走到后续局面再把结果带回来。
+          「沿树选择、叶处求值、逐层回传」这套算法有正式名字：蒙特卡洛树搜索。
+          AlphaGo 系列让它出了名，本项目的搜索就是它的一个实现。
+          一次模拟走一趟：向前选择到叶，取得一个值，再逐层换视角记回统计。
         </p>
+        <Def term="蒙特卡洛树搜索" en="Monte Carlo Tree Search,缩写 MCTS">
+          沿树选择到叶、在叶处取得一个评价、再把评价逐层记回的搜索算法。
+          「蒙特卡洛」来自用随机模拟估计答案的传统；引入神经网络评价后，
+          随机模拟被一次前向取代，记回的形式不变（N/W/Q 照写；但值的来源从真终局换成网络估值，Q 的含义随之改变）。
+        </Def>
+        <Def term="节点、根、边、叶" en="node, root, edge, leaf node">
+          搜索记录下来的每个局面叫一个节点；当前局面是根；局面之间的一手棋是边；
+          沿边走到的那个尚未展开的节点叫叶节点。一次模拟的路径就是一串「节点，边」交替的链条。
+        </Def>
+
+        <h3>选择沿已展开的边走到一个叶</h3>
         <p>
-          <strong>② 岔口怎么选：旧成绩 + 少看补偿。</strong>每条候选边有一本小账：
-          <span className="mono">N</span> 是看过几次，<span className="mono">W</span> 是历次结果的总和，
-          <span className="mono">Q=W/N</span> 是平均成绩。只看 Q，会让一开始碰巧赢的路霸占预算；
-          只平均分配，又会每条路都看得太浅。因此搜索同时看“历史平均更好”和“还没怎么检查”。
+          向下走时只经过已经有子节点的边，停在尚未展开的叶节点；
+          岔口上比较候选边的那条规则叫 PUCT。PUCT 的打分下一课再算，本课先看选择之后发生的数据变化。
         </p>
-        <details className="account-book mt-4">
-          <summary>进阶 · 把“旧成绩 + 少看补偿”写成 PUCT 公式</summary>
-          <div className="formula mt-3">
-            score(a) = <span className="hl">Q(a)</span>(历史平均) +
-            c · P(a) · √ΣN / (1 + N(a))(少看补偿)
-          </div>
-          <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
-            P 是网络给的“先看哪里”的先验，c 控制探索力度，ΣN 是所有候选被看过的次数之和。
-            首次阅读不必记公式；看懂它把“已有证据”和“别忘了查冷门”放在一起即可。
-          </p>
-        </details>
+        <Def term="选择" en="selection">
+          从根沿已经展开的边向下走，直到到达终局或尚未展开的叶节点。
+          走过的每一手都记下「从哪个节点、选了哪条边」，供回传时按原路写回。
+        </Def>
+        <Def term="PUCT" en="Predictor + UCT" see="第 11 课">
+          给每条候选边打分的选择规则。它把网络给的先验和边上已有的成绩合成一个分数，
+          既不放弃已见好成绩的路，也不长期忽略访问不足的候选。
+        </Def>
+
+        <h3>叶处取得一个值</h3>
         <p>
-          P 是<em>网络先验</em>：网络说“这里值得先看”。它是向导，不是判决书；Q 是已经
-          推演出的历史平均。c 是探索强度的旋钮：越大越愿意给冷门候选机会，越小越专注当前热门。
-          在预算足够时，少看的候选通常会得到更多机会；预算很小或先验很偏时，仍可能来不及轮到它——
-          下面的 F5 正是例子。
+          若叶局面已经终局，就按叶节点轮走方的视角直接给值（对方刚成五则记 −1，自己成五记 +1，和记 0），不再询问网络。
+          若棋还没结束，网络对该叶从头到尾算一遍前向，给出
+          <span className="mono">v_net</span>。这个数站在
+          <strong>叶节点当前行棋方</strong>的视角。更早的做法是随机走子到终局、
+          用真实输赢当评价；一盘随机棋噪声极大，要很多次 rollout 才抵得上网络一眼的判断。
+          网络把「看过的成千上万盘」压缩进一次前向，所以本系统用
+          <span className="mono">v_net</span> 代替随机下完，搜索则负责修正网络的漏看。
         </p>
+        <Def term="求值" en="evaluation">
+          在叶节点取得一个局面分的动作。终局叶直接读真实输赢；非终局叶交给网络前向，
+          得到当前行棋方视角的 <span className="mono">v_net</span>。
+        </Def>
+        <Def term="先验" en="prior,代码里是 P">
+          与第 9 课 softmax 后的比例是同一批数。搜索开始前网络给出的各着点概率。它来自策略头，是「第一眼觉得该下哪」，
+          还没有叠加任何后续推演；搜索会在这个基础上继续检验和修正。
+        </Def>
+        <Def term="随机走子" en="rollout">
+          从叶局面开始双方随机落子直到终局，用真实输赢当评价的旧做法。
+          一盘随机棋噪声极大，要很多次 rollout 才抵得上网络一次前向的判断，
+          所以本系统用 <span className="mono">v_net</span> 取代它。
+        </Def>
+
+        <h3>扩展新叶，沿原路径逐层取负回传</h3>
         <p>
-          <strong>③ 逐层取负(= 每爬一层,正负号翻一次):账要对得上视角。</strong>所有数值都站在
-          「当前轮到谁下」的视角(第 2 课的铁约)。我的大优就是对面的劣势:
-          黑白每换一手,符号翻一次。所以叶估值往回记的时候,<em>每爬一层翻一次符号</em>
-          ——叶子说「我(行棋方)+1」,记到上一层的边上是 −1(对那边是劣),
-          再翻回 +1……这样每条边的 Q 都站在「选这条边的那一方」的视角,账才不自相矛盾。
-          真终局不用问网络:<em>终局直传</em>——赢 +1、输 −1、和 0,直接记账,
-          这是搜索能拿到的最硬的信号。
+          普通新叶收到网络策略后，才拥有可以继续向下选择的边。
+          一次模拟最多展开一个新叶，下一次模拟才能利用这次新长出的树枝。
+          一次只长一片叶，一是让每片新叶都先拿到网络评价、再参与下一次选择；二是统计对得上证据量：一次模拟只产生一个新评价、只给一条路径的边记一笔 N/W，展开多个新叶会让新边的计数与真实访问脱节，或迫使一次模拟调用多次网络。
+          若一口气把整条路径全展开，后面的节点没有网络先验，只好用均匀先验
+          （uniform prior，各着点等概率）乱选。
         </p>
+        <Def term="扩展" en="expansion">
+          在叶节点上按网络给出的先验长出各条候选边，使它从「叶」变成可以继续向下选择的节点
+          （相对于叶，可称内部节点）。
+        </Def>
         <p>
-          <strong>④ 在给定预算内，访问数说了算。</strong>40 次只是本页演示预算；跑完后，
-          系统在已检查过的候选中选访问最多的一手。
-          为什么不直接挑 Q 最高?一个候选若只被撞见 1 次、碰巧拿了 +1,Q 也是满分,
-          和被检验 20 次平均出来的 +1 长得一模一样——<em>Q 分不清底气,N 分得清</em>
-          。访问数把先验的方向、Q 的可靠程度、检验的次数炖成一锅,是整个过程的总结算。
+          从叶回到根时，每退一层就换到另一方，所以先把值变成相反数再写进那条边。
+          先看数字：叶方 <span className="mono">v_net</span> = +0.6，上一层边记 −0.6，
+          再上一层边记 +0.6。
+        </p>
+        <Def term="回传" en="backup">
+          从叶回到根，把这次取得的值按原路径写回每条经过的边。
+          每写一条边就更新它的 N、W，Q 由 W/N 现算。
+        </Def>
+        <Def term="negamax" en="negamax,负极大值搜索">
+          回传时「每退一层先取负」的符号约定。五子棋的终局值严格零和（一方所得就是另一方所失），所以同一结果对对手就是它的相反数，逐层取负合法；非零和的计分不能这样回传。具体到符号：
+          叶方的「我赢」是上一层对手的「我输」，所以退一层必须换一次视角。
+        </Def>
+        <p>
+          每写回一条边，就更新它上面的 N、W 两笔（Q=W/N 现算）。一条边经过 4 次，累计
+          <span className="mono">W=+2</span>，则 <span className="mono">Q=+0.5</span>。
+          <span className="mono">N</span> 说明证据量，<span className="mono">W</span>
+          是累计结果，<span className="mono">Q</span> 才是平均成绩。
+        </p>
+        <Def term="N、W、Q" en="visit count, total action value, mean action value">
+          记在每条边上的 3 个数：<span className="mono">N</span> 是这条边被走过的次数，
+          说明证据量；<span className="mono">W</span> 是由选这手的一方所见的累计结果；
+          <span className="mono">Q=W/N</span> 是平均成绩。
+        </Def>
+        <p>
+          根上还另记一个搜索汇总 <span className="mono">root_value</span>：
+          它把每次模拟最终换算到根方视角的值求平均，所以可能混合许多叶的
+          <span className="mono">v_net</span> 和真实终局结果。它只是搜索过程的记录值，
+          用来展示；训练答案 <span className="mono">z</span> 则来自整盘真实终局。
+          <span className="mono">v_net</span>、
+          <span className="mono">root_value</span>、
+          <span className="mono">z</span> 是 3 个不同的量。
+        </p>
+
+        <h3>落子后把搜过的子树提作新根</h3>
+        <p>
+          真实对局里，一方落子之后局面才往前走一步。这一步之下的许多变化，
+          刚才那阵搜索多半已经查过；整棵丢掉重来，等于把做过的搜索扔了。
+          所以落子后把已选动作的子节点提作新根，它下面的 N、W、Q 原样保留，
+          只有上一根的 <span className="mono">root_value</span> 展示统计清零。
+          保留下来的访问数使新根的访问总数不等于这一步新增的模拟次数，
+          读访问配比 π（下一课定义）的分母时要记在心上。
         </p>
       </div>
 
-      <div className="reveal-box mt-8 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-        <strong>现在回看序章的两个仪表。</strong>棋盘上的红色热度，就是搜索把有限访问次数
-        分给候选落点后形成的 <span className="mono">π</span>；旁边的
-        <span className="mono">v</span> 是网络给当前局面的价值判断。它们当时只是预告，
-        现在已经有了来源：<a href="#/prologue">回到序章回放</a>，再看会是另一幅画面。
-      </div>
+      <SimulationStepper />
 
-      <Simulator />
+      <ReuseProbe />
 
-      <Ledger title="mcts.py L55(select)、L101-108(PUCT)、L144-148(backup)、L154-176(落子)">
+      <Ledger title="mcts.py · SearchTree.select / expand_and_backup / _backup / update_root">
         <div className="codewalk">
-          <pre>{`# L55  一次模拟 = 沿 PUCT 降到叶(撞见终局则当场直传)
-def select(self) -> None:`}</pre>
+          <pre>{`# 向前：沿树走到终局或未展开叶
+while node.expanded:
+    action = self._puct_select(node, game)
+    path.append((node, action))
+    game.play(action)
+# （节选省略：途中创建子节点；若到达终局则直接回传真实 ±1/0，见上方提示）
+if game.outcome() is None:
+    self._pending_game = game`}</pre>
         </div>
         <div className="codewalk">
-          <pre>{`# L101-108  岔口公式:Q(裁判)+ U(探索);已占格永远选不到
-Q = np.divide(W, N, out=np.zeros_like(W), where=N > 0)
-U = self.cfg.c_puct * P * sqrt_total / (1.0 + N)
-score = Q + U
-score[legal == 0] = -np.inf
-return int(np.argmax(score))`}</pre>
+          <pre>{`# 向后：每退一层先换视角，再更新该边
+for node, action in reversed(path):
+    value = -value
+    node.N[action] += 1
+    node.W[action] += value
+# 最后把 v 累计进 root_value 展示统计（根汇总值的分子和分母）
+self._root_value_sum += value
+self._root_value_count += 1`}</pre>
         </div>
         <div className="codewalk">
-          <pre>{`# L144-148  回传:每爬一层,符号翻一次
-for node, a in reversed(path):
-    v = -v  # value flips perspective each ply
-    node.N[a] += 1.0
-    node.W[a] += v`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# L154-176  输出:访问数说了算(π = N/ΣN,训练时当网络的老师)
-def root_pi(self, temperature=1.0):
-    counts = self.root.N ...   # 访问数分布
-def best_action(self):
-    masked = np.where(legal > 0, self.root.N, -np.inf)
-    return int(np.argmax(masked))`}</pre>
+          <pre>{`# 落子后复用已经存在的子树
+child = self.root.children.get(action)
+self.root_game.play(action)
+self.root = child if child is not None else new_node
+self._root_value_sum = 0.0
+self._root_value_count = 0  # 展示统计整体清零；新根若已展开且开噪声，还会重混一次（第 11 课）`}</pre>
         </div>
         <p className="mt-3">
-          上面这几段代码是给大人对账用的——看不懂可以直接跳过,不影响学。部件的三键{" "}
-          <span className="mono">①选择 → ②展开 → ③回传</span> 走的正是
-          <span className="mono">select → needsEval/leafInput → expandAndBackup</span>
-          这同一套流程;本站引擎 <span className="mono">learn/src/engine/mcts.ts</span>{" "}
-          和这份 Python 一行一行对得上(Ledger 行号可对账)。唯一的小差别:两边把
-          softmax(把分数变成概率那一步)放在先后不同的位置做——算法一字不差。
+          例 10-1 的 3 个按钮与源码一一对应：「选择」按钮就是 select，走到等待评价的叶子；
+          「求值」把叶局面交给网络；合起来对应
+          <span className="mono">expand_and_backup</span>，其中逐边记回统计的一段是
+          <span className="mono">_backup</span>。
+          浏览器使用单树顺序执行和舍入权重；真正训练时还能把多盘棋等待评价的叶子
+          合成一批一起算，但每棵树内部仍然一次走一步，顺序不变。
         </p>
       </Ledger>
 
+      <ChapterEnd
+        summary={[
+          "一次模拟是一趟往返：向前选择到叶，叶处求值，扩展新叶，再沿原路径逐层取负回传(negamax)。",
+          "叶处的答案分 2 种：终局读真实 ±1/0，非终局读网络的 v_net；更早的 rollout 随机下完一整盘，噪声大，已被一次前向取代。",
+          "边上记 N、W、Q=W/N；根另记 root_value，它是模拟值的平均，与 v_net、终局标签 z 是 3 个不同的量。",
+          "落子后把已搜过的子树提作新根，只清零 root_value 展示统计，已积累的 N、W、Q 保留下来。",
+        ]}
+        next={
+          <>
+            有了「一次模拟」，还要回答岔口上「下一次该查哪条路」。下一章完整手算 PUCT
+            的打分与选边，再看全部根访问数怎样归一成 π、根噪声与温度怎样影响实际落子，
+            以及有限预算下这套选择规则会怎样失败。
+          </>
+        }
+      />
+
       <Quiz
-        title="小测 · 过关解锁第 11 课"
-        onAllCorrect={() => pass("l11")}
+        title="习题 · 过关解锁第 11 课"
+        onAllCorrect={() => pass("l10")}
         questions={[
           {
-            q: "PUCT 里先验 P 和 Q 各是什么角色?",
+            q: "叶节点站在白方视角给出 v_net=+1，回到上一层黑方选择的边时为什么记 −1？",
             options: [
-              "P 管落子,Q 只管展示——最终下哪看 P",
-              "P 是向导(网络说先往哪看),Q 是裁判(几十次推演的历史平均,管往哪走)",
-              "两个都是裁判,谁大听谁的",
+              "因为网络输出只能保留一位小数",
+              "因为同一结果对白方是赢，对上一层黑方就是输；每退一层必须换一次视角",
+              "因为 N 增加后 W 必须变成负数",
             ],
             answer: 1,
-            explain:
-              "先验只负责「先看哪」,一次都没被看过的候选完全由 P 领路;但看过之后,账本(Q)越攒越厚,探索分衰减,最终谁被反复访问由 Q 和检验次数决定。全信 P 是被第一印象锁死,全信 Q 是一棵树上吊死。",
+            explain: "黑白每走一手交换一次。叶方的「我赢」就是上一层对手的「我输」，所以回传先取负（negamax）再写入那条边。",
           },
           {
-            q: "手算例:叶估值 −1(叶子行棋方要输),为什么记到根的边上变成了 +1?",
-            options: [
-              "记账时出了正负号错误,实现上一直没改",
-              "黑白换手视角翻一次:叶子的「我输」正是根行棋方的「我赢」——每爬一层符号翻一次,账才站在每条边自己那一方的视角",
-              "因为终局直传把 −1 换成了 +1",
-            ],
-            answer: 1,
-            explain:
-              "所有数值都站在「当前轮到谁」的视角:叶子轮到白,白输 −1;往上一层是黑的账,黑赢当然记 +1。回传每爬一层就把 v 的正负号翻一次(代码记作 v = −v——那个等号是「变成」的意思,不是「两边相等」),整条链每条边的 Q 才都站在「选这条边的那一方」视角,不自相矛盾。",
+            q: "一条边经过 4 次，累计 W=+2，它的 Q 是多少？",
+            options: ["+0.5", "+2", "+8"],
+            answer: 0,
+            explain: "Q=W/N=2/4=0.5。",
           },
           {
-            q: "40 次推演跑完,为什么按访问数 N 落子,而不是挑 Q 最高的?",
+            q: "v_net、root_value 和 z 的来源分别是什么？",
             options: [
-              "因为 N 计算起来更简单",
-              "因为 Q 分不清底气:只被看过 1 次、碰巧 +1 的候选,和被检验 20 次平均出来的 +1 长得一模一样;N 把先验方向、Q 的可靠程度、检验次数炖成一锅",
-              "因为 Q 有正有负,N 永远是正数",
+              "三者都是同一个网络输出，只是显示位置不同",
+              "v_net 是单个叶的网络输出；root_value 是搜索模拟在根方视角的平均；z 是整盘终局结果",
+              "root_value 是训练标签，z 只用于网页动画",
             ],
             answer: 1,
-            explain:
-              "Q 是平均，平均分不清「一次的运气」和「二十次的底气」。访问数高的手，是被先验领来、又被 Q 留下的手——三种信息它都收到。训练会把 N/ΣN 记成 π（这一手占全部访问次数的几分之几）。现在 π 与终局结果 z 这两位老师都有了；下一课就追问：它们怎样回到每颗旋钮。",
+            explain: "三者来自不同时间和过程。训练会重新计算 v_net 并与 z 比较；搜索过程留下的 root_value 只是记录，不是训练标签。",
           },
         ]}
       />
@@ -224,520 +283,219 @@ def best_action(self):
   )
 }
 
-/* ============ 部件 · 单步模拟器(真引擎 + 真权重叶评估) ============ */
-
-type NetFn = (planes: number[][][]) => { logits: number[]; value: number }
-
 interface LeafView {
   path: number[]
   leaf: GameState
 }
-interface NetAns extends LeafView {
-  logits: number[] // 原样存着,③ 回传交给 expandAndBackup(softmax 在引擎内做)
+
+interface NetAnswer extends LeafView {
+  logits: number[]
   value: number
-  top: { a: number; p: number }[]
   ms: number
 }
 
-function Simulator() {
+function SimulationStepper() {
   const [net, setNet] = useState<NetFn | null>(null)
-  const [eps, setEps] = useState<0 | 0.25>(0) // 根噪声开关
-  const [sims, setSims] = useState(0)
-  const [stage, setStage] = useState<0 | 1 | 2>(0) // 0 可①;1 已选可②;2 已评估可③
+  const [stage, setStage] = useState<0 | 1 | 2>(0)
   const [leaf, setLeaf] = useState<LeafView | null>(null)
-  const [ans, setAns] = useState<NetAns | null>(null)
-  const [termMsg, setTermMsg] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [ver, setVer] = useState(0)
+  const [answer, setAnswer] = useState<NetAnswer | null>(null)
+  const [simulations, setSimulations] = useState(0)
+  const [version, setVersion] = useState(0)
+  const [terminalNote, setTerminalNote] = useState<string | null>(null)
   const treeRef = useRef<SearchTree | null>(null)
-  // 切噪声开关时换种子:同一粒种子下噪声走向固定,换粒让读者多试几次
-  const seedRef = useRef(42)
 
-  // 真权重就位 / 噪声切换 → 重建树,一切归零(种子取自 seedRef,可复现)
   useEffect(() => {
     let alive = true
-    loadWeights().then((w: WeightsJson) => {
+    loadWeights().then((weights: WeightsJson) => {
       if (!alive) return
-      setNet(() => loadNet(w))
+      const loaded = loadNet(weights)
+      setNet(() => loaded)
+      treeRef.current = new SearchTree(POS, CFG, loaded, mulberry32(42))
+      setVersion((v) => v + 1)
     })
-    return () => {
-      alive = false
-    }
+    return () => { alive = false }
   }, [])
-  useEffect(() => {
-    if (!net) return
-    const cfg: MctsConfig = { cPuct: 1.5, dirichletEps: eps, dirichletAlpha: 0.3 }
-    treeRef.current = new SearchTree(POS, cfg, net, mulberry32(seedRef.current))
-    setSims(0)
-    setStage(0)
-    setLeaf(null)
-    setAns(null)
-    setTermMsg(null)
-    setVer((v) => v + 1)
-  }, [net, eps])
 
-  const stepSelect = () => {
+  const select = () => {
     const tree = treeRef.current
     if (!tree || stage !== 0) return
     tree.select()
-    setTermMsg(null)
+    setTerminalNote(null)
     if (tree.needsEval()) {
-      const path = tree.pendingActions() ?? []
-      const lf = tree.pendingState()
-      if (lf) setLeaf({ path, leaf: lf })
+      const pending = tree.pendingState()
+      if (pending) setLeaf({ path: tree.pendingActions() ?? [], leaf: pending })
       setStage(1)
     } else {
-      // 终局:select 内部已按 ±1/0 直传记账
-      setLeaf(null)
-      setAns(null)
-      setSims((s) => s + 1)
-      setTermMsg("这次推演直接撞见终局:输赢已定,不用问网络——赢 +1 / 输 −1 / 和 0,直接记账(终局直传)。")
+      setSimulations((n) => n + 1)
+      setTerminalNote("这次选择直接到达终局：SearchTree 已把真实 ±1/0 沿路径回传，不需要网络。")
+      setVersion((v) => v + 1)
     }
-    setVer((v) => v + 1)
   }
 
-  const stepExpand = () => {
+  const evaluate = () => {
     const tree = treeRef.current
-    if (!tree || stage !== 1 || !leaf) return
-    const t0 = performance.now()
-    const { logits, value } = net!(tree.leafInput()) // 问真网络(策略头+价值头)
-    const ms = performance.now() - t0
-    const legal = legalMoves(leaf.leaf)
-    const probs = softmax(logits)
-    let sum = 0
-    const masked = probs.map((p, a) => p * legal[a])
-    for (const p of masked) sum += p
-    const top = masked
-      .map((p, a) => ({ a, p: sum > 1e-9 ? p / sum : p }))
-      .sort((x, y) => y.p - x.p)
-      .slice(0, 3)
-    setAns({ ...leaf, logits, value, top, ms })
+    if (!tree || !net || !leaf || stage !== 1) return
+    const started = performance.now()
+    const result = net(tree.leafInput())
+    setAnswer({ ...leaf, ...result, ms: performance.now() - started })
     setStage(2)
   }
 
-  const stepBackup = () => {
+  const backup = () => {
     const tree = treeRef.current
-    if (!tree || stage !== 2 || !ans) return
-    tree.expandAndBackup(ans.logits, ans.value)
-    setAns(null)
+    if (!tree || !answer || stage !== 2) return
+    tree.expandAndBackup(answer.logits, answer.value)
     setLeaf(null)
+    setAnswer(null)
     setStage(0)
-    setSims((s) => s + 1)
-    setVer((v) => v + 1)
+    setSimulations((n) => n + 1)
+    setVersion((v) => v + 1)
   }
 
-  const run = (k: number) => {
-    const tree = treeRef.current
-    if (!tree || stage !== 0 || busy) return
-    const n = Math.min(k, MAX_SIMS - sims)
-    if (n <= 0) return
-    setBusy(true)
-    setTermMsg(null)
-    setTimeout(() => {
-      tree.run(n) // 协议与三键单步同一份代码
-      setSims((s) => s + n)
-      setVer((v) => v + 1)
-      setBusy(false)
-    }, 30)
+  const reset = () => {
+    if (!net) return
+    treeRef.current = new SearchTree(POS, CFG, net, mulberry32(42))
+    setStage(0)
+    setLeaf(null)
+    setAnswer(null)
+    setSimulations(0)
+    setTerminalNote(null)
+    setVersion((v) => v + 1)
   }
 
   const tree = treeRef.current
-  const shown = ans ?? leaf
-  const rootN = tree ? Array.from(tree.root.N) : []
-  const rootW = tree ? Array.from(tree.root.W) : []
-  const rootPrior = tree?.root.prior ?? null
-  const rootV = tree ? tree.rootValue() : 0
-  let sumN = 0
-  for (const n of rootN) sumN += n
-  const topRows = rootN
-    .map((n, a) => ({ a, n }))
-    .filter((r) => r.n > 0)
-    .sort((x, y) => y.n - x.n)
-    .slice(0, 5)
-  const f5n = rootN[F5] ?? 0
-  const f5Share = sumN > 0 ? (f5n / sumN) * 100 : 0
+  const rootRows = tree
+    ? Array.from(tree.root.N)
+      .map((n, action) => ({ action, n, w: tree.root.W[action] }))
+      .filter((row) => row.n > 0)
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 5)
+    : []
+  const rootValue = tree?.rootValue() ?? 0
+  void version
 
   return (
-    <figure className="figure mt-8">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
-        <span className="mini-label">部件 · 单步模拟器:真引擎一步一步走</span>
-        <span className="num text-sm" style={{ color: "var(--fg-faint)" }} data-qa="sim-count-wrap">
-          已推演 <span data-qa="sim-count">{sims}</span> 次(40 次用于观察，最多 100 次；不保证找到赢手)
-        </span>
+    <figure className="figure mt-8" data-qa="simulation-stepper">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">例 10-1 · 一次模拟分三键完成</span>
       </div>
-
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
-        {/* 左:局面 + 步进控制 + 当前一步 */}
-        <div className="min-w-0 flex-1 md:max-w-[23rem]">
-          <div data-qa="pos-board">
-            <Board board={POS_FLAT} marks={[{ x: 5, y: 4, anchor: true }]} />
-          </div>
-          <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            教学手摆局面：黑白各 5 子，轮黑，符合轮流落子的规则。
-            红圈标的是 F5 = (5,4) = action 41:黑落这里,横排 (1,4)…(5,4) 成五,
-            一手赢棋。
-          </p>
-
+        <div className="min-w-0 flex-1 md:max-w-[21rem]">
+          <Board board={POS.board.flat()} lastMove={{ x: 5, y: 5 }} />
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" className="btn" disabled={!net || stage !== 0 || busy} onClick={stepSelect} data-qa="step-select">
-              ① 选择
-            </button>
-            <button type="button" className="btn" disabled={stage !== 1} onClick={stepExpand} data-qa="step-expand">
-              ② 展开
-            </button>
-            <button type="button" className="btn" disabled={stage !== 2} onClick={stepBackup} data-qa="step-backup">
-              ③ 回传
-            </button>
+            <button type="button" className="btn" disabled={!net || stage !== 0}
+              onClick={select} data-qa="step-select">① 选择</button>
+            <button type="button" className="btn" disabled={stage !== 1}
+              onClick={evaluate} data-qa="step-evaluate">② 求值（网络评价）</button>
+            <button type="button" className="btn" disabled={stage !== 2}
+              onClick={backup} data-qa="step-backup">③ 扩展并回传</button>
+            <button type="button" className="btn" disabled={!net} onClick={reset}>↺ 重置</button>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button type="button" className="btn" disabled={!net || stage !== 0 || busy || sims + 10 > MAX_SIMS} onClick={() => run(10)} data-qa="run10">
-              连跑 10 次
-            </button>
-            <button type="button" className="btn" disabled={!net || stage !== 0 || busy || sims >= 40} onClick={() => run(40 - sims)} data-qa="run40">
-              跑到 40 次
-            </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={!net || busy}
-              onClick={() => {
-                const cfg: MctsConfig = { cPuct: 1.5, dirichletEps: eps, dirichletAlpha: 0.3 }
-                seedRef.current += 1
-                treeRef.current = new SearchTree(POS, cfg, net!, mulberry32(seedRef.current))
-                setSims(0)
-                setStage(0)
-                setLeaf(null)
-                setAns(null)
-                setTermMsg(null)
-                setVer((v) => v + 1)
-              }}
-              data-qa="reset"
-            >
-              ↺ 重置
-            </button>
-          </div>
-          <div className="mt-2 flex items-center gap-2">
-            <span className="text-xs" style={{ color: "var(--fg-faint)" }}>
-              根噪声:先验掺 25% 随机
-            </span>
-            <span className="seg" data-qa="noise-toggle">
-              <button type="button" className={`seg-btn ${eps === 0 ? "active" : ""}`} disabled={busy} onClick={() => { seedRef.current += 1; setEps(0) }}>
-                关
-              </button>
-              <button type="button" className={`seg-btn ${eps === 0.25 ? "active" : ""}`} disabled={busy} onClick={() => { seedRef.current += 1; setEps(0.25) }}>
-                开
-              </button>
-            </span>
-          </div>
-          <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            这个开关只用于观察：在根部加入一点小扰动，让不同对局有机会先检查不同分支。
-            搜索主线不依赖它；参数、种子和它怎样帮助自我对弈多样化，收进下面的实验室。
+          <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+            已完成 <span className="num">{simulations}</span> 次模拟。每个等待评价的叶子，
+            必须先让网络评价完、把结果记回，才能开始下一次选择；同一棵树一次只处理一个这样的叶子。
           </p>
-          <details className="account-book mt-2">
-            <summary>实验室 · 根噪声怎样改变先验与对局多样性</summary>
-            <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            做个对照实验,看「偏见锁死」:关噪声时,搜索全信网络先验,只在它偏爱的
-            几个点打转——偏见喂偏见。开了噪声,根的先验里掺 25% 随机(这招行话叫
-            Dirichlet 噪声,掺多少记作 ε=0.25——ε 是个希腊字母,读「艾普西隆」,
-            只是「掺多少」的记号;只掺根,整棵树都乱抖就没章法了)。
-            对照着看账本的 <strong>P 列</strong>(先验):关噪声时 F5 永远是 1.3%
-            ——同一网络同一局面,先验是死的;开了噪声,每次搜索的先验都不一样
-            (F5 在 1.0%~1.6% 间波动,别的点同理有涨有落)。这就是「多样性」的本义:
-            不是单方向抬高冷门点,而是让每局走不同的路。但 <strong>N 列</strong>(访问)
-            未必跟着摊——这局 Q 的历史账太强势,40 次「想」的名额仍会集中。噪声防的是
-            另一个坑:自我对弈几千盘,每盘都走同一条路,等于反复学同一招;噪声让每盘
-            换条路走。一切换开关就整盘重来:换一粒新种子(种子=随机路线的起头),
-            路线跟着换,可多试几次。
-            </p>
-          </details>
-
-          {busy && (
-            <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
-              推演中(每次模拟问一次网络,约 16 毫秒——1 毫秒是千分之一秒)……
-            </p>
-          )}
-          {stage === 0 && !busy && sims === 0 && (
-            <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-              按「① 选择」:模拟器从根按岔口公式(PUCT)挑一条路走到叶子;
-              「② 展开」问真网络要先验和估值;「③ 回传」记账、树长大一节。
-              三键连着按完一轮,才是揭晓里说的「一次模拟」。
-            </p>
-          )}
-
-          {shown && (
-            <div className="reveal-box mt-3" data-qa="leaf-box">
-              <div className="mini-label">
-                本次推演{stage === 1 ? "· 已选到叶,待问网络" : "· 网络已答,待记账"}
-              </div>
-              <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-                路线:根{shown.path.length === 0 ? "(根自身)" : shown.path.map(coord).join(" → ")}
-                ,停在没见过的局面(轮到{shown.leaf.current === 1 ? "黑" : "白"}):
-              </p>
-              <div className="mt-2 flex items-start gap-3">
-                <div className="w-28 flex-none">
-                  <Board board={shown.leaf.board.flat()} />
-                </div>
-                {ans ? (
-                  <div className="min-w-0 flex-1 text-xs" style={{ color: "var(--fg-muted)" }}>
-                    <p className="num" style={{ color: "var(--accent-deep)" }}>
-                      v = {ans.value >= 0 ? "+" : ""}{ans.value.toFixed(3)}
-                      <span className="ml-2 font-normal" style={{ color: "var(--fg-faint)" }}>
-                        ({ans.leaf.current === 1 ? "黑" : "白"}方视角,{ans.ms.toFixed(1)} 毫秒)
-                      </span>
-                    </p>
-                    <p className="mt-1.5">先验 top3(这局面的向导):</p>
-                    <ol className="mt-1 space-y-1">
-                      {ans.top.map((t) => (
-                        <li key={t.a} className="l00-top-row" data-qa="prior-row">
-                          <span className="mono">{coord(t.a)}</span>
-                          <span className="prob-track">
-                            <span className="prob-fill" style={{ width: `${Math.min(100, t.p * 600)}%` }} />
-                          </span>
-                          <span className="num">{(t.p * 100).toFixed(1)}%</span>
-                        </li>
-                      ))}
-                    </ol>
-                    <p className="mt-1.5" style={{ color: "var(--fg-faint)" }}>
-                      回传时每爬一层翻一次符号,记进沿途每条边。
-                    </p>
-                  </div>
-                ) : (
-                  <p className="flex-1 text-xs" style={{ color: "var(--fg-faint)" }}>
-                    网络还没看这个局面——按「② 展开」。
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-          {termMsg && (
-            <div className="reveal-box mt-3 text-sm leading-relaxed" data-qa="term-msg">
-              {termMsg}
+          {terminalNote && <div className="reveal-box mt-3 text-sm">{terminalNote}</div>}
+          {(answer ?? leaf) && (
+            <div className="reveal-box mt-3 text-sm" data-qa="leaf-state">
+              <p>路径：根{(answer ?? leaf)!.path.map((a) => ` → ${coord(a)}`).join("") || "（根自身）"}</p>
+              <p className="mt-1">叶方：{(answer ?? leaf)!.leaf.current === 1 ? "黑" : "白"}</p>
+              {answer ? (
+                <p className="num mt-1" style={{ color: "var(--accent-deep)" }}>
+                  v_net={answer.value >= 0 ? "+" : ""}{answer.value.toFixed(3)}（{answer.ms.toFixed(1)} ms）
+                </p>
+              ) : <p className="mt-1">叶子尚未询问网络。</p>}
             </div>
           )}
         </div>
 
-        {/* 右:树图 + 根账本 */}
         <div className="min-w-0 flex-1">
-          <div className="mini-label">搜索树(节点=局面,边=落子;边上 N/W/Q)</div>
-          <div className="mt-2 overflow-x-auto" data-qa="tree-wrap">
-            {!net || !tree ? (
-              <p className="text-sm" style={{ color: "var(--fg-muted)" }}>
-                正在加载真权重(weights-best.json,约 1.2 MB)……
-              </p>
-            ) : (
-              <TreeView root={tree.root} ver={ver} path={shown?.path ?? []} />
-            )}
-          </div>
-
-          <div className="mt-5 border-t pt-3" style={{ borderColor: "var(--hairline)" }}>
-            <div className="mini-label">
-              根账本 · top 候选(最右一列 = 访问占比,即 N/ΣN)
-              {tree && sims > 0 && (
-                <span className="num ml-2" style={{ color: "var(--fg-faint)" }}>
-                  ΣN={sumN}(首次推演只展开根,不记边)v̄={rootV >= 0 ? "+" : ""}
-                  {rootV.toFixed(2)}(v̄=历次 v 的平均,黑方视角)
-                </span>
-              )}
-            </div>
-            {sims === 0 ? (
-              <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
-                还没有账。第一次推演只把根展开(问一次网络,拿到 81 个先验);
-                从第二次起,每条边开始记 N 和 W。
-              </p>
-            ) : (
-              <div className="mt-2 space-y-1.5">
-                {topRows.map((r) => (
-                  <RootRow key={r.a} a={r.a} n={r.n} q={rootW[r.a] / r.n} share={r.n / sumN} prior={rootPrior?.[r.a] ?? 0} />
-                ))}
-                {f5n === 0 && <RootRow a={F5} n={0} q={0} share={0} prior={rootPrior?.[F5] ?? 0} f5 />}
-              </div>
-            )}
-          </div>
-
-          {sims >= 40 && (
-            <div className="reveal-box mt-4 text-sm leading-relaxed" data-qa="f5-box">
-              <div className="mini-label">真网络实测:40 次为什么还没轮到 F5</div>
-              <p className="mt-1.5">
-                40 次推演后,F5((5,4),一手成五)的访问占比:{" "}
-                <span className="num font-bold" style={{ color: "var(--accent-deep)" }} data-qa="f5-share">
-                  {f5Share.toFixed(1)}%
-                </span>
-                <span className="num" style={{ color: "var(--fg-muted)" }}>
-                  (N={f5n}/ΣN={sumN})
-                </span>
-              </p>
-              <p className="mt-2" style={{ color: "var(--fg-muted)" }}>
-                老实交代：这个训练快照很弱，F5 可能在先验里排得很靠后。上面的 N 和占比会直接
-                告诉你，40 次预算有没有来得及检查这手必赢棋。若没有，这不是搜索实现出错，而是
-                固定预算先花在了网络更偏爱的候选上。增加预算会提高补查的机会，但不保证每次都及时找到。
-                <strong>搜索会放大已有直觉，也受固定预算限制。</strong>下一课会把搜索留下的 π
-                和终局给出的 z 接到同一张总账上，看看它们怎样更新旋钮；之后才会把许多盘作业攒成飞轮。
-              </p>
+          <div className="mini-label">根节点统计 · 每条边记 N/W/Q（选边一方视角；根边即根方）</div>
+          {rootRows.length === 0 ? (
+            <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
+              第一趟只展开根本身，路径为空，所以还没有根边统计。继续做第二趟才会经过一条根边。
+            </p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {rootRows.map((row) => (
+                <div key={row.action} className="l00-top-row" data-qa="root-ledger-row">
+                  <span className="mono">{coord(row.action)}</span>
+                  <span className="num">N={row.n}</span>
+                  <span className="num">W={row.w >= 0 ? "+" : ""}{row.w.toFixed(2)}</span>
+                  <span className="num">Q={(row.w / row.n) >= 0 ? "+" : ""}{(row.w / row.n).toFixed(2)}</span>
+                </div>
+              ))}
             </div>
           )}
+          <div className="reveal-box mt-4 text-sm">
+            <div className="mini-label">root_value · 搜索汇总</div>
+            <p className="num mt-1 text-xl font-bold" style={{ color: "var(--accent-deep)" }}>
+              {rootValue >= 0 ? "+" : ""}{rootValue.toFixed(3)}
+            </p>
+            <p className="mt-2" style={{ color: "var(--fg-muted)" }}>
+              它是每次模拟换算到根方视角后的平均；不等于任何一个叶的 v_net，也不是终局标签 z。
+            </p>
+          </div>
         </div>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">部件 11-1</span>
-        这段图注给大人对账,看不懂直接跳过。真引擎 <span className="mono">SearchTree</span>(mcts.ts)三键走的是 select →
-        leafInput/evalFn → expandAndBackup 这套真流程;叶评估器是{" "}
-        <span className="mono">loadNet</span>(真权重,weights-best.json)——
-        这是对最早那版演示页(explainer)的升级:那边打分的还是人手写规则的
-        简易替身,不是真网络(那版讲稿里,50 次就能把 93.9% 的次数收到 F5 上)。
-        随机数用固定序列(mulberry32,初始种子 42,重置
-        一次换下一粒),同一局面重放同一步,结果一致。
+        <span className="cap-no">例 10-1</span>
+        三键直接调用 SearchTree 的 select、leafInput、expandAndBackup；权重舍入和 JS 数值属于浏览器适配。
       </figcaption>
     </figure>
   )
 }
 
-function RootRow({
-  a,
-  n,
-  q,
-  share,
-  prior,
-  f5 = false,
-}: {
-  a: number
-  n: number
-  q: number
-  share: number
-  prior: number
-  f5?: boolean
-}) {
-  return (
-    <div className={`l00-top-row${f5 ? " opacity-70" : ""}`} data-qa={f5 ? "f5-row" : "root-row"}>
-      <span className="mono text-sm" style={{ minWidth: "3.4rem" }}>
-        {coord(a)}
-        {f5 && <span className="ml-1 text-[0.62rem]">(F5)</span>}
-      </span>
-      <span className="num text-xs" style={{ color: "var(--fg-faint)", minWidth: "3.2rem" }}>
-        P {(prior * 100).toFixed(1)}%
-      </span>
-      <span className="num text-xs" style={{ color: "var(--fg-faint)", minWidth: "2.6rem" }}>
-        N {n}
-      </span>
-      <span className="num text-xs" style={{ color: "var(--fg-faint)", minWidth: "3.4rem" }}>
-        Q {n > 0 ? (q >= 0 ? "+" : "") + q.toFixed(2) : "—"}
-      </span>
-      <span className="prob-track">
-        <span className="prob-fill" style={{ width: `${share * 100}%` }} />
-      </span>
-      <span className="num w-10 flex-none text-right text-xs" style={{ color: "var(--accent-deep)" }}>
-        {(share * 100).toFixed(1)}%
-      </span>
-    </div>
-  )
-}
+function ReuseProbe() {
+  const [result, setResult] = useState<{
+    action: number
+    childVisits: number
+    keptVisits: number
+    newRootValue: number
+  } | null>(null)
+  const [loading, setLoading] = useState(false)
 
-/* ============ 树图:DFS 布局,节点 ≤ 推演数 + 1 ============ */
-
-interface LNode {
-  node: MctsNode
-  action: number | null // 从父节点过来的落子
-  parent: LNode | null
-  depth: number
-  children: LNode[]
-  x: number
-}
-
-const XGAP = 66
-const YGAP = 84
-const PADX = 58
-const PADY = 34
-
-function TreeView({ root, path }: { root: MctsNode; ver: number; path: number[] }) {
-  // 布局:叶子按 DFS 序排 x,父亲居子女中点(ver 仅为触发重渲染)
-  const all: LNode[] = []
-  let leafX = 0
-  const walk = (node: MctsNode, action: number | null, parent: LNode | null, depth: number): LNode => {
-    const t: LNode = { node, action, parent, depth, children: [], x: 0 }
-    all.push(t)
-    for (const a of Array.from(node.children.keys()).sort((p, q) => p - q))
-      t.children.push(walk(node.children.get(a)!, a, t, depth + 1))
-    t.x = t.children.length ? (t.children[0].x + t.children[t.children.length - 1].x) / 2 : leafX++
-    return t
-  }
-  walk(root, null, null, 0)
-
-  // 当前推演路径上的边(parent→child)集合
-  const onPath = new Set<LNode>()
-  let cur = all[0]
-  for (const a of path) {
-    const next = cur.children.find((c) => c.action === a)
-    if (!next) break
-    onPath.add(next)
-    cur = next
+  const run = async () => {
+    setLoading(true)
+    const weights = await loadWeights()
+    const net = loadNet(weights)
+    const tree = new SearchTree(POS, CFG, net, mulberry32(7))
+    tree.run(8)
+    const action = tree.bestAction()
+    const child = tree.root.children.get(action)
+    const childVisits = child ? Array.from(child.N).reduce((sum, n) => sum + n, 0) : 0
+    tree.updateRoot(action)
+    const keptVisits = Array.from(tree.root.N).reduce((sum, n) => sum + n, 0)
+    setResult({ action, childVisits, keptVisits, newRootValue: tree.rootValue() })
+    setLoading(false)
   }
 
-  const width = Math.max(1, leafX) * XGAP + PADX * 2
-  const height = (Math.max(...all.map((n) => n.depth)) + 1) * YGAP + PADY * 2
-  const cx = (t: LNode) => PADX + t.x * XGAP
-  const cy = (t: LNode) => PADY + t.depth * YGAP
-
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: "auto", display: "block", minWidth: 320 }}
-      role="img" aria-label="蒙特卡洛搜索树">
-      {all
-        .filter((t) => t.parent)
-        .map((t) => {
-          const p = t.parent!
-          const a = t.action!
-          const N = p.node.N[a]
-          const W = p.node.W[a]
-          const on = onPath.has(t)
-          return (
-            <g key={`e${t.depth}-${t.action}`}>
-              <line
-                x1={cx(p)} y1={cy(p)} x2={cx(t)} y2={cy(t)}
-                style={{ stroke: on ? "var(--accent)" : "var(--hairline-strong)" }}
-                strokeWidth={on ? 2.6 : 1.4}
-              />
-              <text
-                x={(cx(p) + cx(t)) / 2 + 4} y={(cy(p) + cy(t)) / 2 - 2}
-                fontSize={9.5} fontFamily="ui-monospace, SF Mono, Menlo, monospace"
-                style={{ fill: on ? "var(--accent-deep)" : "var(--fg-faint)" }}>
-                {coord(a)} N={N}
-              </text>
-              <text
-                x={(cx(p) + cx(t)) / 2 + 4} y={(cy(p) + cy(t)) / 2 + 9}
-                fontSize={9} fontFamily="ui-monospace, SF Mono, Menlo, monospace"
-                style={{ fill: "var(--fg-faint)" }}>
-                W={W >= 0 ? "+" : ""}{W.toFixed(1)} Q={N > 0 ? (W / N >= 0 ? "+" : "") + (W / N).toFixed(2) : "—"}
-              </text>
-            </g>
-          )
-        })}
-      {all.map((t, i) => {
-        const expanded = t.node.expanded
-        return (
-          <g key={`n${i}`} data-qa="tree-node">
-            {t.depth === 0 ? (
-              <>
-                <circle cx={cx(t)} cy={cy(t)} r={13} style={{ fill: "var(--board)" }} />
-                <text x={cx(t)} y={cy(t)} fontSize={11} textAnchor="middle" dominantBaseline="middle"
-                  style={{ fill: "var(--board-line)" }} fontWeight={700}>
-                  根
-                </text>
-              </>
-            ) : (
-              <circle
-                cx={cx(t)} cy={cy(t)} r={expanded ? 8.5 : 6}
-                style={{
-                  fill: expanded ? "var(--board-line)" : "var(--paper)",
-                  stroke: "var(--board-line)",
-                  strokeWidth: 1.6,
-                }}
-              />
-            )}
-            {onPath.has(t) && (
-              <circle cx={cx(t)} cy={cy(t)} r={t.depth === 0 ? 17 : 13}
-                fill="none" style={{ stroke: "var(--accent)" }} strokeWidth={2.4} />
-            )}
-          </g>
-        )
-      })}
-    </svg>
+    <figure className="figure mt-8" data-qa="reuse-probe">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">例 10-2 · 落子后为什么保留子树</span>
+      </div>
+      <div className="p-4 sm:p-5">
+        <p className="text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+          搜索 8 次后选择访问最多的动作，再调用 <span className="mono">updateRoot</span>。
+          若该动作已有子节点，整棵已检查的子树成为新根；只有上一根的 root_value 统计会清零。
+        </p>
+        <button type="button" className="btn primary mt-4" disabled={loading} onClick={run}>
+          {loading ? "正在搜索…" : "搜索并复用子树"}
+        </button>
+        {result && (
+          <div className="reveal-box mt-4 text-sm">
+            <p>实际落子：<span className="mono">{coord(result.action)}</span></p>
+            <p className="mt-1">子树原有访问总数：<span className="num">{result.childVisits}</span></p>
+            <p className="mt-1">成为新根后仍保留：<span className="num">{result.keptVisits}</span></p>
+            <p className="mt-1">新根 root_value 统计：<span className="num">{result.newRootValue.toFixed(1)}</span>（已清零）</p>
+          </div>
+        )}
+      </div>
+      <figcaption className="figure-cap">
+        <span className="cap-no">例 10-2</span>
+        跑 8 次模拟再落子，对比子树成为新根前后的访问总数；清零的只有 root_value 展示统计。
+      </figcaption>
+    </figure>
   )
 }

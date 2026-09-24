@@ -35,9 +35,9 @@
   --heat: rgba(190, 52, 37, 0.85);
   --ok: #4c7a57;
 
-  --font-body: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC",
-    "Source Han Sans SC", "Microsoft YaHei", -apple-system, "Segoe UI",
-    sans-serif;
+  --font-serif: "Songti SC", "Noto Serif SC", "Source Han Serif SC",
+    "STSong", "SimSun", Georgia, serif;
+  --font-body: var(--font-serif);
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
 
@@ -116,8 +116,8 @@ body {
   background: var(--paper);
   color: var(--fg);
   font-family: var(--font-body);
-  font-size: 16px;
-  line-height: 1.8;
+  font-size: 17px;
+  line-height: 1.85;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow-x: hidden;
@@ -274,10 +274,10 @@ body {
 }
 
 .prose h3 {
-  font-size: 1.22rem;
+  font-size: 1.18rem;
   font-weight: 700;
-  line-height: 1.4;
-  margin: 2.2em 0 0.8em;
+  line-height: 1.5;
+  margin: 2.4em 0 0.9em;
   letter-spacing: 0.01em;
 }
 
@@ -360,89 +360,152 @@ body {
 }
 
 /* ============================================================
-   每课认知地图：先给问题、用途和因果，再进入谜题与术语
+   每课认知地图：先给问题、用途和因果，再进入思考题与术语
    ============================================================ */
 
-.lesson-guide {
+/* ============================================================
+   教材体例:导读 / 定义框 / 章末
+   ============================================================ */
+
+.chapter-intro {
+  border-left: 3px solid var(--accent);
   background: var(--card);
-  border: 1px solid var(--hairline-strong);
-  border-left: 4px solid var(--accent);
-  border-radius: 0 var(--radius) var(--radius) 0;
-  box-shadow: var(--shadow-card);
-  overflow: hidden;
+  padding: 1.15rem 1.35rem 1.2rem;
+  margin-top: 1.5rem;
 }
 
-.lesson-guide-kicker {
-  padding: 0.7rem 1rem;
-  background: var(--accent-wash);
-  border-bottom: 1px solid var(--hairline);
+.chapter-intro-kicker {
   color: var(--accent-deep);
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
+  margin-bottom: 0.7rem;
 }
 
-.lesson-guide-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 0;
+.chapter-intro-q {
+  font-size: 1.08rem;
+  font-weight: 700;
+  line-height: 1.7;
+  margin: 0 0 0.5em;
 }
 
-.lesson-guide-grid > div {
-  padding: 0.85rem 1rem 0.95rem;
-  border-right: 1px solid var(--hairline);
-  border-bottom: 1px solid var(--hairline);
+.chapter-intro-why {
+  color: var(--fg-muted);
+  font-size: 0.95rem;
+  line-height: 1.8;
+  margin: 0 0 0.9em;
 }
 
-.lesson-guide-grid > div:nth-child(2) {
-  border-right: 0;
-}
-
-.lesson-guide-grid > .lesson-guide-takeaway {
-  grid-column: 1 / -1;
-  border-bottom: 0;
-  border-right: 0;
-}
-
-.lesson-guide dt {
-  margin-bottom: 0.25rem;
+.chapter-intro-label {
+  display: inline-block;
   color: var(--fg-faint);
-  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  margin-right: 0.75em;
+  vertical-align: 0.1em;
+}
+
+.chapter-intro-chain {
+  margin: 0 0 0.9em;
+}
+
+.chapter-intro-chain ol {
+  margin: 0.4rem 0 0;
+  padding-left: 1.4em;
+  color: var(--fg-muted);
+  font-size: 0.95rem;
+  line-height: 1.8;
+}
+
+.chapter-intro-goal,
+.chapter-intro-scope {
+  margin: 0 0 0.5em;
+  color: var(--fg-muted);
+  font-size: 0.95rem;
+  line-height: 1.8;
+}
+
+.chapter-intro-scope {
+  margin-bottom: 0;
+  color: var(--fg-faint);
+}
+
+.def-box {
+  margin: 1.6em 0;
+  padding: 0.95rem 1.2rem;
+  background: var(--card-sunken);
+  border-left: 3px solid var(--fg);
+}
+
+.def-box dt {
+  margin-bottom: 0.3rem;
+  font-size: 1.02rem;
+}
+
+.def-box dt strong {
   font-weight: 700;
 }
 
-.lesson-guide dd {
+.def-box .def-en {
+  margin-left: 0.55em;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--fg-faint);
+  font-style: italic;
+}
+
+.def-box dd {
   margin: 0;
   color: var(--fg-muted);
-  font-size: 0.92rem;
-  line-height: 1.7;
+  font-size: 0.95rem;
+  line-height: 1.8;
 }
 
-.lesson-guide-chain {
-  display: flex;
-  gap: 0.85rem;
-  align-items: flex-start;
-  padding: 0.8rem 1rem 0.9rem;
-  background: var(--card-sunken);
+.def-box .def-see {
+  margin-top: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--fg-faint);
 }
 
-.lesson-guide-chain > span {
-  flex: none;
-  color: var(--accent-deep);
+.chapter-end {
+  margin-top: 2.4rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--hairline-strong);
+}
+
+.chapter-end h3 {
   font-family: var(--font-mono);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   font-weight: 700;
-  white-space: nowrap;
+  letter-spacing: 0.14em;
+  color: var(--accent-deep);
+  margin: 1.4em 0 0.6em;
 }
 
-.lesson-guide-chain ol {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem 1.35rem;
+.chapter-end h3:first-child {
+  margin-top: 0;
+}
+
+.chapter-end-summary {
   margin: 0;
-  padding: 0;
-  list-style: none;
+  padding-left: 1.4em;
+  color: var(--fg-muted);
+  font-size: 0.95rem;
+  line-height: 1.85;
+}
+
+.chapter-end-summary li {
+  margin-bottom: 0.4em;
+}
+
+.chapter-end p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.95rem;
+  line-height: 1.85;
 }
 
 .lesson-guide-chain li {
@@ -1146,7 +1209,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* ============================================================
-   课程站新增:闯关节拍部件
+   课程站新增:闯关节拍例
    ============================================================ */
 
 .quiz-card {
@@ -1196,6 +1259,113 @@ details.account-book summary {
   cursor: pointer;
   color: var(--fg-muted);
   font-size: 0.88rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.fidelity-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  background: var(--card-sunken);
+  white-space: nowrap;
+}
+
+.fidelity-runtime-exact,
+.fidelity-mirror-exact {
+  border-color: var(--ok);
+}
+
+.fidelity-constructed,
+.fidelity-adapted,
+.fidelity-recomputed {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+  background: var(--accent-wash);
+}
+
+.fidelity-drift {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.required-step {
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.required-step > header {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--card-sunken);
+}
+
+.required-step > header span {
+  color: var(--accent-deep);
+  font-size: 0.78rem;
+}
+
+.required-step > header h3 {
+  margin: 0;
+  flex: 1;
+  font-size: 1rem;
+}
+
+.required-step > header strong {
+  color: var(--accent-deep);
+  font-size: 0.72rem;
+}
+
+.required-step-body {
+  padding: 1rem 1.15rem;
+}
+
+.evidence-card {
+  border-left: 3px solid var(--accent);
+  border-radius: 0 10px 10px 0;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.evidence-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.evidence-source {
+  padding: 0.55rem 1rem;
+  color: var(--fg-faint);
+  background: var(--card-sunken);
+  font-size: 0.75rem;
+}
+
+.evidence-card-body {
+  padding: 0.85rem 1rem;
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+}
+
+.completion-badge {
+  margin-left: auto;
+  color: var(--ok);
+  font-weight: 700;
 }
 
 /* ============================================================
@@ -1291,7 +1461,7 @@ details.account-book summary {
 }
 
 /* ============================================================
-   课内部件(L00 回放 / L01 数组与算式 / L02 复用 .l01-v* 翻号)
+   课内例(L00 回放 / L01 数组与算式 / L02 复用 .l01-v* 取反)
    ============================================================ */
 
 /* L00 · π top5 行与 v 数值条 */
@@ -1403,7 +1573,7 @@ details.account-book summary {
   font-weight: 600;
 }
 
-/* L03 · 九宫格小表(模板/窗口/乘积)与 0/1 平面 */
+/* L03 · 九宫格小表(卷积核/窗口/乘积)与 0/1 平面 */
 .l03-mini {
   position: relative;
   width: 1.7rem;
@@ -1433,7 +1603,7 @@ details.account-book summary {
 .l03-rows > div:last-child > .l03-gray {
   border-bottom: 1px solid var(--hairline);
 }
-/* L04 · 计票器九宫格(窗口/权重/乘积,放得下 −0.31 这样的两位小数) */
+/* L04 · 加权求和九宫格(窗口/权重/乘积,放得下 −0.31 这样的两位小数) */
 .l04-grid {
   display: inline-block;
   border-right: 1px solid var(--hairline);
@@ -1460,7 +1630,7 @@ details.account-book summary {
   color: var(--accent-deep);
   font-weight: 650;
 }
-/* L04(旧)· 真模板灰度格(权重 → 灰度,悬停看数值) */
+/* L04(旧)· 真卷积核灰度格(权重 → 灰度,悬停看数值) */
 .l03-gray {
   display: block;
   width: 0.92rem;

@@ -146,7 +146,7 @@ class SearchTree:
     def __init__(self, game: Game, cfg: Config, add_noise: bool, rng: np.random.Generator)
     def needs_eval(self) -> bool             # 上次 select 停在未扩展叶
     def select(self) -> None                 # 从根走到叶;终局叶即时回传
-    def leaf_canonical_input(self) -> np.ndarray  # (3,N,N),供批量求值
+    def leaf_input(self) -> np.ndarray            # (3,N,N),供批量求值
     def expand_and_backup(self, policy: np.ndarray, value: float) -> None
     def root_pi(self, temperature: float = 1.0) -> np.ndarray  # (N*N,) 访问数分布(训练目标)
     def root_value(self) -> float            # 根节点平均价值(展示用胜率)
@@ -187,13 +187,13 @@ def play_games(predictor, cfg, num_games, iteration, storage, rng,
 
 - `parallel_games` 局并发推进(§4.3 的批量求值)。
 - 前 `temp_threshold` 手按 `root_pi(1.0)` 采样,之后取 argmax。
-- 每落一手发 `on_progress(slot, game, pi_top5, value)`(节流:每手都发,量可控)。
-- 单局结束产出 `GameRecord`:`moves=[{action,x,y,player,pi(归一化),value}]`、`result`(黑=1/白=-1/和=0)、`samples=[(canonical_board(3,N,N), pi(N*N), z)]`,`z` 从该手行棋方视角(胜=+1 负=-1 和=0)。
+- 每落一手发 `on_progress(slot, iteration, game_id, game, move_record)`；`move_record.value` 是搜索回传后的根节点平均价值(落子前行棋方视角)，不是价值头对根局面的裸输出。
+- 单局结束产出 `GameRecord`：`moves=[{n,x,y,player,pi(归一化),top,value}]`、`result`(黑=1/白=-1/和=0)、`samples=[(canonical_board(N,N), pi(N*N), player, z)]`。训练样本保存当前方视角的有符号棋盘和当时行棋方；`z` 在终局后从该行棋方视角补成胜 `+1`、负 `-1`、和 `0`。
 - `should_stop()` 为真时优雅中断(已完成的局仍落盘)。
 
 ### 4.6 经验池 replay.py
 
-定长 deque(maxlen=buffer_size)。样本以 `int8` 存 canonical 双平面 + `float32` pi + `int8` z。`sample(batch, rng)` 均匀采样,返回解码后的 `(inputs(3,N,N), pi, z)`。支持 `save(path)/load(path)`(npz),训练重启可恢复。
+预分配定长环形数组。每条样本保存 `int8 canonical_board(N,N)`、`int8 player`、`float32 pi(N*N)`、`int8 z`；不重复存三张输入面。`sample(batch, rng)` 用有放回均匀抽样，再由 canonical 正负号重建己方/对方两面、由 `player` 重建颜色面，返回 `(inputs(B,3,N,N), pi, z)`。`save(path)/load(path)` 使用 npz，保存 size/pos 与整组数组；容量改变时按环形时间顺序保留最新且装得下的样本。
 
 ### 4.7 训练 train.py
 
@@ -225,9 +225,9 @@ A(挑战者,新模型)与 B(现任 best 或 baseline)交替先后手,无 Dirichl
 6. 写 `metrics.jsonl` 一行;**然后**才存 `checkpoints/latest.pt`(保证 checkpoint 的 meta.iteration 不超过 metrics 尾行,kill -9 后续训不跳轮);事件追加 `events.jsonl`。
 7. `iteration += 1`,无限循环直到 stop。
 
-暂停在迭代边界生效;所有 checkpoint 经 tmp+rename 原子落盘。
+`pause` 在轮首控制检查处进入挂起循环；`stop` 除轮首外还会在自我对弈中轮询，已完成对局仍会落盘。所有 checkpoint 经 tmp+rename 原子落盘。
 
-CLI:`python -m alphagomoku.trainer --run data/runs/dev --config configs/default.json [--resume]`。启动时若存在 `latest.pt` 与 `buffer.npz` 则恢复续训。
+CLI：`python -m alphagomoku.trainer --run data/runs/dev [--config configs/default.json] [--max-iterations N]`。run 目录的 `config.json` 是权威配置；`--config` 仅在首次创建该 run 时播种。无需也不存在 `--resume`：启动时若已有 `latest.pt` 与 `buffer.npz` 就自动恢复网络、下一轮编号与经验池。checkpoint 当前不保存 optimizer/RNG 状态，因此恢复时优化器(含动量)重新创建，进程级 RNG 也从配置 seed 重新开始。
 
 ## 5. 服务器契约(server/)
 
@@ -283,7 +283,7 @@ data/runs/<run_id>/
 
 | type | data | 频率 |
 | --- | --- | --- |
-| `status` | status.json 全量 | 状态变化时 |
+| `status` | `{state}` | pause/resume/stop 等状态变化时；WebSocket 的独立 `status` 帧才携带 `build_status()` 全量快照 |
 | `iteration_start` | `{iteration}` | 每轮 |
 | `game_progress` | `{slot, iteration, game_id, board(一维 N*N), last_move, move_count, player_to_move, pi_top5:[{action,prob}], value}` | 每手(所有并发局) |
 | `game_end` | `{game_id, iteration, result, moves, first_player}` | 每局 |
@@ -306,7 +306,7 @@ data/runs/<run_id>/
 }
 ```
 
-`pi` 为长度 N*N 的归一化访问分布(训练目标),`value` 为该手行棋前根节点估值(该方视角),`top` 为访问数前 5。
+`pi` 为长度 N*N 的归一化根访问分布(训练目标)，分母是根节点全部动作的访问数总和；`top` 只是访问数前 5 的展示摘要，不能拿 top-5 之和重新归一化。`value` 为该手行棋前 MCTS 回传值在根节点的平均值(该方视角)，是搜索遥测，不是价值头裸输出，也不随 `(s,pi,z)` 存入经验池；训练会对抽出的 `s` 重新前向得到网络价值并与 `z` 计算 MSE。子树复用会保留访问账，因此根总访问数不保证等于本次 nominal simulation budget。
 
 ## 7. 前端契约(web/)
 
@@ -326,7 +326,7 @@ data/runs/<run_id>/
 ## 8. 测试策略(tests/)
 
 - `test_game.py`:四个方向胜负判定、五连才算胜(四连不判)、满盘和棋、非法落子、canonical 视角、8 对称变换(pi 与棋盘一致)。
-- `test_mcts.py`:访问数守恒(ΣN=模拟次数)、噪声只加在根、一步必杀局面下搜索选中杀着(用常数价值假网络)、终局回传符号、pi 归一化且非法位为 0。
+- `test_mcts.py`:新树第一次模拟只展开根且不增加边访问、子树复用保留访问账、噪声只加在根、一步必杀局面下搜索选中杀着(用常数价值假网络)、终局回传符号、pi 归一化且非法位为 0。
 - `test_model.py`:输出形状与值域、checkpoint 存取往返一致。
 - `test_selfplay.py`:6x6 最小配置完整打一局,样本 z 与结果一致、pi 归一化。
 - `test_train.py`:过拟合单批数据损失显著下降。

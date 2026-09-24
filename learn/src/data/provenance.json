@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "source_commit": "8627e054954dfaa38107f24b88e62a4d5f95015b",
+  "source_run": "data/runs/demo",
+  "source_run_required_for_regeneration": true,
+  "sources": [
+    {
+      "path": "data/runs/demo/config.json",
+      "sha256": "d0a256ed4ea4704947a2c1d6acdd7fa2fd25249ca00990340ed44e270f6ee24c"
+    },
+    {
+      "path": "data/runs/demo/checkpoints/best.pt",
+      "sha256": "5d30ff035de016ebcf159501988e5e395d1a8138c7bc0b2de8c80b81e4d60ba1",
+      "config": {
+        "board_size": 9,
+        "channels": 48,
+        "res_blocks": 3
+      },
+      "meta": {
+        "iteration": 2
+      }
+    },
+    {
+      "path": "data/runs/demo/checkpoints/baseline.pt",
+      "sha256": "0cb2ff0120d09b8fcf0fff289d877f4785d687f8ea4d8b2b8e13ce43b10744fb",
+      "config": {
+        "board_size": 9,
+        "channels": 48,
+        "res_blocks": 3
+      },
+      "meta": {
+        "iteration": -1,
+        "note": "frozen random init"
+      }
+    },
+    {
+      "path": "data/runs/demo/metrics.jsonl",
+      "sha256": "f1c1a3524e503773a4cea60bca72c66d1d68f3fdfb5b58adc1316eb6b92c28c1"
+    },
+    {
+      "path": "data/runs/demo/events.jsonl",
+      "sha256": "0d584696dc2dbd6439d1cde8ef227590654f32fc8b89dd9505ca85c83681ff0a"
+    },
+    {
+      "path": "data/runs/demo/games/000003/sp_000003_000.json",
+      "sha256": "550603ce717beab384234f9b59498d4085d9027cb6f3506fd4755248ecfc0d4d"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "learn/src/data/real.ts",
+      "sha256": "db6a619bfaa7493c0a157ee7620cb009207fcd3e628457c2a7b7e6d80fb28d2a"
+    },
+    {
+      "path": "learn/src/data/weights-best.json",
+      "sha256": "7e8396336b20ae228c6661b4a9a8c7bcff531738b71f2665833e8b06cd5c1fce"
+    },
+    {
+      "path": "learn/src/data/weights-untrained.json",
+      "sha256": "92d4fc01b10bced4671c8dcd8b694a30a5ac7a1fbbd7153e2b1d882e9c12dbce"
+    },
+    {
+      "path": "learn/tests/fixtures/expected.json",
+      "sha256": "7f19fdc94361ac88d72e6ed9f79fccea8962782d632fcbb64ab7cb86184de1eb"
+    },
+    {
+      "path": "learn/tests/fixtures/mcts-trace.json",
+      "sha256": "8c8cf6184d5b2dfb287265197eb89319a7875b79962f67caa9b13933a14af6da"
+    }
+  ],
+  "declared_adaptations": [
+    "browser game is fixed to 9x9 while Python is configurable",
+    "browser network uses five-decimal checkpoint weights and Float64 arithmetic",
+    "browser MCTS evaluates one tree sequentially; production batches leaves across games",
+    "deterministic MCTS parity injects fixture evaluations and disables root noise"
+  ]
+}

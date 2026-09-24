@@ -419,7 +419,7 @@ function HeroInsight() {
   )
 
   const side = hero.player === 1 ? "黑" : "白"
-  const pSide = (hero.value + 1) / 2 // tanh 估值 → 当前行棋方胜率
+  const pSide = (hero.rootValue + 1) / 2 // 搜索根估值的展示换算，不是校准胜率
   const pBlack = hero.player === 1 ? pSide : 1 - pSide
   const pWhite = 1 - pBlack
   const empties = size * size - idx
@@ -499,8 +499,8 @@ function HeroInsight() {
         <hr className="hairline-hr" style={{ margin: "1rem 0" }} />
 
         <div className="mini-label" style={{ marginBottom: "0.55rem" }}>
-          搜索根估值 v = <span className="mono">{hero.value >= 0 ? "+" : ""}
-          {fmtFloat(hero.value, 3)}</span>({side}棋视角)→ 胜率天平
+          搜索根汇总 root_value = <span className="mono">{hero.rootValue >= 0 ? "+" : ""}
+          {fmtFloat(hero.rootValue, 3)}</span>({side}棋视角)→ 优势天平
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.7rem" }}>
           <span className="mono" style={{ width: "4.6rem", textAlign: "right", fontSize: "0.8rem" }}>
@@ -516,8 +516,8 @@ function HeroInsight() {
           </span>
         </div>
         <p style={{ fontSize: "0.8rem", lineHeight: 1.7, color: "var(--fg-faint)", margin: "0.45rem 0 0" }}>
-          由搜索根估值按 <span className="mono">(v+1)/2</span> 换算,中线为均势;
-          估值永远站在「当前行棋方」的视角。
+          这里只把搜索根汇总按 <span className="mono">(root_value+1)/2</span> 线性搬到天平上，
+          方便看方向；它不是校准胜率。root_value 站在「当前行棋方」的视角，也不同于网络直接输出的 v_net。
         </p>
       </div>
     </div>

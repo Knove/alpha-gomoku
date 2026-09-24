@@ -2,10 +2,10 @@ import { useId, useState } from "react"
 import type { CSSProperties } from "react"
 
 /** 9×9 SVG 棋盘(移植自 explainer 的 GomokuBoard,改数值坐标轴):
- *  - board: 81 长的扁平整型数组,0 空 / 1 黑 / -1 白,下标 = y*9+x;
- *  - swap: 视角换色(白方视角时黑白互换渲染,双图层交叉淡化);
+ *  - board: 81 长的扁平整型数组，0 空 / 1 黑 / -1 白，下标 = y*9+x;
+ *  - swap: 视角换色(白方视角时黑白互换渲染，双图层交叉淡化);
  *  - marks: 判胜计数演示用的高亮环(anchor 为落点锚);
- *  - heat: 81 长的搜索分布,朱砂热度圆盘。 */
+ *  - heat: 81 长的搜索分布，朱砂热度圆盘。 */
 export interface BoardMark {
   x: number
   y: number
@@ -100,7 +100,7 @@ export default function Board({
       }}
       onPointerLeave={() => setHover(null)}
       onClick={(e) => {
-        // 从点击事件本身定位,不依赖 hover —— 触屏点按可能不触发 pointermove
+        // 从点击事件本身定位，不依赖 hover : 触屏点按可能不触发 pointermove
         const c = interactive ? locate(e) : null
         const cell = c && board[c.y * N + c.x] === 0 ? c : hover
         if (cell) onCellClick?.(cell.x, cell.y)
@@ -141,7 +141,7 @@ export default function Board({
         ))}
       </g>
 
-      {/* 数值坐标轴:x 向右(底部)、y 向下(左侧),与 action = y×9+x 同口径 */}
+      {/* 数值坐标轴：x 向右(底部)、y 向下(左侧),与 action = y×9+x 同口径 */}
       <g style={{ fill: "var(--board-coord)" }} fontSize={labelFont}
         fontFamily="ui-monospace, SF Mono, Menlo, monospace" textAnchor="middle">
         {Array.from({ length: N }, (_, i) => (
@@ -189,7 +189,7 @@ export default function Board({
       )}
 
       {stones.map((s) => {
-        // 双图层:swap 切换时黑白交叉淡化(视角换色动画)
+        // 双图层：swap 切换时黑白交叉淡化(视角换色动画)
         const shown = swap ? -s.v : s.v
         return (
           <g key={`${s.x}-${s.y}`}>

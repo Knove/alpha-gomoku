@@ -25,7 +25,7 @@ function buildHeroBoard(): number[] {
 
 const HERO_BOARD = buildHeroBoard()
 const HERO_TOP_MOVES = HERO.top.map((t) => ({ x: t.x, y: t.y, prob: t.prob }))
-const HERO_VALUE = `${HERO.value >= 0 ? "+" : ""}${fmtFloat(HERO.value, 3)}`
+const HERO_VALUE = `${HERO.rootValue >= 0 ? "+" : ""}${fmtFloat(HERO.rootValue, 3)}`
 const TOTAL_SAMPLES = fmtInt(REAL.metrics[REAL.metrics.length - 1].samples_total)
 const TOTAL_ITERS = REAL.metrics.length
 
@@ -174,7 +174,7 @@ export default function Ch0() {
                     </span>
                   </InfoRow>
                   <InfoRow label="落点">{coordLabel(HERO.x, HERO.y)}</InfoRow>
-                  <InfoRow label="根估值">{HERO_VALUE}</InfoRow>
+                  <InfoRow label="搜索根汇总">{HERO_VALUE}</InfoRow>
                   <InfoRow label="终局">
                     {resultText(GAME.result)} · 共 {GAME.moves.length} 手
                   </InfoRow>
@@ -221,9 +221,9 @@ export default function Ch0() {
                     color: "var(--fg-faint)",
                   }}
                 >
-                  根估值为行棋方视角:<span className="mono">+1</span> 必胜、
-                  <span className="mono">−1</span>{" "}
-                  必败。访问分布就是这一手的「思考过程」,第四章会把它彻底拆开。
+                  搜索根汇总 root_value 站在行棋方视角，越接近 <span className="mono">+1</span>
+                  越偏向有利，越接近 <span className="mono">−1</span> 越偏向不利；它不是胜率承诺，
+                  也不是网络直接输出的 v_net。访问分布就是这一手的「思考过程」，第四章会把它彻底拆开。
                   列字母沿用围棋惯例,跳过 I(避免与数字 1 混淆)。
                 </p>
               </aside>

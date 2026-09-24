@@ -1,18 +1,28 @@
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
+import { CURRICULUM, CURRICULUM_BY_ID, canonicalCurriculumId } from "./framework/curriculum"
 import { LESSONS } from "./framework/lesson"
-import { loadProgress, passQuiz, saveProgress, type Progress } from "./framework/progress"
+import {
+  completedCount,
+  completeUnit,
+  firstIncompleteAvailable,
+  isAvailable,
+  isCompleted,
+  loadProgress,
+  saveProgress,
+  type Progress,
+} from "./framework/progress"
 import { PassLessonContext } from "./framework/quiz"
 import { useTheme } from "./framework/theme"
 
 /** hash 形如 "#/l01";不匹配(空/首页/未知)返回 "" 由重定向兜底。 */
 function routeId(): string {
-  const m = location.hash.match(/^#\/([a-z0-9]+)/)
-  return m ? m[1] : ""
+  const match = location.hash.match(/^#\/([a-z0-9-]+)/)
+  return match ? match[1] : ""
 }
 
 export default function App() {
   const [route, setRoute] = useState(routeId)
-  const [progress, setProgress] = useState<Progress>(loadProgress)
+  const [progress, setProgress] = useState<Progress>(() => loadProgress(CURRICULUM))
   const { theme, toggle } = useTheme()
 
   useEffect(() => {
@@ -21,27 +31,38 @@ export default function App() {
     return () => removeEventListener("hashchange", on)
   }, [])
 
-  // 首页 / 未知路由 → 回到当前解锁进度那一课(读者回来接着学)
-  useEffect(() => {
-    if (!LESSONS.some((l) => l.meta.id === route)) {
-      const target = LESSONS[Math.min(progress.unlocked, LESSONS.length - 1)]
-      location.replace(`#/${target.meta.id}`)
-    }
-  }, [route, progress.unlocked])
+  const canonicalRoute = useMemo(() => canonicalCurriculumId(route), [route])
 
-  // 过关接线:课内 Quiz onAllCorrect → passQuiz + saveProgress,顶栏进度跟涨
+  // 首页 / 未知路由 → 回到第一个已解锁但尚未完成的学习单元。
+  useEffect(() => {
+    if (canonicalRoute && canonicalRoute !== route) {
+      location.replace(`#/${canonicalRoute}`)
+      return
+    }
+    if (!canonicalRoute) {
+      const target = firstIncompleteAvailable(progress, CURRICULUM, CURRICULUM_BY_ID)
+      location.replace(`#/${target.id}`)
+    }
+  }, [canonicalRoute, route, progress])
+
   const passLesson = useCallback((lessonId: string) => {
-    setProgress((prev) => {
-      const next = passQuiz(prev, lessonId, LESSONS.length)
+    // 只接受当前页面发出的完成信号，避免旧组件或后台页面误完成另一章。
+    if (lessonId !== canonicalRoute) return
+    setProgress((previous) => {
+      const next = completeUnit(previous, lessonId, CURRICULUM_BY_ID)
       saveProgress(next)
       return next
     })
-  }, [])
+  }, [canonicalRoute])
 
-  const idx = LESSONS.findIndex((l) => l.meta.id === route)
+  const idx = LESSONS.findIndex((lesson) => lesson.meta.id === canonicalRoute)
   const lesson = idx >= 0 ? LESSONS[idx] : null
-  const locked = lesson ? idx > progress.unlocked : false
-  const prev = idx > 0 ? LESSONS[idx - 1] : null
+  const locked = lesson ? !isAvailable(progress, lesson.meta, CURRICULUM_BY_ID) : false
+  const unmet = lesson?.meta.prerequisites.filter((id) => {
+    const prerequisite = CURRICULUM_BY_ID.get(id)
+    return prerequisite ? !isCompleted(progress, prerequisite) : true
+  }) ?? []
+  const completed = completedCount(progress, CURRICULUM)
 
   return (
     <PassLessonContext.Provider value={passLesson}>
@@ -52,7 +73,7 @@ export default function App() {
             学会下棋的机器
           </a>
           <span className="mini-label num" style={{ flex: 1 }}>
-            已解锁 {Math.min(progress.unlocked + 1, LESSONS.length)}/{LESSONS.length} 课
+            已完成 {completed}/{CURRICULUM.length} 章
           </span>
           <button
             type="button"
@@ -82,35 +103,26 @@ export default function App() {
         <nav className="lesson-nav" aria-label="课程">
           {(() => {
             let previousPhase = ""
-            return LESSONS.map((l, i) => {
-            const itemLocked = i > progress.unlocked
-            const startsPhase = l.meta.phase !== previousPhase
-            previousPhase = l.meta.phase
-            return (
-              <Fragment key={l.meta.id}>
-                {startsPhase && <div className="lesson-phase">{l.meta.phase}</div>}
-                <a
-                  href={`#/${l.meta.id}`}
-                  className={`lesson-item${i === idx ? " current" : ""}${itemLocked ? " lesson-locked" : ""}`}
-                  aria-current={i === idx ? "page" : undefined}
-                  aria-label={itemLocked ? `${l.meta.title}，尚未解锁，可查看预告` : undefined}
-                  tabIndex={0}
-                >
-                  <span className="num lesson-no">{l.meta.num}</span>
-                  <span className="lesson-title">{l.meta.title}</span>
-                  {itemLocked && (
-                    <span className="lock-badge">
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
-                        <rect x="4.5" y="10.5" width="15" height="10" rx="2" />
-                        <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
-                      </svg>
-                      锁
-                    </span>
-                  )}
-                </a>
-              </Fragment>
-            )
+            return LESSONS.map((entry) => {
+              const itemLocked = !isAvailable(progress, entry.meta, CURRICULUM_BY_ID)
+              const itemDone = isCompleted(progress, entry.meta)
+              const startsPhase = entry.meta.phase !== previousPhase
+              previousPhase = entry.meta.phase
+              return (
+                <Fragment key={entry.meta.id}>
+                  {startsPhase && <div className="lesson-phase">{entry.meta.phase}</div>}
+                  <a
+                    href={`#/${entry.meta.id}`}
+                    className={`lesson-item${entry.meta.id === canonicalRoute ? " current" : ""}${itemLocked ? " lesson-locked" : ""}${itemDone ? " lesson-done" : ""}`}
+                    aria-current={entry.meta.id === canonicalRoute ? "page" : undefined}
+                    aria-label={itemLocked ? `${entry.meta.title}，尚未解锁，可查看预告` : undefined}
+                  >
+                    <span className="num lesson-no">{entry.meta.num}</span>
+                    <span className="lesson-title">{entry.meta.title}</span>
+                    {itemDone ? <span className="completion-badge">✓</span> : itemLocked ? <span className="lock-badge">锁</span> : null}
+                  </a>
+                </Fragment>
+              )
             })
           })()}
         </nav>
@@ -121,25 +133,25 @@ export default function App() {
               <div className="card p-6">
                 <div className="eyebrow mb-2">{lesson.meta.phase}</div>
                 <h1 className="text-xl font-bold">下一站预告 · {lesson.meta.num} {lesson.meta.title}</h1>
-                <p className="mt-3" style={{ color: "var(--fg-muted)" }}>
-                  {lesson.meta.preview}
-                </p>
+                <p className="mt-3" style={{ color: "var(--fg-muted)" }}>{lesson.meta.preview}</p>
                 <p className="mt-3 text-sm" style={{ color: "var(--fg-faint)" }}>
                   它会从这个问题开始：{lesson.meta.puzzle}
                 </p>
                 <p className="mt-5 text-sm" style={{ color: "var(--fg-muted)" }}>
-                  先通关上一课，这一站的完整内容就会打开。预告始终可见，是为了让你知道
-                  眼前这一步最终会用在哪里。
+                  先完成前置章节，这一站的完整内容就会打开。预告始终可见，是为了让你知道眼前这一步最终会用在哪里。
                 </p>
-                {prev && (
-                  <a className="btn primary mt-5" href={`#/${prev.meta.id}`}>
-                    回到 {prev.meta.num} · {prev.meta.title}
-                  </a>
-                )}
+                {unmet.map((id) => {
+                  const prerequisite = CURRICULUM_BY_ID.get(id)
+                  return prerequisite ? (
+                    <a key={id} className="btn primary mt-5 mr-2" href={`#/${id}`}>
+                      回到 {prerequisite.num} · {prerequisite.title}
+                    </a>
+                  ) : null
+                })}
               </div>
             </section>
           ) : (
-            <lesson.Comp key={route} />
+            <lesson.Comp key={canonicalRoute} />
           )}
         </main>
       </div>

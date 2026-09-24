@@ -5,13 +5,16 @@ import { createServer } from "node:http"
 
 const ROOT = new URL("..", import.meta.url).pathname
 const ROUTES = [
-  ["prologue", "序"], ["l01", "1"], ["l02", "2"], ["l03", "3"], ["l04", "4"],
-  ["l05", "5"], ["l06", "6"], ["l07", "7"], ["l08", "8"], ["l09", "9"],
-  ["l10", "10"], ["l11", "11"], ["l12", "12"], ["l13", "13"], ["graduation", "毕业"],
+  ["prologue", "序"],
+  ...Array.from({ length: 18 }, (_, i) => {
+    const n = i + 1
+    return [`l${String(n).padStart(2, "0")}`, String(n)]
+  }),
+  ["graduation", "毕业"],
 ]
-/** 懒加载真权重的课(截图前多等一会):新 l04 计票课 + 旧 l04-l07 挪成的 l08-l11 */
-const SLOW = new Set(["l04", "l08", "l09", "l10", "l11"])
-const ALL_IDS = ROUTES.map(([r]) => r).filter((r) => r !== "graduation")
+/** 会懒加载真权重或运行搜索的课，截图前多等一会。 */
+const SLOW = new Set(["l07", "l08", "l09", "l10", "l11", "graduation"])
+const ALL_IDS = ROUTES.map(([id]) => id)
 
 const vite = await (await import("vite")).createServer({
   root: ROOT, logLevel: "error", server: { port: 5197 },
@@ -29,9 +32,10 @@ for (const theme of ["light", "dark"]) {
   await page.evaluate(({ ids, theme }) => {
     localStorage.clear()
     localStorage.setItem("exp-theme", theme)
-    // 全解锁,毕业沙盒可达(进度 key 是 v2:课程 15 条,cap = 14)
-    localStorage.setItem("learn-progress-v2", JSON.stringify({
-      unlocked: 14, quizPassed: Object.fromEntries(ids.map((id) => [id, true])),
+    // 全部章节按当前 contentVersion=1 标记完成，毕业沙盒可达。
+    localStorage.setItem("learn-progress-v4", JSON.stringify({
+      version: 4,
+      completed: Object.fromEntries(ids.map((id) => [id, { contentVersion: 1, completedAt: 1 }])),
     }))
   }, { ids: ALL_IDS, theme })
   // localStorage 是在 App 挂载后才写入的,而 App 只在挂载时读一次——

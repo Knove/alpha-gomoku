@@ -32,7 +32,7 @@ function slimGame(g) {
     result: g.result,
     meta: g.meta ?? {},
     moves: g.moves.map((m) => ({
-      n: m.n, x: m.x, y: m.y, player: m.player, value: m.value,
+      n: m.n, x: m.x, y: m.y, player: m.player, rootValue: m.value,
       pi: m.pi, top: m.top,
     })),
   }
@@ -69,7 +69,7 @@ function main() {
     const f = readdirSync(join(RUN, "games", it)).sort()[0]
     const g = readJson(join(RUN, "games", it, f))
     const m0 = g.moves[0]
-    firstMovePi.push({ iteration: g.iteration, pi: m0.pi, top: m0.top, value: m0.value })
+    firstMovePi.push({ iteration: g.iteration, pi: m0.pi, top: m0.top, rootValue: m0.value })
   }
 
   // --- metrics ---
@@ -115,13 +115,13 @@ function main() {
 `
   const body = `${banner}
 export interface BakedTop { action: number; x: number; y: number; visits: number; prob: number }
-export interface BakedMove { n: number; x: number; y: number; player: number; value: number; pi: number[]; top: BakedTop[] }
+export interface BakedMove { n: number; x: number; y: number; player: number; rootValue: number; pi: number[]; top: BakedTop[] }
 export interface BakedGame {
   id: string; kind: string; iteration: number; board_size: number; win_len: number
   result: number; meta: { black?: string; white?: string; opponent?: string | null }
   moves: BakedMove[]
 }
-export interface FirstMovePi { iteration: number; pi: number[]; top: BakedTop[]; value: number }
+export interface FirstMovePi { iteration: number; pi: number[]; top: BakedTop[]; rootValue: number }
 export interface MetricRow {
   iteration: number; loss: number | null; policy_loss: number | null; value_loss: number | null
   buffer: number; samples_total: number

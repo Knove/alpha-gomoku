@@ -5,19 +5,20 @@
  * 明确的系统落点。链接即使尚未解锁也会显示该课预告。
  */
 const STEPS = [
-  { title: "棋局", sub: "81 个格子 + 当前谁走", href: "#/l01" },
-  { title: "判断器", sub: "网络给出下哪 / 谁优", href: "#/l10" },
-  { title: "多想几步", sub: "搜索检查候选分支", href: "#/l11" },
-  { title: "留下作业", sub: "搜索记录 + 最终输赢", href: "#/l12" },
-  { title: "改旋钮", sub: "两种错误一起回摊", href: "#/l06" },
-  { title: "真刀真枪验收", sub: "对战看是否真的变强", href: "#/l13" },
+  { title: "棋局", sub: "格子、动作 + 当前谁走", href: "#/l01" },
+  { title: "神经网络", sub: "给出下哪 / 谁优两个判断", href: "#/l09" },
+  { title: "搜索", sub: "检查候选分支，多想几步", href: "#/l10" },
+  { title: "留下样本", sub: "搜索记录 + 最终输赢", href: "#/l12" },
+  { title: "改权重", sub: "两种错误一起反向传播", href: "#/l13" },
+  { title: "竞技场", sub: "对战看是否真的变强", href: "#/l15" },
+  { title: "保存运行产物", sub: "训练事实写进 run 目录", href: "#/l17" },
 ] as const
 
 export function SystemPreview() {
   return (
     <figure className="system-preview mt-8" aria-labelledby="system-preview-title">
       <div className="system-preview-head">
-        <span className="mini-label" id="system-preview-title">先看整条链 · 现在不用记名词</span>
+        <span className="mini-label" id="system-preview-title">先看整条链 · 后续逐站推导每个名字</span>
         <span className="text-xs" style={{ color: "var(--fg-faint)" }}>以后每课都会点亮其中一环</span>
       </div>
       <ol>
@@ -32,9 +33,9 @@ export function SystemPreview() {
         ))}
       </ol>
       <figcaption>
-        先记住一句话就够：<strong>它先判断、再推演；结果变成作业，作业再改进判断。</strong>
-        这张图按<strong>系统实际发生的顺序</strong>画；课程为了先讲清更新机制，会在第 11 课先学“怎样改旋钮”，
-        再在第 12 课讲“怎样把很多盘作业攒起来”。点击任何一环可看它在课程中的位置；未解锁时会显示预告。
+        先抓住这一条主线：<strong>网络先判断、搜索再推演；结果变成样本，样本再改进判断；运行产物让这些变化可以被检查。</strong>
+        这张图按系统实际发生的顺序画。课程会先补齐每一步需要的知识，再把同一份真实案例逐段接起来；
+        每个概念、公式和项目对证都属于必修内容。
       </figcaption>
     </figure>
   )

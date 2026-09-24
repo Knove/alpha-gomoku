@@ -15,7 +15,7 @@ function PiEvolution() {
   const board = useMemo(() => new Array(81).fill(0), [])
   const spread = useMemo(() => cur.pi.filter((p) => p > 0.01).length, [cur])
   // 先四舍五入到分位再取符号:-0.0045 经 toFixed(2) 会渲染成 "-0.00",归一为 "0.00"
-  const rootVal = Math.round(cur.value * 100) / 100
+  const rootVal = Math.round(cur.rootValue * 100) / 100
   const rootValText = `${rootVal > 0 ? "+" : ""}${(rootVal === 0 ? 0 : rootVal).toFixed(2)}`
   const fill = (idx / Math.max(1, REAL.firstMovePi.length - 1)) * 100
 

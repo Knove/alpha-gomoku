@@ -1,6 +1,6 @@
-/** 9×9 数值方阵:棋盘的「数值形态」。
- *  - canon 为 null:静态单层(第 1 课,数字随落子出现);
- *  - canon 为 boolean:双层交叉淡化,客观值 ↔ canonical 值逐格翻号(第 2 课视角开关)。 */
+/** 9×9 数值方阵：棋盘的「数值形态」。
+ *  - canon 为 null:静态单层(第 1 课，数字随落子出现);
+ *  - canon 为 boolean:双层交叉淡化，客观值 ↔ canonical 值逐格取反(第 2 课视角开关)。 */
 export function NumTable({
   board,
   canon = null,
