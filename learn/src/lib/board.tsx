@@ -5,7 +5,7 @@ import type { CSSProperties } from "react"
  *  - board: 81 长的扁平整型数组，0 空 / 1 黑 / -1 白，下标 = y*9+x;
  *  - swap: 视角换色(白方视角时黑白互换渲染，双图层交叉淡化);
  *  - marks: 判胜计数演示用的高亮环(anchor 为落点锚);
- *  - heat: 81 长的搜索分布，朱砂热度圆盘。 */
+ *  - heat: 81 长的分布(访问分布 π 或策略头概率 P，由调用方给)，朱砂热度圆盘。 */
 export interface BoardMark {
   x: number
   y: number

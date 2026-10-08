@@ -101,11 +101,13 @@ export default function L14() {
           score(a) = <span className="hl">Q(a)</span> +
           c · P(a) · √ΣN / (1 + N(a))
         </div>
+        <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
+          两项直接相加是 PUCT 的约定：Q 是 −1…+1 的价值刻度，U 是同一刻度上的探索加成，
+          靠 c_puct 调探索所占的分量。
+        </p>
         <p>
-          公式右边第一项是已有成绩，第二项就是探索奖励。
-          <span className="mono">ΣN</span> 是这个岔口全部候选被走过的总次数；两项各有来历：探索幅度用 √ΣN，是 UCB 置信半径的变体（标准 UCB1 用 √(ln ΣN / N)，这里改用先验 P 定各边权重、用 √ΣN 作随预算增长的幅度）；分母 1+N 保证没走过的边（N=0）探索分有限且最大，并随访问递减。平方根让
-          探索奖励随总预算缓慢增加；分母 <span className="mono">1+N(a)</span>
-          让已经常走的路逐渐失去这份奖励。
+          公式右边第一项是已有成绩，第二项就是探索奖励。这族「多试还没试够的路」的选择规则叫 UCB（置信上界，upper confidence bound）；不带先验 P 的标准版叫 UCB1。
+          <span className="mono">ΣN</span> 是这个岔口全部候选被走过的总次数；探索幅度用 √ΣN，它是 UCB1 置信半径（√(2·ln ΣN / N(a))）的变体：这里改用先验 P 定各边权重、用 √ΣN 作随预算增长的幅度；平方根让探索奖励随总预算缓慢增加；分母 <span className="mono">1+N(a)</span> 保证没走过的边（N=0）探索分有限：该边的探索分在 N=0 处取自身最大值；自己的 N 增加时递减（别的边被访问反而让 √ΣN 变大），比较都发生在同一个 ΣN 之下，让已经常走的路逐渐失去这份奖励（不同边还各乘自己的 P，所以 P 很小的未访问边未必压过 P 大的已访问边）。
           <span className="mono">c</span> 是探索强度权重：越大越偏爱少走的路；本项目配置固定为 1.5。
           例 11-1 的三行使用同一个 <span className="mono">c=1.5、ΣN=16</span>，逐行计算后选择总分最高的一条。
         </p>
@@ -131,8 +133,14 @@ export default function L14() {
         </p>
         <div className="formula">π(a) = N(a) / Σ<sub>全部根动作</sub>N</div>
         <p>
-          与先验 P 不同：P 是网络一眼给出的把握，π 是搜索访问配比 N/ΣN。
+          与先验 P 不同：P 是网络一眼给出的把握，π 是搜索访问分布 N/ΣN。树还没跑过模拟时 ΣN=0，这个比值没有定义；本项目此时按合法着均匀给出 π。
         </p>
+        <Def term="访问分布" en="visit distribution，记作 π">
+          搜索跑完后，按各根动作的累计访问数算出的比例分布：
+          <span className="mono">π(a) = N(a) / ΣN</span>，分母是全部根动作访问数之和，
+          不是预算次数，也不是候选动作个数。它与先验 P 回答同一个问题（「哪里该下」），
+          区别只在答案来源：P 来自网络一眼，π 来自搜索推演。
+        </Def>
         <p>
           不能用 top 5 的访问数当总数，也不能把「预算 40 次」直接写成分母。
           新树第一次模拟只展开根，可能还没有任何根边访问；落子后若复用已经搜索过的子树，
@@ -145,8 +153,8 @@ export default function L14() {
           决定前期多试、后期果断。
         </p>
         <Def term="温度" en="temperature">
-          决定实际落子是按分布抽样，还是近似取最大。按 π^(1/τ) 采样，τ=1 时按 π 本身抽样，
-          τ 越低越偏向大访问，τ→0 退化为取最大。自我对弈的前 12 手（演示配置为前 10 手）温度高，按 π 抽样，
+          决定实际落子是按分布抽样，还是近似取最大。按 π^(1/τ) 取幂、重新归一后再采样（幂次之和一般不等于 1，必须归一），τ=1 时按 π 本身抽样，
+          τ 越低越偏向大访问，τ→0⁺ 退化为取最大（τ=0 处公式无定义，取的是极限）。自我对弈只用两档：前 12 手（演示配置为前 10 手）取 τ=1、按 π 抽样，之后取最大；两个数都是配置值，目的是让开局分叉，
           让高访问候选更常出现、冷门候选也有机会；残局每手都可能直接定胜负，
           抽样等于把胜势随手送掉，所以后期温度低，改为直接选访问最多的动作。
         </Def>
@@ -155,17 +163,16 @@ export default function L14() {
           随机配比从狄利克雷分布抽出：
         </p>
         <Def term="狄利克雷分布" en="Dirichlet distribution">
-          在「和为 1 的非负配比」上取样的分布，抽出的一份配比 η 非负且和为 1。浓度参数 α 小于 1 且越小，
-          抽样越偏向少数几路、其余接近 0；本项目取 α=0.3。
+          在「和为 1 的非负配比」上取样的分布，抽出的一份配比 η 非负且和为 1。浓度参数 α 越小，抽样越偏向少数几路、其余接近 0；本项目取 α=0.3（小于 1）。
         </Def>
         <Def term="根噪声" en="root Dirichlet noise">
-          只在根节点把网络先验 P 和随机配比 η 混合的做法，新先验为
+          只在根节点把网络先验 P 和随机配比 η 混合的做法（每次落子换了新根，若新根已展开就重新混一次噪声），新先验为
           (1−ε)·P + ε·η。ε 控制掺多少，自我对弈取 ε=0.25，即 25%。
         </Def>
         <p>
-          只在根掺，一处扰动会贯穿这手棋的整次搜索，把整盘棋引向不同路线；
+          只在根掺，一处扰动会贯穿这手棋的整次搜索，把整局棋引向不同路线；
           若每个节点都掺，统计里到处是没有意义的随机偏差，反而冲淡真实成绩。
-          竞技场和人机对弈关闭根噪声。开局按 π 抽样属于温度的安排，是另一道独立的控制。
+          竞技场和人机对弈关闭根噪声。开局按 π 抽样属于温度的安排，是另一道独立的控制：竞技场开局按 π 抽样，人机对弈则恒取访问最多、不抽样。
         </p>
       </div>
 
@@ -173,19 +180,26 @@ export default function L14() {
 
       <Ledger title="SearchTree._puct_select / root_pi / update_root">
         <div className="codewalk">
-          <pre>{`# 选下一条边：历史平均 + 探索奖励；非法动作永远不选
+          <pre>{`# _puct_select：历史平均 + 探索奖励；非法动作永远不选
+legal = game.legal_moves()
+N, W, P = node.N, node.W, node.prior
+#（省略一行 assert P is not None）
+sqrt_total = math.sqrt(float(N.sum()) + 1e-8)
 Q = np.divide(W, N, out=np.zeros_like(W), where=N > 0)
-U = cfg.c_puct * P * sqrt(N.sum() + 1e-8) / (1 + N)
+U = self.cfg.c_puct * P * sqrt_total / (1.0 + N)
 score = Q + U
 score[legal == 0] = -np.inf
-return int(np.argmax(score))  # 并列时取第一个合法最大值`}</pre>
+return int(np.argmax(score))`}</pre>
         </div>
         <div className="codewalk">
-          <pre>{`# 全部根访问数形成 π；落子后保留已经搜索过的子树
-counts = root.N
-pi = counts / counts.sum()
-root = root.children.get(action, new_node)
-# 新根若已展开，自我对弈会重新混入根噪声`}</pre>
+          <pre>{`# root_pi：全部根访问数形成 π（含 ΣN=0 的退化分支）
+counts = self.root.N
+total = counts.sum()
+if total <= 0:
+    legal = self.root_game.legal_moves()
+    s = legal.sum()
+    return legal / s if s > 0 else legal
+#（下略温度分支）`}</pre>
         </div>
         <p className="mt-3">
           两段代码里，<span className="mono">P/Q/N</span> 合成下一次选择，
@@ -204,8 +218,8 @@ root = root.children.get(action, new_node)
         ]}
         next={
           <>
-            下一节把一盘棋变成一批训练样本。落子当时还不知道输赢，终局才把 z 补进每条记录；
-            顺带分清搜索时记下的 v_net、root_value 和终局 z 各自的角色，以及真训练怎样跨多棵树
+            下一课把一局棋变成一批训练样本。落子当时还不知道输赢，终局才把 z 补进每条记录；
+            顺带分清搜索用过的 v_net、记下的 root_value 和终局 z 各自的角色，以及真训练怎样跨多棵树
             批量评估、逐树顺序搜索。样本积累好之后，才轮到网络从这些样本里学。
           </>
         }
@@ -265,7 +279,7 @@ function PuctTable() {
   const best = scored.reduce((a, b) => (b.score > a.score ? b : a))
 
   return (
-    <figure className="figure mt-8">
+    <figure className="figure mt-8" data-qa="fig-budget">
       <div className="px-4 pt-4 sm:px-5">
         <span className="mini-label">例 11-1 · 3 条边下一次选谁</span>
       </div>
@@ -347,7 +361,7 @@ function BudgetLab() {
   void version
 
   return (
-    <figure className="figure mt-8">
+    <figure className="figure mt-8" data-qa="fig-temp">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
         <span className="mini-label">例 11-2 · 真权重预算实验</span>
         <span className="num text-sm" style={{ color: "var(--fg-faint)" }}>新增模拟 {sims} · 根 ΣN={total}</span>
@@ -404,7 +418,7 @@ function BudgetLab() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 11-2</span>
-        棋盘是教学构造；叶子的评价来自演示用的 checkpoint（检查点，训练中保存的一组已四舍五入的权重），
+        棋盘是教学构造；叶子的评价来自演示用的 checkpoint（检查点，训练保存的权重文件；教学站导出的这份只保留五位小数），
         搜索由浏览器 SearchTree 复现。
       </figcaption>
     </figure>

@@ -2,6 +2,7 @@
  *  节拍：思考题（顺序与中断）→ 两种「继续」→ 逐段推进真实管线 → 崩溃恢复推演 → 对证 → 习题。 */
 import { useState } from "react"
 import { Quiz, usePassLesson } from "../framework/quiz"
+import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
 
@@ -9,22 +10,22 @@ const STAGES = [
   {
     name: "自我对弈",
     output: "对局记录 + 新的 (s, π, z)",
-    why: "先让当前网络完成这一批自我对弈，才有这一轮的新样本。play_games 返回后，管线逐盘写入 games，并把样本加入回放池。",
+    why: "先让当前网络完成这一批自我对弈，才有这一轮的新样本。play_games 返回后，管线逐局写入 games，并把样本加入回放池。",
   },
   {
     name: "保存回放池",
     output: "buffer.npz",
-    why: "对局样本先落盘（写到硬盘上，存成文件）。程序正常重启时会恢复这只池子，不必把以前的样本全部丢掉。",
+    why: "对局样本先落盘（写到硬盘上，存成文件）。程序正常重启时会恢复这个回放池，不必把以前的样本全部丢掉。",
   },
   {
     name: "训练或预热",
-    output: "挑战者参数 + 损失指标，或「继续积累样本」",
-    why: "池子达到 min_buffer 才训练；样本不足时跳过参数更新，只在事件日志里记一条预热。",
+    output: "挑战者权重 + 损失指标，或「继续积累样本」",
+    why: "回放池达到 min_buffer 才训练；样本不足时跳过权重更新，只在事件日志里记一条预热。",
   },
   {
     name: "竞技场",
     output: "晋升结果 + best 可能易主",
-    why: "只有到了配置规定的轮次才比赛。一次竞技场评估要对 best 和 baseline 各赛 6 局、共 12 局完整搜索（第 15 课算的 6 局是 vs best 一组；同轮还要对 baseline 再赛 6 局），代价接近一批自我对弈。相邻两轮挑战者差别又小，按配置每隔一轮（arena_every=2）比一次，把预算省给出新样本。",
+    why: "只有到了配置规定的轮次才比赛。演示配置下对 best 和 baseline 各赛 6 局、共 12 局（默认配置各 10 局）；第一次评估还没有 best，那一轮只对 baseline 赛 6 局，挑战者直接被任命为 best。代价接近一批自我对弈。相邻两轮挑战者差别小，按配置每隔一轮（arena_every=2）比一次，实际在第 0、2、4…轮各赛一场，把预算省给出新样本。",
   },
   {
     name: "先写 metrics（每轮一行的指标记录）",
@@ -34,7 +35,7 @@ const STAGES = [
   {
     name: "再写 checkpoint",
     output: "latest.pt，必要时还有 iter_N.pt",
-    why: "latest 保存最新训练参数；每隔 keep_checkpoint_every 轮，再额外保留一份不会被下一轮覆盖的完整副本（快照）。",
+    why: "latest 保存最新训练权重；每隔 keep_checkpoint_every 轮，再额外保留一份不会被下一轮覆盖的检查点。",
   },
 ] as const
 
@@ -51,12 +52,12 @@ export default function L16() {
         why="训练不只要算对，还要在暂停、停止或崩溃后留下彼此对得上的记录；顺序本身就是正确性的一部分。这串步骤项目里叫管线：一轮训练依次走「自我对弈 → 保存回放池 → 训练（或预热）→ 竞技场（到轮次才跑）→ 写 metrics → 写 checkpoint」，每阶段都有明确的落盘产物，顺序本身保证崩溃后可恢复。"
         chain={[
           "当前网络先下棋，产生并保存新样本",
-          "池子够大才训练，指定轮次才跑竞技场",
+          "回放池够大才训练，指定轮次才跑竞技场",
           "先把这一轮写进 metrics，再保存同轮 checkpoint",
           "重启时恢复权重和回放池，但重新建立优化器与随机数状态",
         ]}
         takeaway="checkpoint 的迭代号不能跑在指标尾行的前面；就算恢复了网络权重，也不等于把动量和随机抽样的位置一并恢复了。"
-        boundary="本课追踪一个训练进程的阶段与落盘边界，不打开每一种文件的内部格式。"
+        boundary="本课追踪一个训练器的阶段与落盘边界，不打开每一种文件的内部格式。"
       />
 
       <Quiz
@@ -71,7 +72,7 @@ export default function L16() {
             ],
             answer: 1,
             explain:
-              "选第二项。恢复时 checkpoint 决定网络从哪轮参数继续，metrics 尾行保存可查的轮次事实。先写指标再写模型，计算最多重做一点、不会让参数悄悄跑到记录前面；唯一会丢数据的是断在 buffer 保存中途：未写完整的池子会整池作废，这是恢复边界里最疼的一格。",
+              "选第二项。恢复时 checkpoint 决定网络从哪轮权重继续，metrics 尾行保存可查的轮次事实。先写指标再写模型，重做的顶多是一轮的计算，不会让权重悄悄跑到记录前面。（中断还有别的代价，正文的恢复边界一节会逐条数。）",
           },
         ]}
       />
@@ -79,25 +80,25 @@ export default function L16() {
       <div className="prose mt-10">
         <h3>一轮训练是一串有顺序的落盘阶段</h3>
         <p>
-          训练进程每一轮都按同一串阶段走：先让当前网络下棋并收样本，把样本存进回放池，
-          样本够数才更新参数，到了配置规定的轮次才跑竞技场，最后先写指标行、再保存网络参数。
+          训练器每一轮都按同一串阶段走：先让当前网络下棋并收样本，把样本存进回放池，
+          样本够数才更新权重，到了配置规定的轮次才跑竞技场，最后先写指标行、再保存网络权重。
           每个阶段结束时都有明确的落盘产物，阶段之间不互相插队。把这串固定顺序的步骤写成一条
           自动推进的流程，就是本课要拆开看的对象。
         </p>
         <Def term="管线" en="pipeline">
           一轮训练固定要走的阶段序列：自我对弈、保存回放池、训练或预热、竞技场、写指标、写 checkpoint。
-          阶段顺序写死在代码里，每阶段产出各自负责的文件；顺序本身保证中断之后能从某个阶段边界接着跑：可恢复的是参数与轮号；样本可恢复以 buffer 文件完整为前提。
+          阶段顺序写死在代码里，每阶段产出各自负责的文件；顺序本身保证中断之后能从某个阶段边界接着跑：可恢复的是权重与轮号；样本可恢复以 buffer 文件完整为前提。
         </Def>
-        <Def term="checkpoint" en="checkpoint">
-          一次保存下来的网络参数文件。项目里 <span className="mono">latest.pt</span> 始终是最近一轮的参数，
+        <Def term="检查点" en="checkpoint" see="第 14 课">
+          一次保存下来的网络权重文件。项目里 <span className="mono">latest.pt</span> 始终是最近一轮的权重，
           按 <span className="mono">keep_checkpoint_every</span> 另存的 <span className="mono">iter_N.pt</span>
-          是不会被下一轮覆盖的完整副本。它保存网络参数、配置和少量说明，不保存优化器状态。
+          是不会被下一轮覆盖的完整副本。它保存网络权重、配置和少量说明，不保存优化器状态。
         </Def>
-        <Def term="metrics" en="metrics">
+        <Def term="metrics" en="metrics record">
           每轮结束追加一行的指标记录，落在 <span className="mono">metrics.jsonl</span>，
-          记下这一轮的损失、池子大小和竞技场汇总。它按行追加，旧行不动，尾行就是可查的最新事实。
-          崩溃重做同一轮会再追加一行同轮号的记录：旧那行的损失数字对应的参数已随内存消失、从未进 checkpoint。
-          读取器应以每轮最后一行为准。
+          记下这一轮的损失、回放池大小和竞技场汇总。它按行追加，旧行不动，尾行就是可查的最新事实。
+          崩溃重做同一轮会再追加一行同轮号的记录（幽灵行）：旧那行的损失数字对应的权重已随内存消失、从未以本轮标号进 checkpoint。
+          读取时应以每轮最后一行为准；训练监控网页的损失曲线还没按这个口径合并同轮号的行，幽灵行会被一并画出来。
         </Def>
 
         <h3>「继续训练」有两种，恢复的程度不一样</h3>
@@ -105,11 +106,11 @@ export default function L16() {
           同一进程里的下一轮会保留网络、优化器的动量、随机数发生器和回放池。
           进程退出后重新启动则不同：项目会自动加载 <span className="mono">latest.pt</span> 和
           <span className="mono">buffer.npz</span>，下一轮编号取 checkpoint 里的迭代号加 1；但 checkpoint
-          只保存网络参数、配置和少量说明，没有保存优化器状态与 RNG 状态。
+          只保存网络权重、配置和少量说明，没有保存优化器状态与 RNG 状态。
         </p>
         <p>
-          所以「恢复训练」准确地说是：恢复网络参数和旧样本，再新建优化器（参见：第 3 课）与随机数发生器。
-          恢复的随机数不是“接续”而是确定性重开：同一个种子重新走一遍随机流，逐轮自我对弈的随机流由「种子、轮号、已下局数」决定，崩溃重做同一轮可复现。动量历史则归零：恢复后头几步没有惯性，单批噪声直接拽着参数走、方向比平时颠簸，几步之后惯性重建，对最终收敛通常可容忍。checkpoint 不保存优化器与随机数状态，是因为它的职责只是「参数可复用」（server、竞技场加载权重都靠它）；优化器状态只对续训有用，存它会让文件翻倍、加载路径分叉。这是有意的简化，升级路径是保存时把优化器一并塞进文件。这些合起来就是当前实现的恢复边界。
+          所以「恢复训练」准确地说是：恢复网络权重和旧样本，再新建优化器（参见：第 3 课）与随机数发生器。
+          恢复的随机数不是「接续」而是确定性重开：同一个种子重新走一遍随机流。逐轮自我对弈的随机流由「种子、轮号、已下局数」三者决定：三者（已下局数只数自我对弈，不含竞技场）都相同且网络权重没变，重做出的就是同一批对局；已下局数写进 metrics 之后再崩，重做时它已经变了，出的是另一批（这是有意的安排，防止同一批样本二次入池）。动量历史则归零：恢复后头几步没有惯性，单批噪声直接拽着权重走、方向比平时颠簸，几步之后惯性重建，对最终收敛通常可容忍。checkpoint 不保存优化器与随机数状态，是因为它的职责只是「权重可复用」（server、竞技场加载权重都靠它）；优化器状态只对续训有用，存它会让文件翻倍、加载路径分叉。这是有意的简化，升级路径是保存时把优化器一并塞进文件。这些合起来就是当前实现的恢复边界。
         </p>
         <Def term="随机数发生器" en="random number generator, RNG">
           产生随机数序列的机制；它的内部状态决定下一串抽样。checkpoint 不保存它，
@@ -125,10 +126,10 @@ export default function L16() {
         <h3>暂停、停止与崩溃留下的边界各不相同</h3>
         <p>
           暂停在主循环开头检查，所以通常等当前整轮结束后才真正进入暂停状态。
-          轮边界是整条管线唯一不存在半成品的时刻：对局已整块写完、池子已保存完（buffer 保存本身不是原子的，若恰在其中断电就落在边界之外），
+          轮边界不存在半成品。唯一不受原子写或跳行保护的整文件是 buffer.npz：崩溃或断电恰好落在它写盘的那一瞬间（正常暂停不会停在那），会留下截断文件；它是直接写入，不走原子换名。对局已整块写完、回放池已保存完，
           在这里停下，任何文件都不会停在半途。
-          stop 命令除了在每轮开头被检查一次，下棋过程中也会每隔一会儿被查看一次；已经完成的对局仍会写入，
-          随后程序离开本轮。正常退出会在 <span className="mono">finally</span> 中再次保存池子和
+          stop 命令除了在每轮开头被检查一次，自我对弈的下棋过程中也会每隔一会儿被查看一次（竞技场不查：它是固定局数的评估，中途打断得不偿失，停在轮边界即可）；已经完成的对局仍会写入，
+          随后程序退出训练。正常退出会在 <span className="mono">finally</span> 中再次保存回放池和
           <span className="mono">latest</span>，并把 status.json 的状态写成 stopped。
         </p>
         <p>
@@ -138,31 +139,40 @@ export default function L16() {
         <Def term="原子" en="atomic">
           一次写入要么完整生效、要么完全不生效，不会留下写了一半的文件。
           checkpoint 的保存走这条路；回放池 <span className="mono">buffer.npz</span> 是直接写入，
-          不保证原子，所以加载失败时程序会放弃这份损坏的池子，而不是拿半份数据继续训练。
+          不保证原子（回放池是 np.savez_compressed 直接写目标文件；checkpoint 那样先写临时文件再换名，就能原子，这是它的升级路径）。写一半断电留下的截断文件，加载时抛出的异常（如 zipfile.BadZipFile、EOFError）
+          不在 pipeline 的捕获范围（那里只接 OSError、ValueError），进程会带着报错退出，
+          要删掉 buffer.npz 才能重跑；回放池作废（接得住的加载失败则丢弃回放池、以空的回放池继续攒）。恢复边界里不可逆丢样本的路径只有这一条。
         </Def>
         <p>
-          这套顺序不能保证一条计算也不重复；它保证的是不会出现「参数已前进、
-          记录没前进」却被当成完整一轮的情况。
+          这套顺序不能保证一条计算也不重复；它保证的是不会出现「权重已前进、
+          记录没前进」却被当成完整一轮的情况。finally 的收尾保存也只保证轮号不超前：被中断（如 Ctrl-C）时它存下的权重可能已走过本轮的部分更新，meta 却只记到上一轮（多训半轮可容忍，比加载超前模型安全）。
         </p>
       </div>
 
       <PipelineStepper />
       <RecoveryProbe />
 
-      <section className="mt-10">
-        <div className="eyebrow mb-3">对证 · 输入、处理、输出</div>
+      <Ledger title="pipeline.run · 启动恢复、训练门槛与写盘顺序">
         <div className="card p-5">
-          <p className="font-semibold">证据一：启动时自动恢复网络与池子，再新建优化器</p>
+          <p className="font-semibold">证据一：启动时自动恢复网络与回放池，再新建优化器</p>
           <pre className="mt-3 overflow-x-auto text-xs leading-relaxed">{`# pipeline.run
 if latest_path.exists():
     net, meta = load_checkpoint(str(latest_path), device)
     iteration = int(meta.get("iteration", -1)) + 1
+#（省略事件记录一行）
 if storage.buffer_path.exists():
-    buffer.load(storage.buffer_path)  # 节选省略：加载失败（如写了一半）就放弃这份池子的 try/except
+    try:
+        buffer.load(storage.buffer_path)
+    except (OSError, ValueError) as e:
+        storage.append_event("log", {"level": "warn", "message": f"buffer load failed: {e}"})
+#（省略 baseline 初始化与指标尾数读取几行）
 optimizer = make_optimizer(net, cfg)`}</pre>
           <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
             输入是 <span className="mono">latest.pt</span> 和 <span className="mono">buffer.npz</span>；
-            输出是恢复后的网络、回放池和下一轮编号。优化器在加载之后才重新创建，所以旧动量没有回来。
+            输出是恢复后的网络、回放池和下一轮编号。注意 except 只接
+            <span className="mono">OSError</span> 和 <span className="mono">ValueError</span>：
+            截断的 npz 抛出的异常不在其内（见上文原子定义框）。
+            优化器在加载之后才重新创建，所以旧动量没有回来。
           </p>
         </div>
 
@@ -170,41 +180,69 @@ optimizer = make_optimizer(net, cfg)`}</pre>
           <p className="font-semibold">证据二：样本够多才训练，否则只预热</p>
           <pre className="mt-3 overflow-x-auto text-xs leading-relaxed">{`# pipeline.run
 if not stopped_mid and len(buffer) >= cfg.min_buffer:
-    for _ in range(cfg.train_steps):
-        train_step(net, optimizer, buffer.sample(cfg.batch_size, rng), device, rng)
+    write_status("running", "train")
+    acc = []
+    for i in range(cfg.train_steps):
+        acc.append(train_step(net, optimizer, buffer.sample(cfg.batch_size, rng),
+                              device, rng))
+        heartbeat("train", (i + 1) / cfg.train_steps)
+#（省略 avg 汇总与 train_end 事件记录几行）
 elif not stopped_mid:
-    storage.append_event("log", {"message": "buffer warming up"})
+    storage.append_event("log", {"level": "info",
+                                 "message": f"buffer warming up: {len(buffer)}/{cfg.min_buffer}"})
 # 两处 not stopped_mid：收到 stop 的那轮既不训练也不记预热，直接离开本轮`}</pre>
           <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
-            <span className="mono">min_buffer</span>（开始参数更新所需的最小样本数）不是池子容量。没过门槛时本轮仍会留下
-            对局和样本，只是不执行参数更新。
+            最小样本门槛 <span className="mono">min_buffer</span>（定义见第 14 课）不是回放池容量。
+            没过门槛时本轮仍会留下对局和样本，只是不执行权重更新。
           </p>
         </div>
 
         <div className="card mt-4 p-5">
           <p className="font-semibold">证据三：指标必须排在 checkpoint 前</p>
           <pre className="mt-3 overflow-x-auto text-xs leading-relaxed">{`# pipeline.run
-storage.append_metrics(metric_row)
+storage.append_metrics({
+    "iteration": iteration,
+    "loss": avg["loss"] if avg else None,
+    "policy_loss": avg["policy_loss"] if avg else None,
+    "value_loss": avg["value_loss"] if avg else None,
+    "policy_entropy": avg["policy_entropy"] if avg else None,
+    "lr": avg["lr"] if avg else cfg.lr,
+    "games": len(records),
+    "games_total": games_total,
+    "samples": new_samples,
+    "samples_total": samples_total,
+    "buffer": len(buffer),
+    "sec_selfplay": round(sec_selfplay, 2),
+    "sec_train": round(sec_train, 2),
+    "arena_vs_best": arena_best,
+    "arena_vs_baseline": arena_base,
+    "best_iteration": best_iteration,
+    "ts": time.time(),
+})
+# NOTE: latest.pt / iter_XXXXXX.pt are saved AFTER append_metrics
+# checkpoints only after metrics: meta.iteration <= metrics tail
 save_checkpoint(net, cfg.to_dict(), str(latest_path), meta={"iteration": iteration})
 if iteration % cfg.keep_checkpoint_every == 0:
-    save_checkpoint(net, cfg.to_dict(), str(storage.checkpoint_path(iter_name)), meta={"iteration": iteration})`}</pre>
+    save_checkpoint(net, cfg.to_dict(),
+                    str(storage.checkpoint_path(f"iter_{iteration:06d}")),
+                    meta={"iteration": iteration})`}</pre>
           <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
             输出顺序是 <span className="mono">metrics → latest → iter_N</span>。如果在 metrics 之后、
             checkpoint 之前突然断电，重启会从旧 checkpoint 再做，而不是加载一个指标里从未出现的新模型。
           </p>
         </div>
-      </section>
+      </Ledger>
 
 
       <ChapterEnd
         summary={[
           "一轮训练按固定阶段落盘：自我对弈、保存回放池、训练或预热、到轮次才跑竞技场、先写 metrics 再写 checkpoint。顺序本身就是正确性的一部分。",
-          "进程重启恢复的是网络参数、迭代号和回放池；优化器与 RNG 重新建立，动量历史和随机抽样位置不在恢复范围内。",
+          "进程重启恢复的是网络权重、迭代号和回放池；优化器与 RNG 重新建立，动量历史和随机抽样位置不在恢复范围内。",
           "暂停会等到轮边界、停止会收尾保存、强制崩溃靠原子 checkpoint 与 metrics 先于 checkpoint 的顺序兜底；buffer.npz 直接写入，不保证原子。",
         ]}
         next={
           <>
-            下一章把 run 目录里的文件一件件打开：谁负责写、用哪种写法、名字里的
+            下一课把 run 目录里的文件一件件打开：谁负责写、用哪种写法、名字里的
             sp/ar/ab 前缀各是什么意思，以及心跳和锁怎样防住死进程与两个写入者。
           </>
         }
@@ -217,13 +255,13 @@ if iteration % cfg.keep_checkpoint_every == 0:
           {
             q: "新进程发现 latest.pt 和 buffer.npz 后，实际恢复了什么？",
             options: [
-              "恢复网络参数、下一轮编号和回放池；优化器与 RNG 重新建立",
+              "恢复网络权重、下一轮编号和回放池；优化器与 RNG 重新建立",
               "恢复每一项内存状态，包括动量和随机数走到的位置",
               "只恢复页面上的训练曲线，网络重新随机初始化",
             ],
             answer: 0,
             explain:
-              "checkpoint 带回网络参数和迭代号，buffer.npz 带回旧样本；make_optimizer 和随机数发生器会在新进程中重新创建，所以这不是逐字节续上旧进程。",
+              "checkpoint 带回网络权重和迭代号，buffer.npz 带回旧样本；make_optimizer 和随机数发生器会在新进程中重新创建，所以这不是逐字节续上旧进程。",
           },
           {
             q: "回放池还没有达到 min_buffer 时，这一轮会怎样？",
@@ -234,7 +272,7 @@ if iteration % cfg.keep_checkpoint_every == 0:
             ],
             answer: 1,
             explain:
-              "min_buffer 是开始参数更新所需的最小样本数。自我对弈产物照常进入池子；只有参数更新暂时跳过，后续轮次继续积累。",
+              "min_buffer 是开始权重更新所需的最小样本数。自我对弈产物照常进入回放池；只有权重更新暂时跳过，后续轮次继续积累。",
           },
           {
             q: "如果程序在 metrics 已写、latest 还没写时突然崩溃，最准确的说法是什么？",
@@ -271,11 +309,11 @@ function PipelineStepper() {
         <div className="flex flex-wrap gap-2">
           <button type="button" className={`btn ${!bufferReady ? "active" : ""}`}
             onClick={() => { setBufferReady(false); setStep(0) }} data-qa="buffer-warming">
-            池子 200 / 门槛 256
+            回放池 200 / 门槛 256
           </button>
           <button type="button" className={`btn ${bufferReady ? "active" : ""}`}
             onClick={() => { setBufferReady(true); setStep(0) }} data-qa="buffer-ready">
-            池子 800 / 门槛 256
+            回放池 800 / 门槛 256
           </button>
         </div>
 
@@ -290,7 +328,7 @@ function PipelineStepper() {
                 </div>
                 <p className="mt-1" style={{ color: "var(--fg-muted)" }}>
                   {warmup
-                    ? "200 条样本还没到 256 条门槛，本轮不改参数；对局与 buffer.npz 已经保存，下一轮继续积累。"
+                    ? "200 条样本还没到 256 条门槛，本轮不改权重；对局与 buffer.npz 已经保存，下一轮继续积累。"
                     : stage.why}
                 </p>
                 <p className="num mt-1 text-xs" style={{ color: "var(--fg-faint)" }}>
@@ -330,13 +368,13 @@ function RecoveryProbe() {
   const copy = {
     before: {
       title: "metrics 之前强制崩溃",
-      body: "这一轮还没有完整指标，也没有同轮 checkpoint。重启从旧 latest 的下一轮编号开始。buffer.npz 是直接写入而非原子替换：若写完则可能保留新样本，若写到一半则加载会失败并放弃这份损坏的池子。",
-      verdict: "不会加载超前模型；可能重做本轮，也可能丢失未完整保存的回放池。",
+      body: "这一轮还没有完整指标，也没有同轮 checkpoint。重启从旧 latest 的下一轮编号开始。buffer.npz 是直接写入而非原子替换：崩溃前若已保存本轮样本，重做出的同一批对局会把样本再入池一次（回放池不排重）；写到一半的回放池文件加载时报错退出，要删掉 buffer.npz 才能重跑。",
+      verdict: "不会加载超前模型；样本可能重复入池；重做的是同一批对局，同名棋谱写回的着法与结果不变（时间戳会变）；写坏的回放池作废。",
     },
     between: {
       title: "metrics 之后、checkpoint 之前强制崩溃",
-      body: "指标尾行已经出现，但 latest 仍是旧参数。重启依据旧 latest 决定轮号，因此可能重做；关键是不会出现「模型领先、指标缺席」。",
-      verdict: "记录可能暂时领先；checkpoint 永不领先。",
+      body: "指标尾行已经出现，但 latest 仍是旧权重。重启依据旧 latest 决定轮号；已下局数已写进指标，重做出的是另一批对局，样本不会重复入池。关键是不会出现「模型领先、指标缺席」。",
+      verdict: "记录可能暂时领先；checkpoint 永不领先；重做换一批对局，新棋谱顶掉旧棋谱文件，旧样本从此失去出处：回放池内样本本身（s、π、z）仍可继续训练，只是事后查不到它出自哪局棋。",
     },
     clean: {
       title: "收到 stop 后正常退出",

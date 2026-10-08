@@ -31,7 +31,7 @@ export default function L05() {
 
       <LessonGuide
         question="为什么网络不能只做乘法和加法，还要在层与层之间「弯一下」？"
-        why="只会乘加的计算再叠很多层，本质仍是直线；棋盘上有些「两个条件同时成立」或「恰好一方占优」的形状，直线永远分不开。"
+        why="只会乘加的计算再叠很多层，本质仍是直线；棋盘上有些「恰好一方占优」或「先跌后涨」的形状，直线永远分不开。"
         chain={[
           "乘加先把特征汇成直线式的分数",
           "有些分类图形无法用一条直线切开",
@@ -77,7 +77,7 @@ export default function L05() {
         <p>
           这个四点形状在棋理里有真实对应：「差距大不大」天生只看
           <span className="mono">|x−y|</span>，两边差得越多越一边倒。棋理里的
-          「两个条件同时成立」（即「且」）、「恰好一方占优」（即「恰好」）、「先跌后涨」都属于同一类拐弯判断。
+          「恰好一方占优」「先跌后涨」都属于同一类拐弯判断。
         </p>
 
         <h3>线性叠线性仍然是一层</h3>
@@ -93,16 +93,16 @@ export default function L05() {
           卷积层里每通道一个、沿棋盘各处共享（和权重在各处重复使用是同一套路）。它移动分界线的位置：
           权重决定直线的方向，偏置决定直线平移多远。字母 b 只为在式子里和权重 w 区分角色。
           偏置也是训练学出来的数字，但它本身不改变「线性还是线性」这个事实。
-          本项目的卷积层不带偏置(bias=False)，这份平移由批标准化的 β 承担（参见：第 8 课）。
+          本项目的卷积层不带偏置(bias=False)，这份平移由批标准化的 β 承担（β 与偏置同类，都是平移；参见：第 8 课）。
         </Def>
         <p>
-          所以「层多」要产生新能力，层与层之间必须插入会改变形状的步骤。若把非线性全挪到最后只做一次，前面各层仍是线性、可以并成一层，整个网络只剩一道折痕，和单个 ReLU 一样分不开那四个点；所以弯要弯在每层之后。
+          所以「层多」要产生新能力，层与层之间必须插入会改变形状的步骤。若把非线性只留到最后做一次（前提：输出只有一个数；输出多个数时折痕随分量增加，两道就已够切开四点，这里从单输出讲起）：前面各层全是线性、可以并成一层，整个网络就相当于单个 ReLU，只有一道折痕，分不开那四个点；所以弯要弯在每层之后。
         </p>
 
         <h3>ReLU 在直线上压出一道折痕</h3>
         <p>
           插在层与层之间的这道工序，正式名字是激活函数。它对加权求和的总分做一次
-          非线性的取舍：总分够正才「激活」放行，否则压成 0。
+          非线性变换。本课主角 ReLU 的规则是「总分够正才放行，否则压成 0」；别的激活函数各有自己的弯法，取舍不都长这样。
         </p>
         <Def term="激活函数" en="activation function">
           接在加权求和之后、对总分做非线性变换的函数。没有它，多少层线性都能合并成一层；
@@ -114,7 +114,7 @@ export default function L05() {
         </p>
         <Def term="ReLU" en="Rectified Linear Unit,线性整流单元">
           <span className="mono">ReLU(s) = max(0, s)</span>：正数通过，负数归零。
-          它只添一个折点，折点两侧的梯度都是常数，几十层叠起来也好算；折点本身没有唯一斜率（不可导），实现上约定此处导数取 0（即门=0），PyTorch 同此约定，有了约定后面的链式法则才写得严格；
+          它只添一个折点，折点两侧的梯度都是常数，几十层叠起来也好算；折点本身没有唯一斜率（不可导），实现上约定此处导数取 0（后文把这个导数开关叫「门」，导数取 0 就是关门）。取 0 与主流实现一致（PyTorch 同此约定）；取 ½ 之类也行，差别只落在恰好踩在 0 点的样本上，实践中极少。有了约定后面的链式法则才写得严格；
           一次比较就完成计算，是最省事的非线性变换。
         </Def>
         <p>
@@ -146,7 +146,7 @@ export default function L05() {
           <pre>{`# model.py L19-21  残差块(residual block,卷积与非线性叠成的一小段):卷积(求和)→ BN(批标准化)→ 非线性变换
 h = F.relu(self.bn1(self.conv1(x)))   # conv 加权求和，再整体 ReLU
 ...
-return F.relu(x + h)                  # 出口再做一次非线性变换(h=这一小段的输出，加回输入 x)
+return F.relu(x + h)                  # 出口再做一次非线性变换(h=两卷积算出的修正量，加回输入 x)
 
 # model.py L32-36  stem 同款：第一层也是先加权求和再非线性变换
 self.stem = nn.Sequential(
@@ -172,7 +172,7 @@ self.stem = nn.Sequential(
         next={
           <>
             复杂棋形从哪里读进来，取决于棋盘怎么送。下一课把同一份棋盘事实拆成三张图：
-            己方子一张、对方子一张、先后手身份一张。三张平面并排才是网络真正读到的输入；
+            己方子一张、对方子一张、先后手身份一张。三个平面并排才是网络真正读到的输入；
             届时再看：己/敌平面与这两道镜像折痕是同一手法（一对 ReLU 各管半边），但作用对象不同：这里作用在 x−y 上，那里作用在单格符号上。
           </>
         }
@@ -194,7 +194,7 @@ self.stem = nn.Sequential(
               "在例 5-1 里把直线怎么转怎么挪，最好也分错一个。这不是权重数量问题，是形状问题：直线没有折痕。要切开的形状是「两条平行线夹一条带状区域」，直线一根画不出两根的事。",
           },
           {
-            q: "把两层线性叠起来（第二层读第一层的得分），表示能力涨了吗？",
+            q: "把两层线性叠起来（第二层读第一层的分数），表示能力涨了吗？",
             options: [
               "涨了：两层看得比一层深",
               "没涨：w₂·(w₁·x) = (w₂·w₁)·x，两个权重并成一个，叠一百层还是一条直线",
@@ -213,7 +213,7 @@ self.stem = nn.Sequential(
             ],
             answer: 1,
             explain:
-              "ReLU(t) 只留从折点向右的半条线、ReLU(−t) 只留向左的半条（照镜子反过来），相加正好拼成 V。最低点的「均衡」两点各是 v=0，坡上的「一边倒」两点各是 v=1。把 v 相同的点连起来，是一条条跟对角线平行的线；判类规则是 v>½ 判「一边倒」、v≤½ 判「均衡」；本例四点的 v 只有 0 和 1，永远不会落在界上。v=½ 那两条把「均衡」点夹在带状区域里、「一边倒」点推到外侧（能一刀分开，是因为 V 形把斜对角两点折到了同一高度）。这道四点反例（异或）就这么被两个非线性变换切开。",
+              "ReLU(t) 只留从折点向右的半条线、ReLU(−t) 只留向左的半条（照镜子反过来），相加正好拼成 V。最低点的「均衡」两点各是 v=0，坡上的「一边倒」两点各是 v=1。把 v 相同的点连起来，是一条条跟对角线平行的线；判类规则是 v>½ 判「一边倒」、v≤½ 判「均衡」；本例四点的 v 只有 0 和 1，永远不会落在界上。v=½ 那两条把「均衡」点夹在带状区域里、「一边倒」点推到外侧（在 v 这把尺子上一刀即可，是因为 V 形把斜对角两点折到了同一高度）。这道四点反例（异或）就这么被两个非线性变换切开。",
           },
         ]}
       />
@@ -332,16 +332,22 @@ function XorCutter() {
             )}
             {mode === "one" && (
               <g data-qa="xor-one">
-                {/* 半平面 x−y>θ 涂色：{ReLU(x−y)>0} 永远是折痕一侧的半平面。
-                    带状多边形沿分界线向 +x 方向铺，伸出画面的部分由 svg 根部裁掉 */}
+                {/* 判类侧 x−y>θ 涂色：沿分界线向 +x 方向铺，伸出画面的部分由 svg 根部裁掉 */}
                 <polygon
-                  points={`${gx(theta)},${gy(GMIN)} ${gx(theta + GMAX - GMIN)},${gy(GMAX)} ${gx(theta + GMAX - GMIN + 3)},${gy(GMAX)} ${gx(theta + 3)},${gy(GMIN)}`}
+                  points={`${gx(theta + GMIN)},${gy(GMIN)} ${gx(theta + GMAX)},${gy(GMAX)} ${gx(theta + GMAX + 3)},${gy(GMAX)} ${gx(theta + GMIN + 3)},${gy(GMIN)}`}
                   style={{ fill: "var(--accent)" }} opacity={0.08} />
+                <polyline
+                  points={`${gx(GMIN - 0.1)},${gy(GMIN - 0.1)} ${gx(GMAX + 0.1)},${gy(GMAX + 0.1)}`}
+                  fill="none" strokeDasharray="4 4" style={{ stroke: "var(--fg-faint)" }}
+                  strokeWidth={1.4} />
+                <text x={gx(0.92)} y={gy(0.92) + 12} fontSize={9} style={{ fill: "var(--fg-faint)" }}>
+                  折痕 x−y=0
+                </text>
                 <polyline
                   points={`${gx(theta + GMIN - 0.1)},${gy(GMIN - 0.1)} ${gx(theta + GMAX - 0.1)},${gy(GMAX - 0.1)}`}
                   fill="none" style={{ stroke: "var(--accent)" }} strokeWidth={2.2} />
-                <text x={PW - PPR} y={gy(0.28)} fontSize={9.5} textAnchor="end" style={{ fill: "var(--fg-faint)" }}>
-                  折痕 x−y={theta.toFixed(2)}
+                <text x={gx(theta + 0.7)} y={gy(0.7) - 6} fontSize={9.5} textAnchor="middle" style={{ fill: "var(--fg-faint)" }}>
+                  判类界 x−y={theta.toFixed(2)}
                 </text>
               </g>
             )}
@@ -349,14 +355,14 @@ function XorCutter() {
               <g data-qa="xor-two">
                 {/* 带状区域 |x−y|<½:两条平行线之间涂色，「否」点躺在里面 */}
                 <polygon
-                  points={`${gx(GMIN - 0.1)},${gy(GMIN - 0.6)} ${gx(GMAX)},${gy(GMAX + 0.5)} ${gx(GMAX)},${gy(GMAX - 0.5)} ${gx(GMIN - 0.1)},${gy(GMIN + 0.4)}`}
+                  points={`${gx(GMIN - 0.1)},${gy(GMIN - 0.6)} ${gx(GMAX)},${gy(GMAX - 0.5)} ${gx(GMAX)},${gy(GMAX + 0.5)} ${gx(GMIN - 0.1)},${gy(GMIN + 0.4)}`}
                   style={{ fill: "var(--accent)" }} opacity={0.08} />
                 <polyline
-                  points={`${gx(GMIN - 0.1)},${gy(GMIN - 0.6)} ${gx(GMAX)},${gy(GMAX + 0.5)}`}
+                  points={`${gx(GMIN - 0.1)},${gy(GMIN - 0.6)} ${gx(GMAX)},${gy(GMAX - 0.5)}`}
                   fill="none" strokeDasharray="5 4" style={{ stroke: "var(--accent)" }}
                   strokeWidth={1.8} />
                 <polyline
-                  points={`${gx(GMIN - 0.1)},${gy(GMIN + 0.4)} ${gx(GMAX)},${gy(GMAX - 0.5)}`}
+                  points={`${gx(GMIN - 0.1)},${gy(GMIN + 0.4)} ${gx(GMAX)},${gy(GMAX + 0.5)}`}
                   fill="none" strokeDasharray="5 4" style={{ stroke: "var(--accent)" }}
                   strokeWidth={1.8} />
                 <text x={gx(1.02)} y={gy(1.18)} fontSize={9.5} style={{ fill: "var(--fg-faint)" }}>
@@ -389,7 +395,7 @@ function XorCutter() {
                 </p>
                 <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
                   转满一圈、挪遍全程：两个「一边倒」斜对角，两个「均衡」也斜对角。
-                  直线分对「一边倒」那对，就分错「均衡」那对。这就是线性的极限，不是权重不够，
+                  一条直线最多分对三个点、至少分错一个；想把「一边倒」那对都分对，「均衡」那对至少分错一只（四点斜对角交错，一线必错至少一只）。这就是线性的极限，不是权重不够，
                   是「直」这个形状不行。
                 </p>
               </div>
@@ -406,9 +412,9 @@ function XorCutter() {
                   当前分错 <span style={{ color: "var(--accent-deep)" }}>{errOne}</span> 个点
                 </p>
                 <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                  v = ReLU(x−y) 只有一道折痕，折痕固定在 x−y=0。你拖的 θ 只是判类界线：
-                  过了 θ 的部分，永远占着折痕一侧的<strong>半平面</strong>（半个坐标面）。
-                  半平面还是直线分界，极限没破。一个折痕不够，两个刚好。
+                  v = ReLU(x−y) 只有一道折痕，折痕固定在 x−y=0。你拖的 θ 是判类界（直线族演示：界线在 x−y 上取值；v=ReLU(x−y) 只在 θ 为非负时等价于在 v 上取阈值，θ 为负时 v 在 x−y≤0 段全压成 0、分不出档）：
+                  规则是 x−y&gt;θ 算「一边倒」（图中阴影就是被判「一边倒」的半平面），界线可以挪，折痕本身不动。
+                  尽管 v 会拐弯，判类界 x−y=θ 仍是一条直线，画出的也还是<strong>半平面</strong>（半个坐标面），极限没破。一个折痕不够，两个刚好。
                 </p>
               </div>
             </div>
@@ -426,23 +432,23 @@ function XorCutter() {
               </table>
               <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
                 表里 |0−1| 减出了负数，两条竖线只留差距：0 比 1 差 1。
-                两个镜像 ReLU 拼出 V 形：分界线 v=½ 是两条平行线，
+                两个镜像 ReLU 拼出 V 形：v=½ 这把刀是读出规则（把算出的 v 与阈值比一比），不是网络内部的一步。分界线 v=½ 是两条虚线平行线（图中阴影是带内的「均衡」区，与一挡阴影的判「一边倒」相反），
                 <strong>两个「均衡」躺在带状区域里(v=0)，两个「一边倒」各被一条线
-                推到外侧(v=1)</strong>。一条线画不出「两侧各留一个一边倒点」的形状，
+                推到外侧(v=1)</strong>。一条线夹不住两个「均衡」、又同时推开两个「一边倒」（四点斜对角交错），
                 两条刚好各管一边。这就是「两个非线性变换」的全部构造。
               </p>
             </div>
           )}
           <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
             回到棋盘：x、y 是同一扇窗里两边的三连数，「差距大不大」这件事，
-            天生就是 |x−y| 的 V 形。棋理里的「且」「恰好」「先跌后涨」，
-            全是这道非线性变换的亲戚。
+            天生就是 |x−y| 的 V 形。棋理里的「恰好一方占优」「先跌后涨」，
+            都要靠这类非线性变换才画得出。
           </p>
         </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 5-1</span>
-        <strong>教学构造：</strong>一个隐藏层、两个镜像单元（h₁/h₂ 的 (1,−1) 镜像权重是为看清原理摆的；真实网络里这种组合由训练自己找到，没有人手摆权重（第 7 课的真实卷积核可验证））：h₁、h₂ 是两个隐藏单元（hidden unit：中间层里做一次乘加再过一道 ReLU 的计算单元），各守一道折痕，
+        <strong>教学构造：</strong>一个隐藏层、两个镜像单元（h₁/h₂ 的 (1,−1) 镜像权重是为看清原理摆的；真实网络里这种组合由训练自己找到，没有人手摆权重）：h₁、h₂ 是两个隐藏单元（hidden unit：中间层里做一次乘加再过一道 ReLU 的计算单元），各守一道折痕，
         h₁=ReLU(x−y)、h₂=ReLU(y−x),v=h₁+h₂。
         四点逐值验证在右表：不是一个 ReLU(半平面切不开),而是两个(带状区域刚好够用)。
       </figcaption>
@@ -512,7 +518,7 @@ function FoldSum() {
         </div>
         <div className="reveal-box mt-4">
           <p className="num">
-            ReLU({t.toFixed(1)}) + ReLU(−{t.toFixed(1)}) ={" "}
+            ReLU({t < 0 ? `−${Math.abs(t).toFixed(1)}` : t.toFixed(1)}) + ReLU({-t < 0 ? `−${Math.abs(-t).toFixed(1)}` : (-t).toFixed(1)}) ={" "}
             {relu(t).toFixed(1)} + {relu(-t).toFixed(1)} ={" "}
             <strong style={{ color: "var(--accent-deep)" }}>{reluAbs(t).toFixed(1)}</strong>
             {"   "}(|t| = {Math.abs(t).toFixed(1)})

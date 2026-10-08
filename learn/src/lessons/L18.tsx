@@ -3,6 +3,7 @@
  *  两种浏览器里下棋 → 对证（server + web）→ 习题。 */
 import { useState } from "react"
 import { Quiz, usePassLesson } from "../framework/quiz"
+import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
 
@@ -25,20 +26,20 @@ const ROUTES: RouteCard[] = [
   {
     view: "直播 Live",
     question: "正在并行下的棋刚走到哪里？",
-    channel: "WebSocket 的 history → events → status 三种帧（一条线上传来的一则则消息）",
+    channel: "WebSocket 的 history → events → status 三种帧（同一条连接上送来的一帧帧消息）",
     source: "events.jsonl 中的 game_progress / game_end，加上 status.json",
-    result: "断线重连先补最近历史，再继续接收新增事件。",
+    result: "断线重连先补最近历史，再继续接收新增事件；重复的部分由网页按事件去重。",
   },
   {
     view: "对局 Games",
     question: "已经保存了哪些自我对弈和竞技场比赛？",
     channel: "GET /api/games?kind=...&cursor=...",
     source: "run 目录里的 self-play / arena 对局 JSON",
-    result: "列表只拿摘要并分页，不一次下载每盘棋的全部落子。",
+    result: "列表只拿摘要并分页，不一次下载每局棋的全部落子。",
   },
   {
     view: "复盘 Replay",
-    question: "一盘指定棋怎样逐手还原？",
+    question: "一局指定棋怎样逐手还原？",
     channel: "GET /api/games/{id}",
     source: "该 game JSON 中的 moves、pi、top 和搜索根估值",
     result: "浏览器按 moves 重放棋盘。每手记录里的 value 字段，在教学站数据里写作 rootValue；这个数来自搜索的 root_value，不是网络直接给的 v_net。",
@@ -48,7 +49,7 @@ const ROUTES: RouteCard[] = [
     question: "人落子后，AI 怎样回应？",
     channel: "GET /api/checkpoints；POST /api/play/new、/{sid}/move、/{sid}/step",
     source: "服务器独立加载所选 checkpoint，并为会话运行没有根噪声的 MCTS",
-    result: "这盘人机棋不写进训练池，也不会打断 trainer。",
+    result: "这局人机棋不写进回放池，也不会打断训练器。",
   },
 ]
 
@@ -61,11 +62,11 @@ export default function L18() {
       <h1 className="text-2xl font-bold">服务边界：训练事实怎样变成网页</h1>
 
       <LessonGuide
-        question="trainer 只写运行文件，浏览器却能看直播、查旧棋和发起人机对战，中间的数据怎样走？"
+        question="训练器只写运行文件，浏览器却能看直播、查旧棋和发起人机对战，中间的数据怎样走？"
         why="如果把网页上的数字误当成训练器内存的直接呈现，就无法判断它们来自快照、实时事件还是一次独立对战，也无法解释断线、恢复和 checkpoint 切换。"
         chain={[
-          "trainer 把事实写进 run 目录",
-          "server 读取文件并管理 trainer 与对战会话",
+          "训练器把事实写进 run 目录",
+          "server 读取文件并管理训练器与对战会话",
           "REST 交付完整快照，WebSocket 负责增量交付",
           "React 各页面按用途组合这些数据，但不参与训练更新",
         ]}
@@ -79,13 +80,13 @@ export default function L18() {
           {
             q: "直播页出现新手落子时，最符合当前项目的路径是哪一条？",
             options: [
-              "浏览器直接读取 trainer 的 Python 内存",
-              "trainer 追加事件，server 追读并通过 WebSocket 推送，浏览器再更新画面",
+              "浏览器直接读取训练器的 Python 内存",
+              "训练器追加事件，server 追读并通过 WebSocket 推送，浏览器再更新画面",
               "浏览器每半秒重新下载全部 checkpoint",
             ],
             answer: 1,
             explain:
-              "选第二项。trainer 与 server 不共享内存；trainer 写 run 目录，server 追读 events.jsonl，并把新增完整行组成 events 帧推给网页。checkpoint 是模型权重，不是直播消息。",
+              "选第二项。训练器与 server 不共享内存；训练器写 run 目录，server 追读 events.jsonl，并把新增完整行组成 events 帧推给网页。checkpoint 是模型权重，不是直播消息。",
           },
         ]}
       />
@@ -93,17 +94,17 @@ export default function L18() {
       <div className="prose mt-10">
         <h3>一个 server 承担的几种工作</h3>
         <p>
-          浏览器和 trainer 之间没有直接通道，中间隔着一个 server。它不替 trainer 训练，
+          浏览器和训练器之间没有直接通道，中间隔着一个 server。它不替训练器训练，
           只做三件事：转达控制命令、交出可重复读取的快照、推送刚发生的变化。
           数据的起点始终是 run 目录，server 的职责是把这些文件变成网页取得到的形式。
         </p>
         <p>
-          第一种是控制训练进程。网页向 <span className="mono">POST /api/control</span>
-          发送 start、pause、resume 或 stop。start 时 server 启动 trainer，
-          其余动作写进 <span className="mono">control.json</span>。stop 写完命令后，server 等
-          trainer 自己收尾；等不到收尾完成才代为结束进程。trainer 在自己的安全边界
-          （轮边界一类的稳定点）读取命令。
-          server 还会结合它启动的那个 trainer 程序的状态与新鲜心跳，判断 trainer 是否真的活着，不能只看一个旧文件。
+          第一种是控制训练器。网页向 <span className="mono">POST /api/control</span>
+          发送 start、pause、resume 或 stop。四个动作都先把命令写进
+          <span className="mono">control.json</span>（文件里只有 run、pause、stop 三个值：start 与 resume 都写 run）；start 写完 run 命令才启动训练器，
+          pause 和 resume 只写命令。stop 写完命令后，server 等训练器自己收尾，最多等 10 秒；等不到收尾完成才代为结束进程。训练器读命令的时机分两种：pause 和 run（继续）只在轮边界这类稳定点生效，
+          stop 在自我对弈的下棋途中也会每隔一会儿查看一次。
+          server 还会结合它启动的那个训练器程序的状态与新鲜心跳，判断训练器是否真的活着，不能只看一个旧文件。
         </p>
         <Def term="REST" en="Representational State Transfer">
           网页按固定地址向 server 问一份完整数据的取用方式。每次请求拿到的是当前完整答案，
@@ -114,19 +115,20 @@ export default function L18() {
           第二种是提供可重复读取的快照，例如下面这些 REST 端点：
           <span className="mono">/api/status</span> 给状态，<span className="mono">/api/metrics</span> 给指标，
           <span className="mono">/api/games</span> 给对局列表，<span className="mono">/api/games/{`{id}`}</span>
-          给整盘棋，<span className="mono">/api/checkpoints</span> 给模型文件，
-          <span className="mono">/api/config</span> 给配置。网页刷新后可以重新取得这些答案。
+          给整局棋，<span className="mono">/api/checkpoints</span> 给 checkpoint 清单
+          （名字、大小、修改时间与训练元数据；模型权重不走这条通道，由 server 自己从
+          run 目录加载），<span className="mono">/api/config</span> 给配置。网页刷新后可以重新取得这些答案。
         </p>
         <Def term="WebSocket" en="WebSocket">
           一条一直连着的通信线，server 有新消息就主动推过来，网页不必反复来问。
           适合直播这类「正在发生」的内容。
         </Def>
         <Def term="增量交付" en="incremental delivery">
-          只推新出现的消息，不把完整历史重发一遍。连接建立时先补一份最近历史，
-          之后每个新增事件、每次状态变化只送它自己那一条。
+          只推新出现的记录，不把完整历史重发一遍。连接建立时先补一份最近历史，
+          之后每个新增事件只送它自己那一行；status 则约每 2 秒送整份状态。
         </Def>
         <p>
-          第三种是传递刚发生的变化。WebSocket 连接后先送最近 50 条
+          第三种是传递刚发生的变化。WebSocket 连接后先送最近 50 行
           <span className="mono">history</span>，再送新增的 <span className="mono">events</span>，
           并约每 2 秒送一次 <span className="mono">status</span>。events 文件若最后一行还没写完，
           server 的事件追读循环会等这一行写完整了再读出来；短暂读错也不会让直播任务永久死掉。
@@ -137,16 +139,17 @@ export default function L18() {
         </p>
         <p>
           人机对战是独立的第四条支线。Play 页先查现有 checkpoint，再开一局独立的
-          会话（这盘人机棋的临时记录）。
+          会话（这局人机棋的临时记录）。
         </p>
-        <Def term="Predictor" en="Predictor，预测器">
-          装进内存的那份网络。
+        <Def term="预测器" en="Predictor">
+          server 里装进内存的那份网络。它加载所选 checkpoint 的权重，只做前向计算，
+          不训练、不更新；同一份权重按文件修改时间缓存复用。
         </Def>
         <p>
           模型文件很大，server 加载一次就先放着备用：它记住文件上次修改的时间，时间没变就接着用，
           变了才重新加载。每次 AI 落子创建一棵不加根噪声的搜索树（见第 11 课），
-          取访问数（被模拟到的次数）最多的动作。
-          会话保存在 server 内，既不写回回放池，也不会借用或暂停 trainer 正在进行的搜索。
+          取访问数最多的动作。
+          会话保存在 server 内，既不写回回放池，也不会借用或暂停训练器正在进行的搜索。
         </p>
       </div>
 
@@ -154,17 +157,16 @@ export default function L18() {
         <h3>两种「浏览器里下棋」：做法对齐，结果不逐位相同</h3>
         <p>
           生产 Web 的 Play 页把请求交给 server，由 Python 加载的 checkpoint 与 Python 写的
-          MCTS（蒙特卡洛树搜索，第 11 课）应手；
+          MCTS 应手；
           本教学站的浏览器沙盒则为了离线和速度，在浏览器里运行一份用 TypeScript 重写的镜像实现（与 Python 端逐层对拍过），
           只保留五位小数的权重和较小的搜索预算。
-          两边遵守同一套棋盘、网络和搜索约定，但小数位数、随机数、一次算几盘和预算都不同，
+          两边遵守同一套棋盘、网络和搜索约定，但小数位数、随机数、一次算几局和预算都不同，
           所以只能说约定一致、做法对齐，不能保证每次搜索路径和每个小数完全相同。
         </p>
       </div>
       <RouteMatcher />
 
-      <section className="mt-10">
-        <div className="eyebrow mb-3">对证 · 页面名称不是来源，数据链才是来源</div>
+      <Ledger title="页面名称不是来源，数据链才是来源">
         <div className="prose">
           <p>
             下面三段是真实边界的最小骨架。按顺序读：server 先公开资源，WebSocket 再补实时帧，
@@ -173,20 +175,31 @@ export default function L18() {
         </div>
         <div className="card mt-4 p-5 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
           <div className="mini-label">server/app.py · create_app 中的资源边界</div>
-          <pre className="mt-2 overflow-x-auto">{`GET  /api/status, /api/metrics, /api/games, /api/checkpoints, /api/config
+          <pre className="mt-2 overflow-x-auto">{`GET  /api/status, /api/metrics, /api/games, /api/games/{game_id},
+     /api/checkpoints, /api/config, /api/play/{sid}
 POST /api/control, /api/play/new, /api/play/{sid}/move, /api/play/{sid}/step
+PUT  /api/config
 WS   /ws  → history + events + status`}</pre>
           <p className="mt-3">
-            先认清上面三个缩写：GET、POST 是 REST 的两种请求方法（GET = 要数据，POST = 下命令），WS = 实时推送。
-            输入是网页请求；server 从 RunStorage、trainer 状态或 PlayManager 取得数据；输出是 JSON
+            先认清上面几个缩写：GET、POST 是 REST 的两种请求方法（GET = 要数据，POST = 下命令），PUT = 改配置，WS = 实时推送。
+            输入是网页请求；server 从 RunStorage、训练器状态或 PlayManager 取得数据；输出是 JSON
             快照或 WS 帧。这里没有训练反向传播。
           </p>
         </div>
         <div className="card mt-4 p-5 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
           <div className="mini-label">server/play.py · PlayManager.get_predictor / _ai_move</div>
-          <pre className="mt-2 overflow-x-auto">{`cached = cache.get(checkpoint)
-if cached.mtime != checkpoint.mtime: load_checkpoint(...)
-tree = SearchTree(game, cfg, add_noise=False)
+          <pre className="mt-2 overflow-x-auto">{`# PlayManager.get_predictor / _ai_move
+mtime = path.stat().st_mtime
+with self._lock:
+    cached = self._cache.get(name)
+    if cached is not None and cached[0] == mtime:
+        self._cache.move_to_end(name)
+        return cached[1]
+net, _meta = load_checkpoint(str(path), self.device)
+pred = Predictor(net, self.device)
+#（省略其余缓存维护行）
+tree = SearchTree(game, cfg, add_noise=False, rng=self._rng)
+#（省略模拟主循环：反复 select → 就地求值 → expand_and_backup）
 action = tree.best_action()`}</pre>
           <p className="mt-3">
             checkpoint 名称决定使用哪份权重；修改时间决定缓存是否过期；没有根噪声的搜索给出 AI 应手。
@@ -195,7 +208,7 @@ action = tree.best_action()`}</pre>
         </div>
         <div className="card mt-4 p-5 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
           <div className="mini-label">web/src/App.tsx · 页面消费边界</div>
-          <pre className="mt-2 overflow-x-auto">{`#/       → Dashboard(status, metrics, events)
+          <pre className="mt-2 overflow-x-auto">{`#/       → Dashboard(events, status, connected)
 #/live   → Live(events, status)
 #/games  → Games()     #/games/:id → Replay(id)
 #/play   → Play()`}</pre>
@@ -204,19 +217,19 @@ action = tree.best_action()`}</pre>
             「真实运行数据」。
           </p>
         </div>
-      </section>
+      </Ledger>
 
 
       <ChapterEnd
         summary={[
-          "浏览器与 trainer 不共享内存：trainer 写 run 目录，server 读文件再转手，REST 交完整快照、WebSocket 推新增消息。",
-          "控制命令反向走同一个边界：网页发 start/pause/resume/stop，server 写 control.json，trainer 在安全位置读取；人机对战另开 Predictor 会话，不写回训练池。",
+          "浏览器与训练器不共享内存：训练器写 run 目录，server 读文件再转手，REST 交完整快照、WebSocket 推新增消息。",
+          "控制命令反向走同一个边界：网页发 start/pause/resume/stop，server 写 control.json，训练器在安全位置读取；人机对战另开 Predictor 会话，不写回回放池。",
           "页面名字不是事实来源；每个真实结论都要沿 API 或 WS 帧追到 run 产物。教学站沙盒与生产 Web 约定一致、做法对齐，但不保证逐位相同。",
         ]}
         next={
           <>
             全书的技术内容到此为止。剩下的毕业章把十八课接成一张全系统图，
-            请你亲手下完一盘、沿箭头查清每个数的来历，再在四个新情境里找出第一处错误。
+            请你亲手下完一局、沿箭头查清每个数的来历，再在四个新情境里找出第一处错误。
           </>
         }
       />
@@ -239,13 +252,13 @@ action = tree.best_action()`}</pre>
           {
             q: "人在 Play 页选择 best 并落子后，哪项说法正确？",
             options: [
-              "浏览器直接修改 best.pt，然后 trainer 接着训练",
-              "server 为独立会话加载或复用 best Predictor，用没有根噪声的 MCTS 应手，不把这盘棋放进训练池",
-              "Play 页必须等待当前训练迭代结束，才能共用 trainer 的搜索树",
+              "浏览器直接修改 best.pt，然后训练器接着训练",
+              "server 为独立会话加载或复用 best Predictor，用没有根噪声的 MCTS 应手，不把这局棋放进回放池",
+              "Play 页必须等待当前训练迭代结束，才能共用训练器的搜索树",
             ],
             answer: 1,
             explain:
-              "PlayManager 按 checkpoint 建立独立会话，使用自己的 Game 和每手新建的 SearchTree。它读取训练产物，但不修改 checkpoint、replay buffer 或 trainer 的进行中状态。",
+              "PlayManager 按 checkpoint 建立独立会话，使用自己的 Game 和每手新建的 SearchTree。它读取训练产物，但不修改 checkpoint、回放池或训练器的进行中状态。",
           },
           {
             q: "教学站浏览器沙盒与生产 Web 对战为什么不能说成「执行结果完全相同」？",
@@ -269,7 +282,7 @@ function RouteMatcher() {
   const route = ROUTES[selected]
 
   return (
-    <figure className="figure mt-8">
+    <figure className="figure mt-8" data-qa="fig-routes">
       <div className="px-4 pt-4 sm:px-5">
         <span className="mini-label">例 18-1 · 页面、通道与事实来源</span>
         <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>

@@ -1138,7 +1138,7 @@ input[type="range"]::-moz-range-thumb {
   animation: pulse-dot 1s ease-in-out infinite;
 }
 
-/* 胜率天平 */
+/* 得分率天平 */
 .gauge {
   position: relative;
   height: 18px;
@@ -1668,7 +1668,7 @@ details.account-book summary {
 }
 
 /* ============================================================
-   L08/L09 · 表格、晋升计算器、胜率条
+   L08/L09 · 表格、晋升计算器、得分率条
    ============================================================ */
 
 .l09-table {
@@ -1711,7 +1711,7 @@ details.account-book summary {
   line-height: 1.15;
 }
 
-/* L09 · 胜率条:填充 + 55% 线 + 指针 */
+/* L09 · 得分率条:填充 + 55% 线 + 指针 */
 .l09-ratebar {
   position: relative;
   height: 14px;

@@ -20,16 +20,16 @@ export default function L01() {
       <h1 className="text-2xl font-bold">一次点击怎样成为合法落子或终局</h1>
 
       <LessonGuide
-        question="怎样把一盘棋和一手落子写成计算机能准确处理的数字？"
+        question="怎样把一局棋和一手落子写成计算机能准确处理的数字？"
         why="计算只能搬运数字。先把棋盘、落子和判胜写成固定、可逆的数字记法，程序各处引用同一格棋盘时口径一致。"
         chain={[
           "每个交叉点记为空、黑、白三种数字：0、+1、−1",
           "9×9 棋盘固定成 81 个位置，坐标 (x, y) 与动作编号一一对应",
           "落子就是给对应位置赋当前方的数，然后换手",
-          "判胜只从刚落的子向四个方向数连子，每个方向各自数出的连子数达到 5 即胜",
+          "判胜只从刚落的子向四个方向数连子，含刚落那颗、每个方向数出 5 即胜",
         ]}
         takeaway="你能把坐标和动作编号来回换算，也能说明为什么新出现的五连一定包含刚落下的子。"
-        boundary="本课的 0/+1/−1 是游戏引擎保存棋盘的记法。三个输入平面（平面是一张 9×9 的数表，见第 2 课）会把同一事实改写成网络更容易处理的形式，两者用途不同，并不矛盾。"
+        boundary="本课的 0/+1/−1 是游戏引擎保存棋盘的记法。三个输入平面（平面是一张 9×9 的数表，定义见第 2 课，编码见第 6 课）会把同一事实改写成网络更容易处理的形式，两者用途不同，并不矛盾。"
       />
 
       <Quiz
@@ -44,7 +44,7 @@ export default function L01() {
             ],
             answer: 1,
             explain:
-              "选第二项。数是唯一不用翻译的材料：计算机只搬得动数，照片和文字都得先拆成数才搬得动。81 个交叉点，一个交叉点对应一个数，整盘棋就是一个 9×9 的数组，即排成 9 行 9 列的一组数。既然绕不开数，一开始就用数，还省掉翻译这道工序。",
+              "选第二项。数是唯一不用翻译的材料：计算机只搬得动数，照片和文字都得先拆成数才搬得动。81 个交叉点，一个交叉点对应一个数，整局棋就是一个 9×9 的数组，即排成 9 行 9 列的一组数。既然绕不开数，一开始就用数，还省掉翻译这道工序。",
           },
         ]}
       />
@@ -59,7 +59,7 @@ export default function L01() {
         </p>
         <p>
           现在把它变成数。给每个交叉点记一个数：<strong>0 = 空，1 = 黑，−1 = 白</strong>。
-          黑和白恰好用一正一负表示：换手时希望「整盘乘一个数」就完成编码翻号，这要求两方编码互为相反数（第 2 课正用到这一点，参见）；0/1/2 式的编码乘任何数都做不到。于是开局、中盘、终局
+          黑和白恰好用一正一负表示：从当前行棋方的立场重看棋盘时（第 2 课要用到这个做法），希望「整盘乘一个数」就完成编码翻号，这要求两方编码互为相反数；0/1/2 式的编码乘任何数都做不到。于是开局、中盘、终局
           都是同一种形状：9×9 = 81 个数。这是游戏程序保存棋盘的记法。
         </p>
         <p>
@@ -81,14 +81,14 @@ export default function L01() {
         </Def>
       </div>
 
-      <figure className="figure mt-6 max-w-[19rem]">
+      <figure className="figure mt-6 max-w-[19rem]" data-qa="fig-tengen">
         <div className="p-4">
           <Board board={EMPTY_BOARD.map((_, i) => (i === 40 ? 1 : 0))}
             lastMove={{ x: 4, y: 4 }} />
         </div>
         <figcaption className="figure-cap">
-          <span className="cap-no">图 1-1</span>
-          天元 (x=4, y=4)：4 × 9 + 4 = 40。再验一个 x≠y 的点 (x=5, y=3)：3 × 9 + 5 = 32，32 ÷ 9 = 3 余 5。天元 x=y，验不出两种编号约定的差别，这个点才验得出。
+          <span className="cap-no">图 1</span>
+          天元 (x=4, y=4)：4 × 9 + 4 = 40。再验一个 x≠y 的点 (x=5, y=3)：3 × 9 + 5 = 32，32 ÷ 9 = 3 余 5。天元 x=y，验不出 y×9+x 与 x×9+y 两种编号约定的差别，这个点才验得出。
         </figcaption>
       </figure>
 
@@ -96,7 +96,7 @@ export default function L01() {
         <p>
           落子这个动作，在数组看来就是<strong>一次「赋值」</strong>：把那一格的数换成
           当前方的数，黑落写 1，白落写 −1。上面这三条约定（0/1/−1、y×9+x、赋值落子）
-          就是五子棋和机器之间的全部约定。例 1-1 把这套换算做成双向练习：
+          就是五子棋和机器之间的本课三条约定。例 1-1 把这套换算做成双向练习：
           它的右侧表格会把每一步落子变成一个数。
         </p>
       </div>
@@ -147,8 +147,12 @@ EMPTY, BLACK, WHITE = 0, 1, -1`}</pre>
         <div className="codewalk">
           <pre>{`# L49-63  落子 = 一次赋值 + 换手
 def play(self, action: int) -> None:
-    ...                              # 节选省略：越界与已终局的合法性检查
-    y, x = divmod(action, n)        # ← y×9+x 倒回去算：action ÷ 9,商是 y,余数是 x
+    n = self.n
+    if not 0 <= action < n * n:
+        raise ValueError(f"action {action} out of range [0, {n * n})")
+    if self._winner != EMPTY:
+        raise ValueError("game is already finished")
+    y, x = divmod(action, n)        # ← y×9+x 倒回去算：商是 y，余数是 x
     if self.board[y, x] != EMPTY:
         raise ValueError(f"square ({x}, {y}) is occupied")
     self.board[y, x] = self._current
@@ -160,18 +164,19 @@ def play(self, action: int) -> None:
         </div>
         <div className="codewalk">
           <pre>{`# L65-79  判胜：锚点 + 四方向，1 + 正 + 反 ≥ 5
-def _count_dir(self, y, x, dy, dx, p) -> int:
+def _count_dir(self, y: int, x: int, dy: int, dx: int, p: int) -> int:
     c = 0
     yy, xx = y + dy, x + dx
     while 0 <= yy < self.n and 0 <= xx < self.n and self.board[yy, xx] == p:
-        c += 1; yy += dy; xx += dx
+        c += 1
+        yy += dy
+        xx += dx
     return c
 
-def _is_win_at(self, y, x) -> bool:
+def _is_win_at(self, y: int, x: int) -> bool:
     p = self.board[y, x]
     for dx, dy in _DIRS:            # 横、竖、两种斜，共 4 个方向
-        if 1 + self._count_dir(y, x, dy, dx, p) \\
-             + self._count_dir(y, x, -dy, -dx, p) >= self.win_len:
+        if 1 + self._count_dir(y, x, dy, dx, p) + self._count_dir(y, x, -dy, -dx, p) >= self.win_len:
             return True
     return False`}</pre>
         </div>
@@ -188,7 +193,7 @@ def _is_win_at(self, y, x) -> bool:
 
       <ChapterEnd
         summary={[
-          "一盘棋是一个 81 个数的 9×9 数组：0 = 空、+1 = 黑、−1 = 白；落子就是给对应位置赋当前方的数。",
+          "一局棋是一个 81 个数的 9×9 数组：0 = 空、+1 = 黑、−1 = 白；落子就是给对应位置赋当前方的数。",
           "动作编号 action = y×9+x 把坐标拼成 0 到 80 的唯一整数，除以 9 可拆回 x、y；天元 (4,4) 是 40。",
           "判胜以刚落的子为锚点，沿四个方向数「1 + 两边连子」，任一方向达到 5 即胜；新出现的五连一定包含这颗新子。",
         ]}
@@ -205,6 +210,17 @@ def _is_win_at(self, y, x) -> bool:
         title="习题 · 过关解锁第 2 课"
         onAllCorrect={() => pass("l01")}
         questions={[
+          {
+            q: "黑方在 (4,4) 落一子后，数组里发生了什么？",
+            options: [
+              "第 40 格从 0 赋成 +1，随后轮到白方",
+              "第 40 格从 0 赋成 −1，因为白方也要记在同一格",
+              "整个数组乘以 −1，准备给白方看",
+            ],
+            answer: 0,
+            explain:
+              "落子就是一次赋值加换手：0 = 空、+1 = 黑、−1 = 白；(4,4) 的动作编号是 40，黑落写 +1，随后轮白。整盘乘 −1 是下一课的视角翻转，不是落子动作。",
+          },
           {
             q: "动作 40 是棋盘上哪个点？（action = y×9+x）",
             options: [
@@ -298,7 +314,7 @@ function TapGrid() {
       : undefined
 
   return (
-    <figure className="figure mt-8">
+    <figure className="figure mt-8" data-qa="fig-tap">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
         <span className="mini-label">例 1-1 · 亲手换算</span>
         <span className="seg">
@@ -462,7 +478,10 @@ function WinCount() {
   }
 
   return (
-    <figure className="figure mt-8">
+    <figure className="figure mt-8" data-qa="fig-winscan">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">例 1-2 · 判胜计数：四方向逐个数</span>
+      </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
         <div className="min-w-0 flex-1 md:max-w-[24rem]">
           <Board board={board} marks={marks} lastMove={anchor} />

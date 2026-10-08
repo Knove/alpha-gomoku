@@ -31,11 +31,14 @@ test("quadLoss / linGrad:第 3 课 mini-loss 的账(有限差分对拍)", () => 
 test("linStep:x=2 时临界 lr=0.25,lr=0.125 一步到谷底", () => {
   const x = 2, z = 1; // 谷底 w* = z/x = 0.5
   assert.ok(Math.abs(linStep(0, x, z, 0.125) - 0.5) < 1e-12); // 因子 1−8lr=0
-  // lr=0.2:因子 −0.6,误差每步 ×(−0.6) —— 跨谷震荡但收敛
+  // lr=0.25:因子 −1,误差每步原样翻面:永久等幅震荡(0 ↔ 1)
+  assert.ok(Math.abs(linStep(0, x, z, 0.25) - 1.0) < 1e-12);
+  assert.ok(Math.abs(linStep(1.0, x, z, 0.25) - 0) < 1e-12);
+  // lr=0.2:因子 −0.6,误差每步 ×(−0.6),跨谷震荡但收敛
   let w = 0;
   w = linStep(w, x, z, 0.2);
   assert.ok(Math.abs(w - 0.5) < Math.abs(0 - 0.5)); // 误差在缩
-  // lr=0.35:因子 −1.8,误差每步 ×1.8 —— 发散
+  // lr=0.35:因子 −1.8,误差每步 ×1.8,发散
   let d = 0, prev = Math.abs(d - 0.5);
   d = linStep(d, x, z, 0.35);
   assert.ok(Math.abs(d - 0.5) > prev);

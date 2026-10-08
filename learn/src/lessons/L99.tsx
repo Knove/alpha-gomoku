@@ -25,7 +25,7 @@ const GRADUATION_DIAGNOSTIC = [
       "两者一定相同，因为网络权重没有变",
     ],
     answer: 1,
-    explain: "搜索预算像多给一点思考时间：它会带来更多访问记录，常能纠正第一印象，却不能把错误的先验（网络第一眼给出的判断 P，参见：第 10 课）或漏看的变化变成必然正确。比较棋力仍要看受控对战的累积证据。",
+    explain: "搜索预算像多给一点思考时间：它会带来更多访问分布 π，常能纠正第一印象，却不能把错误的先验（网络第一眼给出的判断 P，参见：第 10 课）或漏看的变化变成必然正确。比较棋力仍要看受控对战的累积证据。",
   },
   {
     q: "把一条训练样本的棋盘顺时针转 90°，却把策略目标 π 原封不动。最先出了什么问题？",
@@ -38,9 +38,9 @@ const GRADUATION_DIAGNOSTIC = [
     explain: "π 不是抽象的 81 个数；每个数都回答「这个格子该下的概率」。棋盘旋转时，π 必须把每个概率搬到对应的新格子。z 只表示胜负，是一个数，不随旋转移动。",
   },
   {
-    q: "一盘棋最后黑胜。轮到白方的那一步样本，价值目标 z 应记什么？",
+    q: "一局棋最后黑胜。轮到白方的那一步样本，价值目标 z 应记什么？",
     options: [
-      "+1，因为整盘棋由黑方赢了",
+      "+1，因为整局棋由黑方赢了",
       "−1，因为每条样本都站在「轮到谁」的视角；对白方这一步，「我」输了",
       "0，因为白方没有走到终局",
     ],
@@ -78,24 +78,14 @@ export default function Graduation() {
         question="换一个没讲过的局面，你能不能指出整条因果链断在哪一环？"
         why="复述看过的案例只证明记性；把同一套因果用在新局面上，才算把这台机器真正看懂。"
         chain={[
-          "和一台机器下一盘：权重是真实导出的，搜索也真实跑在浏览器里，记录它的决策痕迹",
+          "和一台机器下一局：权重是真实导出的，搜索也真实跑在浏览器里，记录它的决策痕迹",
           "沿系统图逐环说明每个数从哪里来、经过了谁",
           "分清 v_net、root_value、z 各自回答什么问题",
           "在四道换了情境的诊断题里，用「因为……所以……」说出断链位置",
         ]}
         takeaway="每个箭头都能找到原因和证据：结构给归纳偏置，训练目标带来新信息，损失测的是贴合程度，对战给实战证据，运行文件把事实安全留下。"
-        boundary="本章不再引入新机制，只做三件事：下完一盘、查清一条链、指出四个断点。"
+        boundary="本章不再引入新机制，只做三件事：下完一局、查清一条链、指出四个断点。"
       />
-
-      <div className="prose mt-8">
-        <p>
-          十八课走完，你不只要复述看过的案例，还要把同一套因果用在新局面上。
-          先和一台机器下一盘：权重是真实导出的，搜索也真实跑在浏览器里；
-          再沿系统图逐环说明每个数从哪里来；
-          最后完成四道换了情境的诊断题，找出「预算更多就必然正确」「只转棋盘不转 π」
-          这类断链说法为什么错。
-        </p>
-      </div>
 
       <Quiz
         title="思考题 · 先选一个答案"
@@ -121,12 +111,15 @@ export default function Graduation() {
         <h3 className="text-lg font-bold">六条结论随身带走</h3>
         <div className="prose mt-3">
           <p>
-            全系统图把十二个环节收在一张图上。下面这张单子收下你的六个结论：它们散在各课，换个场景照样用得上。
+            全系统图把十三个环节收在一张图上。下面这张单子收下你的六个结论：它们散在各课，换个场景照样用得上。
             括号里是教会你它的那一课。
           </p>
           <Def term="归纳偏置" en="inductive bias" see="第 7 课">
             结构里事先写死的「答案大概长什么样」的假设。它没有把「三连要堵」这条规则塞进网络，
             那仍要靠数据和训练学出来。第一条结论说的就是这件事。
+          </Def>
+          <Def term="先验" en="prior" see="第 10 课">
+            网络第一眼给出的各着点判断，搜索从它出发继续检验。
           </Def>
           <ul>
             <li>
@@ -143,7 +136,9 @@ export default function Graduation() {
             <li>
               <strong>训练目标要带来新增、尽量可靠的信息；价值目标还要是真值。</strong>
               搜索后的 π 记下了推演过程，那是「不搜索、只看一眼」的网络看不见的。它通常是更丰富的目标；
-              但预算有限、先验（网络第一眼的判断，参见：第 10 课）会错，它不是永远更准的答案
+              但预算有限、先验（见上方定义框）会错，它不是永远更准的答案。
+              价值标签更挑剔：z 是终局事实，root_value 和 v_net 都只是估计，拿估计当标签等于自己教自己，
+              估计里的偏差会被原样写进权重
               (<a href="#/l12">自我对弈样本课</a>)。
             </li>
             <li>
@@ -155,12 +150,12 @@ export default function Graduation() {
             <li>
               <strong>对称性让同一事实换八个等价视角。</strong>
               棋盘和 π 一起旋转或镜像，训练能从不同朝向复习同一条棋谱；
-              它们不是八盘互不相关的新棋
+              它们不是八局互不相关的新棋
               (<a href="#/l14">训练课</a>)。
             </li>
             <li>
               <strong>反向传播让答错了能追查。</strong>
-              误差沿网络逐层反向传播回每个权重，梯度更新告诉每个权重：错误会往哪边变。
+              误差沿网络逐层反向传播回每个权重，梯度只给每个权重一个局部方向：这一步往哪边挪损失会小一点。
               许多能认照片、听语音的可训练系统，也靠这种办法调整权重
               (<a href="#/l13">反向传播课</a>)。
             </li>
@@ -169,13 +164,14 @@ export default function Graduation() {
       </div>
 
       <section className="mt-10">
-        <div className="eyebrow mb-3">对证 · 一步一步核对这盘棋</div>
+        <div className="eyebrow mb-3">对证</div>
         <div className="card p-6">
+          <p className="font-semibold">一步一步核对这局棋</p>
           <ol className="prose mt-3">
             <li>在沙盒落一手，记录 action、当前行棋方和 AI 搜索访问前三名。</li>
             <li>指出网络直接给出的 <span className="mono">v_net</span>、搜索汇总的
               <span className="mono">root_value</span> 与终局结果 <span className="mono">z</span> 为什么不能混用。</li>
-            <li>沿系统图说明这盘实时浏览器对局与训练进程的差别：这里预算更小、没有根噪声、单局顺序搜索、没有训练写盘。</li>
+            <li>沿系统图说明这局实时浏览器对局与训练器的差别：这里预算更小、权重只留五位小数、没有根噪声、单局顺序搜索、没有训练写盘。</li>
             <li>完成下方四个诊断，并用「因为……所以……」说出断链位置。</li>
           </ol>
         </div>
@@ -188,10 +184,10 @@ export default function Graduation() {
           当前方视角的三个输入平面，网络怎样给出 <span className="mono">P</span> 和
           <span className="mono">v_net</span>，搜索怎样留下 <span className="mono">root_value</span>
           与 <span className="mono">π</span>，终局怎样补上 <span className="mono">z</span>，
-          π 与 z 两种误差怎样改参数，又为什么必须用竞技场而不是训练损失判断棋力。
+          π 与 z 两种误差怎样改权重，又为什么必须用竞技场而不是训练损失判断棋力。
           你还能够从 checkpoint、运行文件、REST 与 WebSocket 一直追到浏览器上的画面。
           本课模型出自只训了 4 轮（iteration 0–3）的 run，上场的 best 在第 2 轮晋升；
-          一盘输赢仍不够给它下棋力结论；真正的毕业标准，是每个箭头都能找到原因和证据。
+          一局输赢仍不够给它下棋力结论；真正的毕业标准，是每个箭头都能找到原因和证据。
           这门课讲的不是五子棋，而是「让 AI 从零自教自学」的方法。舞台换了，那个
           「自己下棋、自己出样本、自己变强」的自我改进循环不换。
         </p>
@@ -199,14 +195,14 @@ export default function Graduation() {
 
       <ChapterEnd
         summary={[
-          "一盘沙盒棋可以把 action、v_net、root_value、π、z 全部现场对上：网络给第一眼判断，搜索给汇总，终局给答案。",
+          "一局沙盒棋可以把 action、v_net、root_value、π、z 全部现场对上：网络给第一眼判断，搜索给汇总，终局给答案。",
           "全系统图上半是局面到搜索结果，下半是样本到证据；每个节点都能回到教它的那一课。",
           "六个结论随身带走：归纳偏置、视角约定、训练目标的信息量、损失与对战的分工、对称性、反向传播。",
         ]}
         next={
           <>
-            全书正文到此结束。仓库中的介绍站（explainer/）与 archive/ 下的讲义是同一套事实的长文版（讲义编号与十八课不对齐），
-            不再补新知识，只方便日后按主题查找。
+            全书正文到此结束。仓库中的介绍站（explainer/）与 learn/archive/ 下的讲义是同一套事实的长文版
+            （讲义按主题命名，与十八课不一一对应），不再补新知识，只方便日后按主题查找。
           </>
         }
       />
@@ -306,12 +302,12 @@ function PlayGround() {
     ? out === 0 ? "和棋。盘满，握手言和。"
       : out === human ? "你赢了。这是一局体验，别急着据此给谁下棋力结论。"
       : "它赢了。这也只是一局；看看右边，它把搜索预算主要花在哪些候选上。"
-    : thinking ? "它正在搜索（每手 20 次模拟 × 每次模拟问网络一回）……"
+    : thinking ? "它正在搜索（每手 20 次模拟，其中非终局叶各问网络一回）……"
     : humanTurn ? `轮到你（执${human === 1 ? "黑" : "白"}）落子`
     : "轮到它……"
 
   return (
-    <figure className="figure mt-8">
+    <figure className="figure mt-8" data-qa="fig-play">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3 sm:px-5">
         <span className="mini-label">例 G-1 · 人机对弈，真权重 weights-best + 真搜索</span>
         <span className="mini-label num">每手 {SIMS} 次模拟</span>
@@ -345,7 +341,7 @@ function PlayGround() {
           </div>
           <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
             {weights
-              ? "AI = SearchTree（搜索树）+ loadNet（装网络），每手真算一遍；落子取访问数最大。和训练时同一份网络：训练时每手 40 次模拟，这里 20 次，省一半。"
+              ? "AI = SearchTree（搜索树）+ loadNet（装网络），每手真算一遍；落子取访问数最大。和训练时同一份权重（导出时保留五位小数）：自我对弈每手 40 次模拟（演示配置；竞技场 30 次），这里 20 次，省一半。"
               : "正在加载真权重（weights-best.json，约 1.2 MB）……"}
           </p>
         </div>
@@ -367,7 +363,7 @@ function PlayGround() {
                         style={{ width: `${(r.n / aiTop[0].n) * 100}%` }} />
                     </span>
                     <span className="num flex-none text-right text-xs" style={{ color: "var(--fg-faint)" }}>
-                      N={r.n} Q={r.q >= 0 ? "+" : ""}{r.q.toFixed(2)}
+                      N={r.n} Q={r.q >= 0 ? "+" : "−"}{Math.abs(r.q).toFixed(2)}
                     </span>
                   </li>
                 ))}
@@ -378,13 +374,13 @@ function PlayGround() {
                 </p>
               )}
               <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                条的长短 = 访问数 N（第一名占满全长）；Q 是每条边（候选落子）的平均得分，
+                条的长短 = 访问数 N（第一名占满全长）；Q 是每条边（候选落子）的平均成绩，
                 搜索课的统计原样搬来。看它把预算花在哪些候选上；N 受先验 P、成绩 Q 与探索的共同影响。
               </p>
             </>
           )}
           <div className="reveal-box mt-4 text-xs leading-relaxed">
-            这份权重出自只训了 4 轮的演示 run，上场的 best 在第 2 轮晋升。这里的一盘胜负只让你观察搜索和网络怎样配合，
+            这份权重出自只训了 4 轮的演示 run，上场的 best 在第 2 轮晋升。这里的一局胜负只让你观察搜索和网络怎样配合，
             不是你或它的棋力结论；要比较模型，得回到竞技场课那样的受控对战。
           </div>
         </aside>
@@ -415,13 +411,14 @@ const BRAIN: SysNode[] = [
   { x: 236, name: "叠层", sub: "局部到全盘", href: "#/l08" },
   { x: 348, name: "双头", sub: "P + v_net", href: "#/l09" },
   { x: 460, name: "搜索", sub: "PUCT 推演", href: "#/l11" },
-  { x: 572, name: "π / root_value", sub: "定义见第 10–11 课", href: "#/l11" },
+  { x: 572, name: "root_value", sub: "搜索根估值·第 10 课", href: "#/l10" },
+  { x: 680, name: "π", sub: "访问分布·第 11 课", href: "#/l11" },
 ].map((n) => ({ ...n, y: 34 }))
 
 const LOOP: SysNode[] = [
   { x: 300, y: 132, name: "自我对弈", sub: "批量产样本", href: "#/l12" },
   { x: 492, y: 132, name: "(s, π, z)", sub: "每手样本", href: "#/l12" },
-  { x: 584, y: 222, name: "回放训练", sub: "小批抽样、增广与反传", href: "#/l14" },
+  { x: 584, y: 222, name: "回放训练", sub: "小批抽样与增广", href: "#/l14" },
   { x: 404, y: 296, name: "竞技场", sub: "挑战 best", href: "#/l15" },
   { x: 196, y: 296, name: "checkpoint", sub: "保存与恢复", href: "#/l16" },
   { x: 16, y: 222, name: "网页", sub: "run 目录 + 实时消息", href: "#/l18" },
@@ -434,7 +431,7 @@ function SystemMap() {
         <span className="mini-label">例 G-2 · 全系统图，点任何一个环节回到教它的那一课</span>
       </div>
       <div className="overflow-x-auto p-4 sm:p-5" data-qa="sysmap">
-        <svg viewBox="0 0 688 356" style={{ minWidth: 560, width: "100%", height: "auto", display: "block" }}>
+        <svg viewBox="0 0 800 356" style={{ minWidth: 560, width: "100%", height: "auto", display: "block" }}>
           <defs>
             <marker id="sys-arrow" viewBox="0 0 10 10" refX="8" refY="5"
               markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -452,10 +449,10 @@ function SystemMap() {
           ))}
 
           {/* 网络 → 自我对弈（搜索产 π，自我改进循环起转） */}
-          <path d="M 618 78 C 618 100, 560 96, 505 122"
+          <path d="M 726 78 C 726 100, 560 96, 505 122"
             fill="none" style={{ stroke: "var(--accent)" }} strokeWidth={1.6}
             strokeDasharray="5 4" markerEnd="url(#sys-arrow)" />
-          <text x={563} y={96} fontSize={10} style={{ fill: "var(--accent-deep)" }}>网络给搜索第一眼的 P</text>
+          <text x={563} y={96} fontSize={10} style={{ fill: "var(--accent-deep)" }}>π 写进样本</text>
 
           {[
             { a: LOOP[0], b: LOOP[1], bend: 0 },
@@ -493,7 +490,7 @@ function SystemMap() {
       <figcaption className="figure-cap">
         <span className="cap-no">例 G-2</span>
         上半把棋局变成输入，由网络给出 P 与 v_net，再由搜索形成 π 与 root_value。
-        下半把一盘棋记录成样本，小批抽样训练出挑战者，经竞技场、checkpoint 和 run 目录留下证据，
+        下半把一局棋记录成样本，小批抽样训练出挑战者，经竞技场、checkpoint 和 run 目录留下证据，
         最后由服务器送到网页。每个节点都对应前面完成的一课；点击可回到那条因果和真实代码。
       </figcaption>
     </figure>

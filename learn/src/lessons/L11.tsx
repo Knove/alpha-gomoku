@@ -56,7 +56,7 @@ export default function L11() {
           "每条边更新 N、W、Q，根另记搜索汇总 root_value",
         ]}
         takeaway="一次模拟只有一趟往返：向前选择到叶，取得一个值，再逐层换视角记回统计。"
-        boundary="本课只学搜索分哪几步、每步按什么顺序做、怎样把结果记回来。下一课才完整手算 PUCT，并解释（下一课的）访问配比 π、根噪声、温度和实际落子。"
+        boundary="本课只学搜索分哪几步、每步按什么顺序做、怎样把结果记回来。下一课才完整手算 PUCT，并解释（下一课的）访问分布 π、根噪声、温度和实际落子。"
       />
 
       <Quiz
@@ -70,7 +70,7 @@ export default function L11() {
               "删除整棵树，从根重新随机落子",
             ],
             answer: 1,
-            explain: "选第二项。非终局的新叶没有真实输赢，网络先给出各着点概率（先验 prior，搜索开始前网络给出的各着点概率 P），再给一个局面分数 v_net；随后叶节点展开，这个分数才沿选择路径逐层换视角记回。",
+            explain: "选第二项。非终局的新叶没有真实输赢，网络先给出各着点概率（先验 prior，网络给出的各着点概率 P，新叶展开时现算），再给一个局面分数 v_net；随后叶节点展开，这个分数才沿选择路径逐层换视角记回。",
           },
         ]}
       />
@@ -86,7 +86,7 @@ export default function L11() {
         <Def term="蒙特卡洛树搜索" en="Monte Carlo Tree Search,缩写 MCTS">
           沿树选择到叶、在叶处取得一个评价、再把评价逐层记回的搜索算法。
           「蒙特卡洛」来自用随机模拟估计答案的传统；引入神经网络评价后，
-          随机模拟被一次前向取代，记回的形式不变（N/W/Q 照写；但值的来源从真终局换成网络估值，Q 的含义随之改变）。
+          随机模拟被一次前向取代，记回的形式不变（N/W/Q 照写；但值的来源从真终局换成价值估计 v_net，Q 的含义随之改变）。混用会带来偏差：硬 ±1 是确定结果，价值估计 v_net 带误差，访问少时估计值影响大；访问一多，Q 是许多次回传的平均，单次估计误差被平均稀释掉（其中也掺着少数终局硬结果）。
         </Def>
         <Def term="节点、根、边、叶" en="node, root, edge, leaf node">
           搜索记录下来的每个局面叫一个节点；当前局面是根；局面之间的一手棋是边；
@@ -95,12 +95,17 @@ export default function L11() {
 
         <h3>选择沿已展开的边走到一个叶</h3>
         <p>
-          向下走时只经过已经有子节点的边，停在尚未展开的叶节点；
-          岔口上比较候选边的那条规则叫 PUCT。PUCT 的打分下一课再算，本课先看选择之后发生的数据变化。
+          向下走时沿选出的边前进，边上的子节点没有就当场建一个，直到停在尚未展开的叶节点；
+          岔口上比较候选边的那条规则叫 PUCT。本课先看选择之后发生的数据变化。
         </p>
         <Def term="选择" en="selection">
-          从根沿已经展开的边向下走，直到到达终局或尚未展开的叶节点。
+          从根沿已经展开的边向下走，直到到达终局或尚未展开的叶节点（终局节点也算叶：它不必再展开，直接读真实输赢）。
           走过的每一手都记下「从哪个节点、选了哪条边」，供回传时按原路写回。
+        </Def>
+        <Def term="先验" en="prior，代码里是 P">
+          与第 9 课 softmax 后的比例是同一批数，用作先验时只保留合法落点、再重新归一到 1。
+          它是网络给出的各着点概率：根先验在第一趟模拟展开根时现算，途中每个新叶展开时再各算一次，机制相同。它来自策略头，是「第一眼觉得该下哪」，
+          还没有叠加任何后续推演；搜索会在这个基础上继续检验和修正。
         </Def>
         <Def term="PUCT" en="Predictor + UCT" see="第 11 课">
           给每条候选边打分的选择规则。它把网络给的先验和边上已有的成绩合成一个分数，
@@ -109,25 +114,23 @@ export default function L11() {
 
         <h3>叶处取得一个值</h3>
         <p>
-          若叶局面已经终局，就按叶节点轮走方的视角直接给值（对方刚成五则记 −1，自己成五记 +1，和记 0），不再询问网络。
+          若叶局面已经终局，就按叶节点轮走方的视角直接给值，不再询问网络：
+          对方刚成五则记 −1，和记 0。合法对局里成五的必是刚落完子的对方，
+          所以叶值本身（叶处直读的那一个数）不会出现 +1；回传时逐手翻号，「赢」才以 +1 的形式出现在上方的边上。
           若棋还没结束，网络对该叶从头到尾算一遍前向，给出
           <span className="mono">v_net</span>。这个数站在
           <strong>叶节点当前行棋方</strong>的视角。更早的做法是随机走子到终局、
-          用真实输赢当评价；一盘随机棋噪声极大，要很多次 rollout 才抵得上网络一眼的判断。
-          网络把「看过的成千上万盘」压缩进一次前向，所以本系统用
+          用真实输赢当评价；一局随机棋噪声极大，要很多次 rollout 才抵得上网络一眼的判断。
+          网络把「看过的成千上万局」压缩进一次前向，所以本系统用
           <span className="mono">v_net</span> 代替随机下完，搜索则负责修正网络的漏看。
         </p>
         <Def term="求值" en="evaluation">
           在叶节点取得一个局面分的动作。终局叶直接读真实输赢；非终局叶交给网络前向，
           得到当前行棋方视角的 <span className="mono">v_net</span>。
         </Def>
-        <Def term="先验" en="prior,代码里是 P">
-          与第 9 课 softmax 后的比例是同一批数。搜索开始前网络给出的各着点概率。它来自策略头，是「第一眼觉得该下哪」，
-          还没有叠加任何后续推演；搜索会在这个基础上继续检验和修正。
-        </Def>
         <Def term="随机走子" en="rollout">
           从叶局面开始双方随机落子直到终局，用真实输赢当评价的旧做法。
-          一盘随机棋噪声极大，要很多次 rollout 才抵得上网络一次前向的判断，
+          一局随机棋噪声极大，要很多次 rollout 才抵得上网络一次前向的判断，
           所以本系统用 <span className="mono">v_net</span> 取代它。
         </Def>
 
@@ -171,7 +174,7 @@ export default function L11() {
           根上还另记一个搜索汇总 <span className="mono">root_value</span>：
           它把每次模拟最终换算到根方视角的值求平均，所以可能混合许多叶的
           <span className="mono">v_net</span> 和真实终局结果。它只是搜索过程的记录值，
-          用来展示；训练答案 <span className="mono">z</span> 则来自整盘真实终局。
+          用来展示。它与「根边按访问数加权的 Q 平均」接近，但不相等：首趟只展开根的那次模拟，值只进 root_value、不动任何根边；换新根后 root_value 统计清零，根边却保留旧计数。训练答案 <span className="mono">z</span> 则来自整盘真实终局。
           <span className="mono">v_net</span>、
           <span className="mono">root_value</span>、
           <span className="mono">z</span> 是 3 个不同的量。
@@ -184,8 +187,12 @@ export default function L11() {
           所以落子后把已选动作的子节点提作新根，它下面的 N、W、Q 原样保留，
           只有上一根的 <span className="mono">root_value</span> 展示统计清零。
           保留下来的访问数使新根的访问总数不等于这一步新增的模拟次数，
-          读访问配比 π（下一课定义）的分母时要记在心上。
+          读访问分布 π 的分母时要记在心上。若对手走了搜索里没有的着，就新建一个空节点当新根，从头展开。
         </p>
+        <Def term="访问分布" en="visit distribution，记作 π" see="第 11 课">
+          根下各落点访问数占根下访问数之和的比例。分母是这个和（记作 ΣN），
+          不是这一步新增的模拟次数，也不是候选动作的个数。
+        </Def>
       </div>
 
       <SimulationStepper />
@@ -194,39 +201,45 @@ export default function L11() {
 
       <Ledger title="mcts.py · SearchTree.select / expand_and_backup / _backup / update_root">
         <div className="codewalk">
-          <pre>{`# 向前：沿树走到终局或未展开叶
+          <pre>{`# select：沿树走到终局或未展开叶
 while node.expanded:
-    action = self._puct_select(node, game)
-    path.append((node, action))
-    game.play(action)
-# （节选省略：途中创建子节点；若到达终局则直接回传真实 ±1/0，见上方提示）
-if game.outcome() is None:
-    self._pending_game = game`}</pre>
+    a = self._puct_select(node, game)
+    path.append((node, a))
+    #（节选省略：途中创建子节点 child 并挂上）
+    game.play(a)
+    node = child
+out = game.outcome()
+if out is not None:
+    #（节选省略：按 out 定 v，终局叶给真实 ±1/0，见上方提示）
+    self._backup(path, v)
+    return
+self._pending_game = game
+self._pending_path = path
+self._pending_leaf = node`}</pre>
         </div>
         <div className="codewalk">
           <pre>{`# 向后：每退一层先换视角，再更新该边
-for node, action in reversed(path):
-    value = -value
-    node.N[action] += 1
-    node.W[action] += value
-# 最后把 v 累计进 root_value 展示统计（根汇总值的分子和分母）
-self._root_value_sum += value
+for node, a in reversed(path):
+    v = -v  # value flips perspective each ply
+    node.N[a] += 1.0
+    node.W[a] += v
+self._root_value_sum += v
 self._root_value_count += 1`}</pre>
         </div>
         <div className="codewalk">
           <pre>{`# 落子后复用已经存在的子树
 child = self.root.children.get(action)
 self.root_game.play(action)
-self.root = child if child is not None else new_node
+self.root = child if child is not None else _Node(self.root_game.n * self.root_game.n)
 self._root_value_sum = 0.0
 self._root_value_count = 0  # 展示统计整体清零；新根若已展开且开噪声，还会重混一次（第 11 课）`}</pre>
         </div>
         <p className="mt-3">
-          例 10-1 的 3 个按钮与源码一一对应：「选择」按钮就是 select，走到等待评价的叶子；
-          「求值」把叶局面交给网络；合起来对应
-          <span className="mono">expand_and_backup</span>，其中逐边记回统计的一段是
-          <span className="mono">_backup</span>。
-          浏览器使用单树顺序执行和舍入权重；真正训练时还能把多盘棋等待评价的叶子
+          例 10-1 的 3 个按钮与源码一一对应：「选择」按钮就是 <span className="mono">select</span>，
+          走到等待评价的叶子；「求值」把叶局面交给网络（源码里由调用方算好 policy、value 喂回来）；
+          「扩展并回传」按钮才是 <span className="mono">expand_and_backup</span>，
+          其中逐边记回统计的一段是 <span className="mono">_backup</span>。
+          浏览器使用单树顺序执行和舍入权重；真正训练时还能把多局棋等待评价的叶子
           合成一批一起算，但每棵树内部仍然一次走一步，顺序不变。
         </p>
       </Ledger>
@@ -240,7 +253,7 @@ self._root_value_count = 0  # 展示统计整体清零；新根若已展开且�
         ]}
         next={
           <>
-            有了「一次模拟」，还要回答岔口上「下一次该查哪条路」。下一章完整手算 PUCT
+            有了「一次模拟」，还要回答岔口上「下一次该查哪条路」。下一课完整手算 PUCT
             的打分与选边，再看全部根访问数怎样归一成 π、根噪声与温度怎样影响实际落子，
             以及有限预算下这套选择规则会怎样失败。
           </>
@@ -410,7 +423,7 @@ function SimulationStepper() {
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="mini-label">根节点统计 · 每条边记 N/W/Q（选边一方视角；根边即根方）</div>
+          <div className="mini-label">根节点统计 · 每条边记 N/W/Q（三个数都记在选边一方的视角上；根下的边就记根方，也就是当前行棋方）</div>
           {rootRows.length === 0 ? (
             <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
               第一趟只展开根本身，路径为空，所以还没有根边统计。继续做第二趟才会经过一条根边。

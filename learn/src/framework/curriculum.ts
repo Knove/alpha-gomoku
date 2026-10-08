@@ -157,7 +157,7 @@ export const CURRICULUM: readonly CurriculumUnit[] = [
   }),
   unit({
     id: "l12", num: "12", title: "自我对弈：一手棋怎样成为样本", puzzle: "落子时不知道输赢，终局后怎样补全目标答案？",
-    phase: "搜索变成学习", preview: "追踪真实样本，并看真正的训练程序如何跨多局批量评估、逐树顺序搜索。",
+    phase: "搜索变成学习", preview: "追踪真实样本，并看真正的训练器如何跨多局批量评估、逐树顺序搜索。",
     prerequisites: ["l11"], contentVersion: 1,
     outcomes: ["构造一条 (s,π,z)", "解释 z 的样本视角", "区分 v_net、rootValue 和 z", "解释跨树 batching"],
     sources: [
@@ -177,7 +177,7 @@ export const CURRICULUM: readonly CurriculumUnit[] = [
   }),
   unit({
     id: "l14", num: "14", title: "训练：许多样本怎样形成一次更新", puzzle: "旧新样本怎样混合、变换并共同更新网络？",
-    phase: "搜索变成学习", preview: "走过回放池、随机抽样、旋转翻转变换和一次真实的参数更新。",
+    phase: "搜索变成学习", preview: "走过回放池、随机抽样、旋转翻转变换和一次真实的权重更新。",
     prerequisites: ["l13"], contentVersion: 1,
     outcomes: ["解释 replay 存储与重建", "同步变换棋盘和 π", "说明数据增强与真实优化器"],
     sources: [
@@ -189,7 +189,7 @@ export const CURRICULUM: readonly CurriculumUnit[] = [
     id: "l15", num: "15", title: "竞技场：谁有资格成为 best", puzzle: "损失下降为什么还不能换 best?",
     phase: "验收与运行", preview: "控制颜色和开局，用 best、baseline 和有限比赛证据决定晋升。",
     prerequisites: ["l14"], contentVersion: 1,
-    outcomes: ["区分 challenger/best/baseline/latest", "计算竞技场得分", "说明阈值与证据限制"],
+    outcomes: ["区分 challenger/best/baseline/latest", "计算竞技场得分率", "说明阈值与证据限制"],
     sources: [
       { kind: "python", path: "alphagomoku/arena.py", symbol: "play_match", fidelity: "runtime-exact" },
       { kind: "python", path: "alphagomoku/pipeline.py", symbol: "run", fidelity: "runtime-exact" },
@@ -220,7 +220,7 @@ export const CURRICULUM: readonly CurriculumUnit[] = [
     id: "l18", num: "18", title: "服务边界：训练事实怎样变成网页", puzzle: "服务器和浏览器怎样观察并操作训练？",
     phase: "验收与运行", preview: "沿“完整快照、实时消息和独立的人机对战”三条数据通路，追踪 Dashboard、Live、Replay 与 Play。",
     prerequisites: ["l17"], contentVersion: 1,
-    outcomes: ["区分 REST 快照与 WS 增量", "追踪每个 web view 的数据来源", "说明浏览器与训练端适配差异"],
+    outcomes: ["区分 REST 快照与 WS 增量", "追踪每个 web view 的数据来源", "说明浏览器与训练器适配差异"],
     sources: [
       { kind: "python", path: "server/app.py", symbol: "create_app", fidelity: "runtime-exact" },
       { kind: "python", path: "server/tail.py", symbol: "EventTail", fidelity: "runtime-exact" },

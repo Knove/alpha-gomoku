@@ -14,9 +14,10 @@
 //     const v  = tree.rootValue();           // mean backed-up value (display)
 //     tree.updateRoot(a);                    // reuse subtree for the next move
 //
-// ONLY interface difference from python: Predictor.predict applies softmax before
+// Interface differences from python: ①Predictor.predict applies softmax before
 // handing probs to the tree; our evalFn returns raw logits, so expandAndBackup
-// applies softmax here before masking/normalizing.
+// applies softmax here before masking/normalizing. ②python's add_noise flag is
+// expressed here by cfg.dirichletEps (0 turns the noise off).
 
 import { encode, legalMoves, outcome, play, type GameState } from "./game.ts";
 import { softmax } from "./nn.ts";
@@ -276,7 +277,7 @@ export class SearchTree {
         best = a;
       }
     }
-    return best;
+    return best === -1 ? 0 : best; // python np.argmax returns 0 when all are -inf
   }
 
   rootValue(): number {
