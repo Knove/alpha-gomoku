@@ -2,7 +2,7 @@
  *  节拍：思考题（数据从哪来）→ 控制/REST/WS/对局会话 → 例（页面—通道—来源匹配器）→
  *  两种浏览器里下棋 → 对证（server + web）→ 习题。 */
 import { useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -54,7 +54,6 @@ const ROUTES: RouteCard[] = [
 ]
 
 export default function L18() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -235,8 +234,7 @@ action = tree.best_action()`}</pre>
       />
 
       <Quiz
-        title="习题 · 过关解锁毕业课"
-        onAllCorrect={() => pass("l18")}
+        title="习题"
         questions={[
           {
             q: "总览页为什么同时使用 REST 和 WebSocket？",

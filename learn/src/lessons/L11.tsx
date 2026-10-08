@@ -2,7 +2,7 @@
  *  节拍：思考题（第一印象会错）→ 根到叶的选择/求值/扩展 → 逐层取负回传 →
  *  N/W/Q 与 root_value → 例 10-1 一次模拟 / 例 10-2 子树复用 → 对证 → 习题。 */
 import { useEffect, useRef, useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -39,7 +39,6 @@ function mulberry32(seed: number): () => number {
 }
 
 export default function L11() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -261,8 +260,7 @@ self._root_value_count = 0  # 展示统计整体清零；新根若已展开且�
       />
 
       <Quiz
-        title="习题 · 过关解锁第 11 课"
-        onAllCorrect={() => pass("l10")}
+        title="习题"
         questions={[
           {
             q: "叶节点站在白方视角给出 v_net=+1，回到上一层黑方选择的边时为什么记 −1？",

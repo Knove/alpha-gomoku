@@ -4,7 +4,7 @@
  *  例 6-2(同一局面三个输入平面并排，点格联动)→
  *  为什么刚好选三个 → 对证(game.py encode + replay.py 重建)→ 习题。 */
 import { useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -40,7 +40,6 @@ const PLANE_OPP = OBJ.map((v) => (v === 1 ? 1 : 0))
 const PLANE_COLOR = new Array<number>(81).fill(0) // 轮白 → 整张 0
 
 export default function L07() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -211,8 +210,7 @@ inputs = np.stack([cur, opp, color], axis=1).astype(np.float32)`}</pre>
       />
 
       <Quiz
-        title="习题 · 过关解锁第 7 课"
-        onAllCorrect={() => pass("l06")}
+        title="习题"
         questions={[
           {
             q: "本模型为什么不直接把一个 ±1 平面交给第一层卷积核？",

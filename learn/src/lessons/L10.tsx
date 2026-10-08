@@ -4,7 +4,7 @@
  *  对照开关换 weights-untrained 未训练网：baseline，训练前冻结的随机初始化）
  *  → 对证（model.py 双头 + forward）→ 习题。 */
 import { useEffect, useMemo, useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -51,7 +51,6 @@ function askNet(
 }
 
 export default function L10() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -232,8 +231,7 @@ def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
       />
 
       <Quiz
-        title="习题 · 过关解锁第 10 课"
-        onAllCorrect={() => pass("l09")}
+        title="习题"
         questions={[
           {
             q: "为什么「下哪」和「谁优」共用 1 个主干，而不训练 2 个网络？",

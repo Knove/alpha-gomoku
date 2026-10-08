@@ -2,7 +2,7 @@
  *  节拍：思考题 → 回放环 → 随机批次/min_buffer → 同步对称 → 精确 train_step →
  *  例 14-1/14-2 → 对证（ReplayBuffer/train_step/优化器）→ 小结 → 习题。 */
 import { useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -28,7 +28,6 @@ const argmaxPi = (pi: number[]) => {
 }
 
 export default function L15() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -209,8 +208,7 @@ def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
       />
 
       <Quiz
-        title="习题 · 过关解锁第 15 课"
-        onAllCorrect={() => pass("l14")}
+        title="习题"
         questions={[
           {
             q: "棋盘顺时针转 90° 时，π 和 z 应分别怎样处理？",

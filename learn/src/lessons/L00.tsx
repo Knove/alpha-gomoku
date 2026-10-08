@@ -1,8 +1,8 @@
 /** 序 · 没人教过它下棋。
  *  节拍：总问题 → 18 课路线图 → 来源契约 → 真实自我对局回放 → 开始第 1 课。
  *  回放不重算搜索：棋盘逐手重建，π/rootValue 直接读真实训练记录。 */
-import { useEffect, useMemo, useRef, useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { useEffect, useMemo, useState } from "react"
+import { Quiz } from "../framework/quiz"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
 import { SystemPreview } from "../framework/system-preview"
@@ -14,8 +14,6 @@ const GAME = REAL.selfplayGame
 const LEN = GAME.moves.length
 
 export default function Prologue() {
-  const pass = usePassLesson()
-  const entered = useRef(false)
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -127,16 +125,7 @@ export default function Prologue() {
         }
       />
 
-      <a
-        className="btn primary mt-10"
-        href="#/l01"
-        onClick={() => {
-          if (!entered.current) {
-            entered.current = true
-            pass("prologue") // 序不设习题：点按钮即过关，解锁第 1 课
-          }
-        }}
-      >
+      <a className="btn primary mt-10" href="#/l01">
         开始第 1 课 →
       </a>
     </section>

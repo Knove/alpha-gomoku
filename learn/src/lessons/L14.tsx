@@ -2,7 +2,7 @@
  *  节拍：选择分数(Q+U)→ 例 11-1 三行手算 → π/根噪声/温度 → 例 11-2 真权重预算 →
  *  对证(SearchTree)→ 本章小结 → 习题。 */
 import { useEffect, useRef, useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -37,7 +37,6 @@ function mulberry32(seed: number): () => number {
 const coord = (a: number) => `(${a % 9},${Math.floor(a / 9)})`
 
 export default function L14() {
-  const pass = usePassLesson()
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
       <div className="eyebrow mb-3">第 11 课</div>
@@ -226,8 +225,7 @@ if total <= 0:
       />
 
       <Quiz
-        title="习题 · 过关解锁第 12 课"
-        onAllCorrect={() => pass("l11")}
+        title="习题"
         questions={[
           {
             q: "一条边 Q 很高，但只访问过 1 次；另一条边 Q 稍低，却已访问 20 次。为什么 PUCT 不直接永远选择第一条？",

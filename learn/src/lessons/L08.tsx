@@ -3,7 +3,7 @@
  *  归纳偏置 / 48 个是训练学出来的)→ 例 7-1(滑窗 + 扫全盘热力图，conv2d 真算)→
  *  例 7-2(真卷积核墙：weights-best.json 前 8 个)→ 对证(model.py L33)→ 习题。 */
 import { useEffect, useMemo, useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -34,7 +34,6 @@ const SCORES: number[] = (() => {
 })()
 
 export default function L08() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -218,8 +217,7 @@ color = np.full_like(cur, 1.0 if game.current_player == BLACK else 0.0)`}</pre>
       />
 
       <Quiz
-        title="习题 · 过关解锁第 8 课"
-        onAllCorrect={() => pass("l07")}
+        title="习题"
         questions={[
           {
             q: "横三连卷积核盖在己方三连正上方得 3；窗口往右挪一格只得 2。为什么？",

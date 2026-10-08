@@ -4,7 +4,7 @@
  *  → 例 5-2(折线拼形：ReLU(t)+ReLU(−t)=|t| 徒手拖)→ 求和之后再变换
  *  → 对证(model.py 卷积求和之后接非线性变换)→ ChapterEnd → 习题。 */
 import { useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -22,7 +22,6 @@ const YES: [number, number][] = [
 ]
 
 export default function L05() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -179,8 +178,7 @@ self.stem = nn.Sequential(
       />
 
       <Quiz
-        title="习题 · 过关解锁第 6 课"
-        onAllCorrect={() => pass("l05")}
+        title="习题"
         questions={[
           {
             q: "为什么线性机器切不开「均衡 / 一边倒」这四点？",

@@ -2,7 +2,7 @@
  *  节拍：思考题→样本三要素（落子前 s 与 π、终局后补 z）→例 12-1 真实样本拆开看→
  *  多局同时推进（例 12-2）→对证→习题。 */
 import { useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -36,7 +36,6 @@ function rootVisits(visits: number, prob: number): number | null {
 }
 
 export default function L12() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -250,8 +249,7 @@ for pid, trees in groups.items():
       />
 
       <Quiz
-        title="习题 · 过关解锁第 13 课"
-        onAllCorrect={() => pass("l12")}
+        title="习题"
         questions={[
           {
             q: "为什么 π 的分母不能用页面显示的 top3 访问数之和？",

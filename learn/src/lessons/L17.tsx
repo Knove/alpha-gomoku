@@ -3,7 +3,7 @@
  *  例（产物分拣台）→ 对证（storage.py/trainer.py）→ 习题。 */
 import { useState } from "react"
 import { LessonGuide } from "../framework/lesson-guide"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { ChapterEnd, Def } from "../framework/def"
 
@@ -27,7 +27,6 @@ const ARTIFACTS = [
 type ArtifactId = (typeof ARTIFACTS)[number]["id"]
 
 export default function L17() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -185,8 +184,7 @@ fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)`}</pre>
       />
 
       <Quiz
-        title="习题 · 过关解锁第 18 课"
-        onAllCorrect={() => pass("l17")}
+        title="习题"
         questions={[
           {
             q: "status.json 为什么先写临时文件，再用 os.replace 换上？",

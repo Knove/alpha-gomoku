@@ -2,7 +2,7 @@
  *  节拍：思考题（损失降=棋力涨？）→ 角色(best/latest/baseline/challenger)→
  *  受控对战（换先后手/开局采样/和棋半分）→ 晋升计算器 → 真实对局 → 对证 → 习题。 */
 import { useEffect, useMemo, useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -46,7 +46,6 @@ const FOCUSED = [1, 5, 7, 9, 13, 21].map((i) => SP.moves[i]) // (1,0)(5,4)(6,1)(
 const coord = (x: number, y: number) => `(${x},${y})`
 
 export default function L13() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -266,8 +265,7 @@ sample_temperature=True, temp_threshold=max(2, cfg.temp_threshold // 2),`}</pre>
       />
 
       <Quiz
-        title="习题 · 过关解锁第 16 课"
-        onAllCorrect={() => pass("l15")}
+        title="习题"
         questions={[
           {
             q: "为什么预先设定的晋升线不能被读成「已经统计证明新网络更强」？",

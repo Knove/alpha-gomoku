@@ -20,28 +20,33 @@ test("课程清单固定为序 + 18 课 + 毕业，ID/编号唯一", () => {
   assert.equal(new Set(CURRICULUM.map((unit) => unit.num)).size, CURRICULUM.length)
 })
 
-test("每课依赖存在且只指向更早课程，必修契约完整", () => {
-  const position = new Map(CURRICULUM.map((unit, index) => [unit.id, index]))
+test("每课必修契约完整：outcomes/sources 齐全且无未决 drift", () => {
   for (const unit of CURRICULUM) {
     assert.ok(unit.outcomes.length > 0, `${unit.id}: outcomes`)
     assert.ok(unit.sources.length > 0, `${unit.id}: sources`)
     assert.equal(unit.sources.some((source) => source.fidelity === "drift"), false, `${unit.id}: unresolved drift`)
-    for (const prerequisite of unit.prerequisites) {
-      assert.ok(CURRICULUM_BY_ID.has(prerequisite), `${unit.id}: missing ${prerequisite}`)
-      assert.ok(position.get(prerequisite)! < position.get(unit.id)!, `${unit.id}: forward dependency ${prerequisite}`)
-    }
+    assert.ok(CURRICULUM_BY_ID.has(unit.id), `${unit.id}: registered`)
   }
 })
 
-test("课程组件、过关 ID 与源码引用全部存在", () => {
+test("教材无学习管理机制：不设锁、勾、进度与过关接线", () => {
+  for (const file of ["App.tsx", "framework/quiz.tsx", "framework/curriculum.ts"]) {
+    const body = readFileSync(`${repoRoot}/learn/src/${file}`, "utf8")
+    for (const banned of ["usePassLesson", "onAllCorrect", "prerequisites", "contentVersion", "completion-badge", "lock-badge", "lesson-locked"]) {
+      assert.equal(body.includes(banned), false, `${file}: ${banned}`)
+    }
+  }
+  assert.equal(existsSync(`${repoRoot}/learn/src/framework/progress.ts`), false, "progress.ts 已删除")
+})
+
+test("课程组件与源码引用全部存在", () => {
   const lessonSource = readFileSync(`${repoRoot}/learn/src/framework/lesson.ts`, "utf8")
   for (const unit of CURRICULUM) {
     const componentMatch = lessonSource.match(new RegExp(`${unit.id}: (L\\d+|Prologue|Graduation)`))
     assert.ok(componentMatch, `${unit.id}: component mapping`)
     const component = componentMatch[1]
     const componentPath = component === "Prologue" ? "L00" : component === "Graduation" ? "L99" : component
-    const body = readFileSync(`${repoRoot}/learn/src/lessons/${componentPath}.tsx`, "utf8")
-    if (unit.id !== "graduation") assert.match(body, new RegExp(`pass\\("${unit.id}"\\)`), `${unit.id}: pass ID`)
+    readFileSync(`${repoRoot}/learn/src/lessons/${componentPath}.tsx`, "utf8")
     for (const source of unit.sources) {
       const sourcePath = `${repoRoot}/${source.path}`
       assert.equal(existsSync(sourcePath), true, `${unit.id}: ${source.path}`)

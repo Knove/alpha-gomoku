@@ -4,7 +4,7 @@
  *  例 8-2(真特征图墙：traceNet + weights-best,stem 与三个残差块各取前 6 通道)→
  *  对证(model.py ResBlock / blocks)→ 习题。 */
 import { useEffect, useMemo, useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -26,7 +26,6 @@ const STATE: GameState = (() => {
 })()
 
 export default function L09() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -209,8 +208,7 @@ self.blocks = nn.Sequential(*[ResBlock(channels) for _ in range(res_blocks)])`}<
       />
 
       <Quiz
-        title="习题 · 过关解锁第 9 课"
-        onAllCorrect={() => pass("l08")}
+        title="习题"
         questions={[
           {
             q: "7 层的感受野怎么算？",

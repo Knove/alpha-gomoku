@@ -2,7 +2,7 @@
  *  节拍：思考题(黑白两套棋理的代价)→ 规范视角(例 2-1 视角开关)
  *  → 对证(game.py canonical_board)→ ChapterEnd → 习题。 */
 import { useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -32,7 +32,6 @@ const OBJ: number[] = (() => {
 })()
 
 export default function L02() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -148,8 +147,7 @@ export default function L02() {
       />
 
       <Quiz
-        title="习题 · 过关解锁第 3 课"
-        onAllCorrect={() => pass("l02")}
+        title="习题"
         questions={[
           {
             q: "轮到白棋走时，规范视角（canonical）对数组做了什么操作？",

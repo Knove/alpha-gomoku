@@ -6,7 +6,7 @@ import Board from "../lib/board"
 import { emptyBoard, outcome, play, type GameState } from "../engine/game"
 import { loadNet, type WeightsJson } from "../engine/model"
 import { SearchTree, type MctsConfig } from "../engine/mcts"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
 import { loadWeights } from "../lib/weights"
@@ -67,7 +67,6 @@ function replayState(moves: number[]): GameState {
 }
 
 export default function Graduation() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -210,7 +209,6 @@ export default function Graduation() {
       <Quiz
         title="习题 · 毕业诊断：四个新情境，逐题解释断链位置"
         questions={GRADUATION_DIAGNOSTIC}
-        onAllCorrect={() => pass("graduation")}
       />
     </section>
   )

@@ -1,7 +1,7 @@
 /** 第 16 课 · 管线：一轮训练怎样运行并恢复。
  *  节拍：思考题（顺序与中断）→ 两种「继续」→ 逐段推进真实管线 → 崩溃恢复推演 → 对证 → 习题。 */
 import { useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -40,7 +40,6 @@ const STAGES = [
 ] as const
 
 export default function L16() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -249,8 +248,7 @@ if iteration % cfg.keep_checkpoint_every == 0:
       />
 
       <Quiz
-        title="习题 · 过关解锁第 17 课"
-        onAllCorrect={() => pass("l16")}
+        title="习题"
         questions={[
           {
             q: "新进程发现 latest.pt 和 buffer.npz 后，实际恢复了什么？",

@@ -2,7 +2,7 @@
  *  节拍：思考题 → 两笔真实损失 → 双权重手推(3 / 1 / 0.25)→ 链式四环 →
  *  门关死/梯度消失/残差捷径 → 例 13-1(拖 w₁/w₂ 前向反向联动)→ 对证(train_step)→ 小结 → 习题。 */
 import { useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -16,7 +16,6 @@ const W1_0 = 0.5
 const W2_0 = 1.5
 
 export default function L06() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -210,8 +209,7 @@ optimizer.step()`}</pre>
       />
 
       <Quiz
-        title="习题 · 过关解锁第 14 课"
-        onAllCorrect={() => pass("l13")}
+        title="习题"
         questions={[
           {
             q: "反向传播（backpropagation）在干什么？",

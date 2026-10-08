@@ -2,7 +2,7 @@
  *  节拍：思考题 → 正文(配对/损失/梯度/学习率，定义框命名)→
  *  例 3-1(单权重演示)→ 例 3-2(梯度下降步进器)→ 对证(train.py optimizer)→ 小结与预告 → 习题。 */
 import { useEffect, useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -29,7 +29,6 @@ const DUAL: number[] = (() => {
 const loss = (w: number) => (w * X - Z) * (w * X - Z)
 
 export default function L03() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -258,8 +257,7 @@ def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
       />
 
       <Quiz
-        title="习题 · 过关解锁第 4 课"
-        onAllCorrect={() => pass("l03")}
+        title="习题"
         questions={[
           {
             q: "查表法（把每种局面的答案都存起来）的两个致命缺陷是？",

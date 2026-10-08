@@ -2,7 +2,7 @@
  *  节拍：思考题(表示法)→ 数组与动作编号(例 1-1 点格子)→ 判胜计数(例 1-2)
  *  → 对证(game.py)→ ChapterEnd → 习题。 */
 import { useMemo, useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -12,7 +12,6 @@ import { NumTable } from "../lib/numview"
 const EMPTY_BOARD: number[] = new Array<number>(81).fill(0)
 
 export default function L01() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -207,8 +206,7 @@ def _is_win_at(self, y: int, x: int) -> bool:
       />
 
       <Quiz
-        title="习题 · 过关解锁第 2 课"
-        onAllCorrect={() => pass("l01")}
+        title="习题"
         questions={[
           {
             q: "黑方在 (4,4) 落一子后，数组里发生了什么？",

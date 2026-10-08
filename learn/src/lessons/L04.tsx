@@ -3,7 +3,7 @@
  *  例 4-1(三输入加权求和演示：真权重，拖缩放系数)→
  *  例 4-2(线性的单调性：直线画不出 V)→ 对证(model.py stem)→ 小结与预告 → 习题。 */
 import { useEffect, useMemo, useState } from "react"
-import { Quiz, usePassLesson } from "../framework/quiz"
+import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
@@ -35,7 +35,6 @@ const wIdx = (filter: number, plane: number, i: number) =>
   (filter * 3 + plane) * 9 + i
 
 export default function L04() {
-  const pass = usePassLesson()
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
@@ -195,8 +194,7 @@ self.stem = nn.Sequential(
       />
 
       <Quiz
-        title="习题 · 过关解锁第 5 课"
-        onAllCorrect={() => pass("l04")}
+        title="习题"
         questions={[
           {
             q: "本模型为什么用「对应相乘再相加」做基础运算？",
