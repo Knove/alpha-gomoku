@@ -51,7 +51,7 @@ export default function L14() {
           "把全部根访问数换算成比例（加起来等于 1），得到策略目标 π",
           "根噪声改的是搜索期的根先验，温度管的是搜索完之后的落子",
         ]}
-        takeaway="P 引路、Q 记成绩、N 记证据量；PUCT 决定下一次查哪里。π 总结整次搜索；实际动作再按对局前后期采样，或取最大访问数。"
+        takeaway="你能按 PUCT 手算下一次选边，把根访问数归一成 π；配置噪声与温度的开关组合，指出各自落在自我对弈的哪一段。"
         boundary="F5 是刻意构造的失败诊断局面，不是训练记录。演示使用浏览器复现、真正导出的权重和固定随机序列；它和真正训练用的是同一套规则，但预算、精度和执行方式经过浏览器适配。"
       />
 
@@ -106,7 +106,7 @@ export default function L14() {
         </p>
         <p>
           公式右边第一项是已有成绩，第二项就是探索奖励。这族「多试还没试够的路」的选择规则叫 UCB（置信上界，upper confidence bound）；不带先验 P 的标准版叫 UCB1。
-          <span className="mono">ΣN</span> 是这个岔口全部候选被走过的总次数；探索幅度用 √ΣN，它是 UCB1 置信半径（√(2·ln ΣN / N(a))）的变体：这里改用先验 P 定各边权重、用 √ΣN 作随预算增长的幅度；平方根让探索奖励随总预算缓慢增加；分母 <span className="mono">1+N(a)</span> 保证没走过的边（N=0）探索分有限：该边的探索分在 N=0 处取自身最大值；自己的 N 增加时递减（别的边被访问反而让 √ΣN 变大），比较都发生在同一个 ΣN 之下，让已经常走的路逐渐失去这份奖励（不同边还各乘自己的 P，所以 P 很小的未访问边未必压过 P 大的已访问边）。
+          <span className="mono">ΣN</span> 是这个岔口全部候选被走过的总次数。探索分怎么读，分三段：先验 P 给各边打底，√ΣN 让探索奖励随总预算缓慢增加，分母 <span className="mono">1+N(a)</span> 让走过的边慢慢失去这份奖励。具体说：没走过的边（N=0）探索分取自身最大值；自己的 N 增加时递减，别的边被访问反而让 √ΣN 变大。比较都发生在同一个 ΣN 之下，所以已经常走的路逐渐失去奖励。不同边还各乘自己的 P，P 很小的未访问边未必压过 P 大的已访问边。这套幅度相当于 UCB1 置信半径（√(2·ln ΣN / N(a))）的变体：标准版用对数增长，这里改用 √ΣN。
           <span className="mono">c</span> 是探索强度权重：越大越偏爱少走的路；本项目配置固定为 1.5。
           例 11-1 的三行使用同一个 <span className="mono">c=1.5、ΣN=16</span>，逐行计算后选择总分最高的一条。
         </p>
@@ -178,6 +178,9 @@ export default function L14() {
       <BudgetLab />
 
       <Ledger title="SearchTree._puct_select / root_pi / update_root">
+        <p className="mb-2 text-sm">
+          <strong>这段在证什么：</strong>PUCT 选点是 _puct_select 的已有成绩加探索奖励；root_pi 把根访问数归一成 π（温度分支从略）；update_root 复用子树后 ΣN 带旧访问数。
+        </p>
         <div className="codewalk">
           <pre>{`# _puct_select：历史平均 + 探索奖励；非法动作永远不选
 legal = game.legal_moves()

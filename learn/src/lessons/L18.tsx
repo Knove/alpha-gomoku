@@ -69,8 +69,8 @@ export default function L18() {
           "REST 交付完整快照，WebSocket 负责增量交付",
           "React 各页面按用途组合这些数据，但不参与训练更新",
         ]}
-        takeaway="浏览器不直接碰训练器，所有数据都经 server 转手。run 目录是唯一事实来源，REST 给完整快照、WebSocket 给新增消息；人机对战另开会话加载 checkpoint。"
-        boundary="本课学习这个项目的数据约定，不展开 FastAPI、React、HTTP 或 WebSocket 的通用知识。"
+        takeaway="你能接线一条 REST+WS 数据通路并验收网页上每个数字的来源：run 目录是唯一事实来源，浏览器不直接碰训练器。"
+        boundary="本课学习这个项目的数据约定与接线：文件、端点、页面各管哪一段；FastAPI、React、HTTP、WebSocket 的通用知识不展开，框架细节以仓库代码为准。"
       />
 
       <Quiz
@@ -104,6 +104,15 @@ export default function L18() {
           pause 和 resume 只写命令。stop 写完命令后，server 等训练器自己收尾，最多等 10 秒；等不到收尾完成才代为结束进程。训练器读命令的时机分两种：pause 和 run（继续）只在轮边界这类稳定点生效，
           stop 在自我对弈的下棋途中也会每隔一会儿查看一次。
           server 还会结合它启动的那个训练器程序的状态与新鲜心跳，判断训练器是否真的活着，不能只看一个旧文件。
+        </p>
+        <p>
+          这套接线的代码骨架：<span className="mono">server/</span> 目录下
+          <span className="mono">app.py</span> 定义路由与静态托管，
+          <span className="mono">play.py</span> 管理人机对战会话，
+          <span className="mono">tail.py</span> 尾读历史文件；网页端读 REST 快照、订 WS 增量，
+          按 hash 选页。启动有两种：<span className="mono">scripts/dev.sh</span>
+          （server、trainer、vite 一起起，开发用）和 <span className="mono">scripts/start.sh</span>
+          （先构建 web，单进程在 :8000 同时供 API 与页面，验收用）。
         </p>
         <Def term="REST" en="Representational State Transfer">
           网页按固定地址向 server 问一份完整数据的取用方式。每次请求拿到的是当前完整答案，
@@ -166,6 +175,9 @@ export default function L18() {
       <RouteMatcher />
 
       <Ledger title="页面名称不是来源，数据链才是来源">
+        <p className="mb-2 text-sm">
+          <strong>这段在证什么：</strong>网页上每个数字的来源链就是下面三段：server 公开资源（REST+WS）、PlayManager 人机对战链、React 按 hash 选页。
+        </p>
         <div className="prose">
           <p>
             下面三段是真实边界的最小骨架。按顺序读：server 先公开资源，WebSocket 再补实时帧，
@@ -201,7 +213,7 @@ tree = SearchTree(game, cfg, add_noise=False, rng=self._rng)
 #（省略模拟主循环：反复 select → 就地求值 → expand_and_backup）
 action = tree.best_action()`}</pre>
           <p className="mt-3">
-            checkpoint 名称决定使用哪份权重；修改时间决定缓存是否过期；没有根噪声的搜索给出 AI 应手。
+            checkpoint 名称决定使用哪份权重。修改时间决定缓存是否过期。没有根噪声的搜索给出 AI 应手。
             这条会话链与训练写入链彼此独立。
           </p>
         </div>

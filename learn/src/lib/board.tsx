@@ -162,7 +162,7 @@ export default function Board({
             if (h <= 0.005 || board[i] !== 0) return null
             const wn = h / maxHeat
             return (
-              <circle key={i} cx={px(i % N)} cy={py(Math.floor(i / N))}
+              <circle key={i} className="motion-r" cx={px(i % N)} cy={py(Math.floor(i / N))}
                 r={R * (0.5 + 0.5 * wn)} style={{ fill: "var(--heat)" }}
                 opacity={0.08 + wn * 0.6} />
             )

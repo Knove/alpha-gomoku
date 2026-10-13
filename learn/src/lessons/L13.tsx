@@ -62,7 +62,7 @@ export default function L13() {
           "公布局数与结果的不确定度",
           "用固定参照网衡量长期进步",
         ]}
-        takeaway="损失、访问数集中、单局巧合都不是充分的棋力证据；控制好条件的对战（交换先后手、换不同开局）提供更直接的证据。"
+        takeaway="你能配置一场受控对战（交换先后手、开局按 π 采样），并按得分率执行 55% 晋升判定；损失与访问数集中都不当棋力证据。"
         boundary="少量对局仍有运气，所以竞技场只能提供有限证据；局数、规则和对手都会影响结论强度。"
       />
 
@@ -226,6 +226,9 @@ export default function L13() {
       </div>
 
       <Ledger title="arena.py play_match（计分与开局采样）→ pipeline.py run（晋升）">
+        <p className="mb-2 text-sm">
+          <strong>这段在证什么：</strong>计分 1/0.5/0、55% 过线、开局前几手按 π 采样，分别落在 play_match 的计分行、pipeline 的晋升判断与竞技场的采样开关。
+        </p>
         <div className="codewalk">
           <pre>{`# arena.py L75  得分率按「胜 + 和棋×0.5」计(代码字段名 win_rate_a；wins=胜局，draws=和局，total=总局数)
 "win_rate_a": (wins_a + 0.5 * draws) / total,`}</pre>
@@ -246,7 +249,10 @@ sample_temperature=True, temp_threshold=max(2, cfg.temp_threshold // 2),`}</pre>
           ②promote_threshold 就是那条 55% 线，判完当场存新 best；
           ③这个 fast 演示配置里，自我对弈前 10 手采样，竞技场取 temp_threshold 的一半
           （至少 2 手），这里是 5 手；这是配置选择，不是算法常量。竞技场只需让棋局适度分叉，不需要
-          自我对弈那样的根噪声。
+          自我对弈那样的根噪声。同一调用的上一行还有 <span className="mono">simulations=cfg.arena_simulations</span>：
+          竞技场每手的搜索预算（演示配置 30、默认配置 50）与自我对弈的
+          <span className="mono">mcts_simulations</span>（演示 40、默认 100）是两个独立配置项，
+          混用会让两边用不一样的思考量比棋力。
         </p>
       </Ledger>
 
@@ -395,12 +401,12 @@ function PromoCalc() {
           也就是说，2 个网络一样强，大约每 10 回里有 3 回半会纯靠运气赢到 4 局及以上。
         </div>
         <div className="reveal-box mt-3 text-sm leading-relaxed">
-          和棋也算半分：3 胜 1 和 2 负 = 58.3%，一样过线。含和棋的算法是三结果多项分布：
+          和棋也算半分：3 胜 1 和 2 负 = 58.3%，一样过线。含和棋的算法要把三类结果（胜/和/负）的排法全数出来：干的事就是「数排法 × 乘概率」，道理简单：
           设每局胜、和、负的概率为 p、d、1−p−d，六局里胜 W 局、和 D 局、负 6−W−D 局的概率是
           6!/(W!·D!·(6−W−D)!) × p^W × d^D × (1−p−d)^(6−W−D)，
           把所有满足 2W+D ≥ 7（即得分率 ≥ 55%）的组合加起来就是过线概率。
           例：五子棋的和棋是盘满 81 手仍无五连；d = 0.2 只是随手举的假设值，不是实测和棋率。双方等强（p = (1−d)/2）、和棋率 d = 0.2 时，过线概率约 41%，
-          高于 34% 运气线。这条曲线先升后降：低和棋率时，和棋给半分、凑线的组合变多（6 局里 3 胜 1 和 2 负，2W+D=7 就过线，比凑 4 胜容易），过线概率反而升到约 41%（d≈0.2 最高）；和棋再多，得分越挤向五成，才回落（d = 0.8 时约 30%）。
+          高于 34% 运气线。这条曲线先升后降。低和棋率时，和棋给半分、凑线的组合变多：6 局里 3 胜 1 和 2 负，2W+D=7 就过线，比凑 4 胜容易，过线概率反而升到约 41%（d≈0.2 最高）。和棋再多，得分越挤向五成，才回落（d = 0.8 时约 30%）。
           所以 6 局的晋升线 55% 只比五五开高一档，是工程上的折中，不是强证据；真要证明棋力得打几百局。
           6 局过线只说明改进回路在运转（能自动换 best），并不说明棋力已足够。
         </div>
@@ -532,7 +538,7 @@ function ArenaReplay() {
       <figcaption className="figure-cap">
         <span className="cap-no">例 15-2</span>
         {ARENA.id}，共 {ALEN} 手，黑胜。局面由引擎逐手重建，π 与 root_value 读取真实竞技场记录；
-        root_value 是搜索汇总的记录值，不是训练时重新计算的 v_net。
+        root_value 是搜索汇总的记录值，不是训练时重新计算的 v_net。播放下一手前先预测 top 访问点会落在哪，再推进验证。
       </figcaption>
     </figure>
   )

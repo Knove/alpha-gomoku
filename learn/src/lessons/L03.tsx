@@ -37,14 +37,14 @@ export default function L03() {
 
       <LessonGuide
         question="为什么机器不必背下每一种棋局，也能从输赢里越练越会下？"
-        why="先弄清机器里什么能改、何时改、改了为什么会影响判断，后面的细节才不会只剩一串名词。"
+        why="先弄清机器里什么能改、何时改、改了为什么会影响判断，后面的细节才有落脚处。"
         chain={[
           "棋盘特征进入固定的计算骨架",
           "特征与权重一对一配对，加权求和成判断",
           "终局结果 z 指出判断错了多少，告诉权重该微调哪边",
           "更准的判断配合搜索变成更好的走法，长期表现为棋力",
         ]}
-        takeaway="权重是每个特征的分量，与特征一对一配对；它决定机器如何判断，但本身不是棋力。训练时才调权重，下棋时只使用已经调好的权重。"
+        takeaway="你能手算一次梯度下降更新，并写出学习率过大过小的后果；训练时调权重、下棋时只读权重，权重本身不是棋力。"
         boundary="本课把真实网络约 14.5 万个权重缩到一对「特征 × 权重」来观察。真实机器同时学习策略目标和价值目标（两种目标的答案分别是搜索留下的 π 与终局 z）；第 4 课扩成 3×3 窗口内的 9 对，第 7 课扩成全盘滑窗的 27 对。"
       />
 
@@ -98,7 +98,7 @@ export default function L03() {
 
         <h3>先摆出一对：特征 x = 2 和它的权重 w</h3>
         <p>
-          本课的玩具只提一个问题：「己方三连有几条？」计数口径是出题人定的：只数横竖、不数斜线（判胜数四方向，这里刻意简化）；同一行或同一列上连续三颗己方子、两端不再延伸，计 1 条（四连不计：恰三的口径里找不出「恰三」的一段；两端是否被堵死也不论，死三活三同样计 1）。棋局<strong>规定</strong>横一条、竖一条，
+          本课的玩具只提一个问题：「己方三连有几条？」计数口径是出题人定的，三条规矩。只数横竖、不数斜线（判胜数四方向，这里刻意简化）。同一行或同一列上连续三颗己方子、两端不再延伸，计 1 条；四连不计，两端是否被堵死也不论（死三活三同样计 1）。棋局<strong>规定</strong>横一条、竖一条，
           共两条，这个问题的答案就是 <span className="mono">x = 2</span>。两条三连不是
           两个特征，它们是同一个问题的计数对象：问题问的是总数，答案只是一个数。
           棋盘是答案的来源，答案才是特征值。数三连这一步是人替机器做的；真实网络不请人
@@ -166,12 +166,13 @@ export default function L03() {
         <p>
           这道单权重题不必真的左右各试一次。先用数字试一小步：w=0 时把 w 挪到 0.001，
           损失从 1 变成 0.996004，「损失变化 ÷ w 变化」约是 −3.996，近似 −4。
-          这个「损失随 w 变化的速度」有精确写法，叫求导（对…求导，读作求对…的变化率）。
+          这个「损失随 w 变化的速度」有精确写法，叫求导（对…求导，读作求对…的变化率）。它把刚才那个「损失变化 ÷ w 变化」写成通用公式，让你不用每次都挪 0.001 试一遍。
           把 <span className="mono">r = wx</span> 代入损失再对 <span className="mono">w</span> 求导，
-          走两步（链式法则）：对 r 求导得 2(r−z)，再乘 r 对 w 的变化率 x，两步相乘得
-          2(wx−z)·x，即 <span className="mono">2x(wx−z)</span>。w=0、x=2、z=1 代入正好 −4，
+          结果是 <span className="mono">2x(wx−z)</span>。它怎么来的？走两步（链式法则）：
+          先对 r 求导得 2(r−z)，再乘 r 对 w 的变化率 x，两步相乘就是 2(wx−z)·x。
+          w=0、x=2、z=1 代入正好 −4，
           与上面的试算对上；它的正负给方向，大小表示变化有多快。作为对照：绝对值损失 |r−z| 对 w 的变化率大小恒为 |x|（符号看误差方向），所以它的步子不随接近答案而变轻。公式里 x=0（己方一条三连也没有）时梯度恒为 0：这样的样本推不动 w，
-          要靠别的样本来教；若某特征在训练集里恒为 0，它的权重收不到样本梯度，只有权重衰减（每次更新把权重往零轻拽一点的做法，对证一节展开）会把它慢慢拽向 0；那不是学习信号，救不活这样的零特征，它等于白带着。
+          要靠别的样本来教。若某特征在训练集里恒为 0，它的权重收不到样本梯度，只有权重衰减（每次更新把权重往零轻拽一点的做法，对证一节展开）会把它慢慢拽向 0。那不是学习信号，救不活这样的零特征，它等于白带着。
         </p>
         <Def term="反向传播" en="backpropagation">
           真实网络用来把错误沿许多层倒着传给每个权重的算法：按链式法则
@@ -200,8 +201,8 @@ export default function L03() {
           下棋时走「棋局 → 已调好的权重给出判断 → 把判断变成走法」。
         </Def>
         <p>
-          许多轮自动纠错后，判断更准，长期的赢棋能力通常随之提高；但损失降不必然等于实战棋力涨。这就是机器「自己变准」的全部机制，
-          不是魔法，也不是把棋力塞进某一个权重。
+          许多轮自动纠错后，判断更准，长期的赢棋能力通常随之提高；但损失降不必然等于实战棋力涨。这就是机器「自己变准」的全部机制：
+          一步一步改权重，棋力由全体权重共同承担。
         </p>
       </div>
 
@@ -210,6 +211,9 @@ export default function L03() {
       <Descender />
 
       <Ledger title="train.py · make_optimizer（梯度下降加三件配套）">
+        <p className="mb-2 text-sm">
+          <strong>这段在证什么：</strong>例 3-2 迈出的梯度下降步，真训练由 make_optimizer 这几行搭好：lr 定步幅，动量与 Nesterov 管惯性，权重衰减把权重往零轻拽。
+        </p>
         <div className="codewalk">
           <pre>{`# train.py L13-20  真训练用的优化器:梯度下降 + 三件配套(momentum、nesterov、weight_decay)
 def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
@@ -282,10 +286,10 @@ def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
               "六个档位当然可以全试一遍；难点在真实机器有约 14.5 万个可学数字，组合数会爆炸。连续权重让训练能问「轻轻往这边调，损失是升还是降？」，在平滑的局部里得到方向，而不是枚举所有组合。",
           },
           {
-            q: "学习率（lr）调大会怎样？",
+            q: "在例 3-2 里把 lr 从 0.05 拉到 0.4，连走二十步会看到什么？",
             options: [
               "只会更快到最低点，越大越好",
-              "步子大了会跨过最低点、来回弹；本玩具（x=2）有两个阈值：超过 0.125 开始过冲弹跳，超过 0.25 才越弹越发散（正好 0.125 是一步到位，正好 0.25 是永久等幅来回）",
+              "会越弹越发散、小球飞出画外。本玩具（x=2）有两个阈值：超过 0.125 先开始过冲弹跳，超过 0.25 才越发散（正好 0.125 是一步到位，正好 0.25 是永久等幅来回）",
               "没有影响，只是一个写法习惯",
             ],
             answer: 1,
@@ -413,7 +417,7 @@ function TargetRange() {
 
             {mode === "knob" ? (
               <g data-qa="knob-dot">
-                <circle cx={xOf(w)} cy={yOf(l)} r={6} style={{ fill: "var(--accent-deep)" }} />
+                <circle className="motion-pos" cx={xOf(w)} cy={yOf(l)} r={6} style={{ fill: "var(--accent-deep)" }} />
                 <text x={xOf(w)} y={yOf(l) - 10} fontSize={10} textAnchor="middle" className="num"
                   style={{ fill: "var(--accent-deep)" }}>
                   {l.toFixed(2)}
@@ -574,7 +578,7 @@ function Descender() {
         <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
           下面这道曲线只有一个最低点，研究的是另一个问题：方向已经知道以后，一步该走多远。
           先选学习率 <span className="mono">lr</span>，再点「走一步」或「自动」：0.05 是小步，
-          0.2 会跨过最低点后折返，0.35 则大到越走越远。观察的重点不是背住数字，而是看清
+          0.2 会跨过最低点后折返，0.35 则大到越走越远。观察的重点是看清
           <strong>太小走得慢、合适才能靠近、太大会冲过头</strong>。
         </p>
       </div>
@@ -603,11 +607,14 @@ function Descender() {
                 .join(" ")}
               fill="none" style={{ stroke: "var(--fg-faint)" }} strokeWidth={1} />
             {hist.map((wv, i) =>
-              wv >= WMIN - 0.4 && wv <= WMAX + 0.4 ? (
-                <circle key={i} cx={xOf(wv)} cy={yOf(loss(wv))} r={i === n ? 5 : 1.6}
-                  style={{ fill: i === n ? "var(--accent-deep)" : "var(--fg-faint)" }} />
+              i < n && wv >= WMIN - 0.4 && wv <= WMAX + 0.4 ? (
+                <circle key={i} cx={xOf(wv)} cy={yOf(loss(wv))} r={1.6}
+                  style={{ fill: "var(--fg-faint)" }} />
               ) : null,
             )}
+            <circle className="motion-pos" data-qa="descend-ball"
+              cx={xOf(hist[n])} cy={yOf(loss(hist[n]))} r={6}
+              style={{ fill: "var(--accent-deep)" }} />
             {flew && (
               <text x={CW - CPR - 4} y={CPT + 10} fontSize={10} textAnchor="end"
                 style={{ fill: "var(--accent-deep)" }}>

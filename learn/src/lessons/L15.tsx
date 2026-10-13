@@ -43,7 +43,7 @@ export default function L15() {
           "每张棋盘与 π 同步做一种旋转或镜像",
           "重新前向、算 2 笔损失、反传并更新权重",
         ]}
-        takeaway="回放池决定从哪些旧样本抽样，数据增强决定怎样等价改写样本，train_step 才负责重新前向、计算损失并更新。"
+        takeaway="你能写出回放池抽批与棋盘、π 的同步增广，并复现一次 train_step 的重新前向、两笔损失与更新。"
         boundary="一条真实记录只贡献一批损失里的一小份梯度，不能说某份 checkpoint 或 best 更换全是它的功劳。"
       />
 
@@ -128,6 +128,9 @@ export default function L15() {
       <SymmetryTable />
 
       <Ledger title="replay.py · ReplayBuffer / train.py · train_step">
+        <p className="mb-2 text-sm">
+          <strong>这段在证什么：</strong>三段各管一事：回放池抽批并重建 3 个输入平面、train_step 把（s、π、z）变成两笔损失并更新、make_optimizer 定更新规则。
+        </p>
         <div className="codewalk">
           <pre>{`# ReplayBuffer.sample：有放回随机抽样，再重建 3 个输入平面
 idx = rng.integers(0, self.size, size=batch_size)
@@ -142,7 +145,9 @@ inputs = np.stack([cur, opp, color], axis=1).astype(np.float32)`}</pre>
           <pre>{`# train_step：样本与 π 同步变换，再重新前向计算损失
 aug_in[i] = dihedral_transform(inputs[i], k)
 aug_pi[i] = dihedral_transform_pi(pis[i], n, k)
-#（net.train()、把增广后的批次转成张量、送入设备的几行从这里略去）
+#（略去几行：net.train()、把增广后的批次转成张量并送入设备；
+#  形状是输入 (128,3,9,9) → logits (128,81)、v (128,)，
+#  与 target_pi (128,81)、target_z (128,) 逐条对齐）
 logits, v = net(x)
 value_loss = F.mse_loss(v, target_z)
 logp = F.log_softmax(logits, dim=-1)
@@ -182,7 +187,7 @@ def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
         </p>
         <Def term="检查点" en="checkpoint">
           训练中保存的一份模型文件，内容是网络权重、配置和 meta。
-          不保存优化器的状态（含各权重的动量记录）和随机数发生器的状态：不存是为了文件简单、加载路径统一（第 16 课展开）；代价是恢复后头几步没有惯性、方向比平时颠簸，几步后惯性重建。
+          不保存优化器的状态（含各权重的动量记录）和随机数发生器的状态。不存是为了文件简单、加载路径统一（第 16 课展开）。代价是恢复后头几步没有惯性、方向比平时颠簸，几步后惯性重建。
         </Def>
         <Def term="最近保存点" en="latest">
           指最近一次保存的 checkpoint。按项目方式恢复训练时加载 latest 与
@@ -221,14 +226,14 @@ def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
             explain: "π 的每一项对应一个棋盘坐标，所以样本旋转时答案坐标也要旋转。z 是输赢关系，没有空间坐标。",
           },
           {
-            q: "回放池 sample 为什么叫「有放回」抽样？",
+            q: "把回放池改成「无放回、按入库顺序读完一个 epoch」，训练动态会差在哪？",
             options: [
-              "抽中的样本会从池里永久删除",
-              "每个下标独立随机产生，同一条样本在一批里可能再次被抽到",
-              "每次只从最新一局棋抽",
+              "抽中的样本会从池里永久删除，池会越训越小",
+              "有放回的均匀小批与池内分布同权，同一条样本一批里可能抽到两次；按序无放回会让样本带上次序，最近入库的局面被系统性排后",
+              "每次只从最新一局棋抽，效果更好",
             ],
             answer: 1,
-            explain: "代码用 rng.integers 为 batch 中每个位置独立产生下标，并没有把已抽中的下标移除。",
+            explain: "代码用 rng.integers 为 batch 中每个位置独立产生下标，并没有把已抽中的下标移除，所以每步看到的样本分布与池内分布一致。改成按序无放回，步与步之间就带上了入库次序，近况会攒在末尾才被学到。",
           },
           {
             q: "按项目方式恢复训练后（加载 latest checkpoint 与 buffer.npz，前者是最近一次保存），哪些东西当前不会原样恢复？",
@@ -318,7 +323,7 @@ function SymmetryTable() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 14-2</span>
-        棋盘由真实自我对弈记录重建，π 直接取自记录；换 k 时两者必须用同一个变换。
+        棋盘由真实自我对弈记录重建，π 直接取自记录；换 k 时两者必须用同一个变换。换 k 前先预测 π 会搬到哪几格，再切过去对拍。
       </figcaption>
     </figure>
   )

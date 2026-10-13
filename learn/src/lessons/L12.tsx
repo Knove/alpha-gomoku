@@ -51,7 +51,7 @@ export default function L12() {
           "终局后从当时行棋方视角补上 z",
           "一局棋因此留下许多条训练样本",
         ]}
-        takeaway="一条训练样本由 (s, π, z) 3 个要素组成，三者都必须站在记录该手时的行棋方视角；落子前记下 s 与 π，终局后才补得上 z。"
+        takeaway="你能从一局棋构造出全部 (s, π, z) 并与真实记录对拍：三者都站在记录该手时的行棋方视角，落子前记 s 与 π，终局后补 z；并写出跨树合批、树内串行的四步锁步接口。"
         boundary="对局记录里的 root_value 是搜索多次回传后的记录值，不是网络直接输出的价值估计；训练会在抽到 s 时重新运行网络。"
       />
 
@@ -79,7 +79,7 @@ export default function L12() {
           这手棋的输赢要等终局才补。为什么价值目标只认终局 z，不拿 root_value 或 v_net 当标签？判据和策略侧不同。策略目标要的是「同一问题的更好答案」，π 多看了几十次模拟，所以拿它教 P。
         </p>
         <p>
-          价值目标要的是<strong>真值</strong>：z 是对局事实，与网络当前水平无关，而 root_value 与 v_net 都是估计，拿估计当标签等于自己教自己，会把搜索与网络的系统性偏差固化回网络。就可靠性而言 z 优于 root_value、root_value 优于 v_net；就信息密度而言恰好相反（两个判据见下方定义框）。本项目价值侧选可靠性。一局棋因此留下许多条训练样本，每一条都由
+          价值目标要的是<strong>真值</strong>：z 是对局事实，与网络当前水平无关；root_value 与 v_net 都是估计。拿估计当标签等于自己教自己，会把搜索与网络的系统性偏差固化回网络。就可靠性而言 z 优于 root_value、root_value 优于 v_net；就信息密度而言恰好相反（两个判据见下方定义框）。本项目价值侧选可靠性。一局棋因此留下许多条训练样本，每一条都由
           <span className="mono">(s, π, z)</span> 3 个要素组成。
         </p>
         <Def term="可靠性" en="reliability">
@@ -194,13 +194,16 @@ export default function L12() {
           <span className="chip">各自回传</span>
         </div>
         <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          这样利用了网络擅长批量计算的特点，同时保留每棵搜索树「选择后立刻拿到结果、下一次再选择」的顺序。
+          先自问「再加一棵树 D，前向次数会加一还是不变」，再看上面的合批箭头对答案。这样利用了网络擅长批量计算的特点，同时保留每棵搜索树「选择后立刻拿到结果、下一次再选择」的顺序。
           这里的「一批」是合批（一次前向喂多个叶局面），与训练时每批 128 条样本的小批不是同一件事。
           浏览器里的单局 <span className="mono">SearchTree.run()</span> 是顺序复现；生产训练才会跨棋局合批。
         </p>
       </div>
 
       <Ledger title="selfplay.py · play_games / _finalize（样本的出生过程）">
+        <p className="mb-2 text-sm">
+          <strong>这段在证什么：</strong>样本三件套（s、π、z）的出生时刻：落子前连行棋方一起存进 samples，终局后按行棋方补 z；第二段另证多局批量评估。
+        </p>
         <div className="codewalk">
           <pre>{`# 落子前：局面与搜索给出的策略目标已知，终局结果还未知
 s.samples.append((s.game.canonical_board().astype(np.int8),
@@ -227,7 +230,7 @@ for pid, trees in groups.items():
           第一段回答「样本 3 个要素何时产生」：落子前 append 进 samples 的是
           <span className="mono">(s, π, player)</span>，终局后逐条按
           <span className="mono">player</span> 补上 <span className="mono">z</span>。
-          第二段回答「并行多局为什么不是并行改一棵树」。自我对弈两边是同一个网络，代码仍按叶方（leaf_player）选网，是给「两边用不同网络」的场景预留的口子。
+          第二段回答「并行多局为什么不是并行改一棵树」。这四步就是你要写的锁步接口：<span className="mono">select</span> 各树各走一步到待评叶子，<span className="mono">needs_eval</span> 报告哪些树要评，<span className="mono">leaf_input</span> 取输入叠成一批前向，<span className="mono">expand_and_backup</span> 逐树记回；跨树只合批求值，树内部仍一次一步。自我对弈两边是同一个网络，代码仍按叶方（leaf_player）选网，是给「两边用不同网络」的场景预留的口子。
           记录中的 <span className="mono">root_value</span> 只是搜索展示值，不在 samples 的 3 个要素里。
         </p>
       </Ledger>

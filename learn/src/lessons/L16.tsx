@@ -55,7 +55,7 @@ export default function L16() {
           "先把这一轮写进 metrics，再保存同轮 checkpoint",
           "重启时恢复权重和回放池，但重新建立优化器与随机数状态",
         ]}
-        takeaway="checkpoint 的迭代号不能跑在指标尾行的前面；就算恢复了网络权重，也不等于把动量和随机抽样的位置一并恢复了。"
+        takeaway="你能跑通一轮训练管线，并排出写盘顺序（指标先于 checkpoint）；演练崩溃恢复：权重、样本各回到哪一步，动量与 RNG 从零重来。"
         boundary="本课追踪一个训练器的阶段与落盘边界，不打开每一种文件的内部格式。"
       />
 
@@ -86,7 +86,7 @@ export default function L16() {
         </p>
         <Def term="管线" en="pipeline">
           一轮训练固定要走的阶段序列：自我对弈、保存回放池、训练或预热、竞技场、写指标、写 checkpoint。
-          阶段顺序写死在代码里，每阶段产出各自负责的文件；顺序本身保证中断之后能从某个阶段边界接着跑：可恢复的是权重与轮号；样本可恢复以 buffer 文件完整为前提。
+          阶段顺序写死在代码里，每阶段产出各自负责的文件。顺序本身保证中断之后能从某个阶段边界接着跑：可恢复的是权重与轮号，样本可恢复以 buffer 文件完整为前提。
         </Def>
         <Def term="检查点" en="checkpoint" see="第 14 课">
           一次保存下来的网络权重文件。项目里 <span className="mono">latest.pt</span> 始终是最近一轮的权重，
@@ -100,6 +100,42 @@ export default function L16() {
           读取时应以每轮最后一行为准；训练监控网页的损失曲线还没按这个口径合并同轮号的行，幽灵行会被一并画出来。
         </Def>
 
+        <h3>把一轮训练跑起来：命令与配置</h3>
+        <p>
+          训练器的入口是 <span className="mono">python -m alphagomoku.trainer</span>。
+          只有 <span className="mono">--run</span> 必填，指向 run 目录；
+          <span className="mono">--config</span> 仅在该目录尚无 config.json 时用来播种，
+          <span className="mono">--max-iterations</span> 限制轮数：
+        </p>
+        <div className="codewalk">
+          <pre>{`python -m alphagomoku.trainer --run data/runs/dev --config configs/fast.json
+python -m alphagomoku.trainer --run data/runs/dev --max-iterations 4
+
+scripts/dev.sh     # server :8000 + trainer + vite :5173，开发用
+scripts/start.sh   # 构建 web 后单进程 :8000，验收用`}</pre>
+        </div>
+        <p>
+          配置的两套值：项目默认（<span className="mono">configs/default.json</span>）与
+          演示（<span className="mono">configs/fast.json</span>，站里真实记录就出自它）。
+          改一个数之前先看它影响哪一段：
+        </p>
+        <table className="l09-table">
+          <thead><tr><th>配置键</th><th>默认</th><th>演示</th><th>影响</th></tr></thead>
+          <tbody>
+            <tr><td className="mono">net_channels / net_res_blocks</td><td>64 / 4</td><td>48 / 3</td><td>网络容量与感受野</td></tr>
+            <tr><td className="mono">mcts_simulations</td><td>100</td><td>40</td><td>自我对弈每手思考量</td></tr>
+            <tr><td className="mono">c_puct / dirichlet_epsilon / dirichlet_alpha</td><td>1.5 / 0.25 / 0.3</td><td>同左</td><td>探索强度与根噪声</td></tr>
+            <tr><td className="mono">temp_threshold</td><td>12</td><td>10</td><td>前几手按 π 采样，之后取最大访问</td></tr>
+            <tr><td className="mono">games_per_iteration / parallel_games</td><td>24 / 8</td><td>12 / 6</td><td>每轮对局数与并行局数</td></tr>
+            <tr><td className="mono">batch_size / train_steps</td><td>128 / 30</td><td>128 / 20</td><td>每轮更新的批大小与步数</td></tr>
+            <tr><td className="mono">lr / weight_decay</td><td>0.01 / 1e-4</td><td>同左</td><td>步幅与轻拽</td></tr>
+            <tr><td className="mono">buffer_size / min_buffer</td><td>100000 / 512</td><td>50000 / 256</td><td>回放池容量与训练门槛</td></tr>
+            <tr><td className="mono">arena_every / arena_games / arena_simulations</td><td>2 / 10 / 50</td><td>2 / 6 / 30</td><td>受控对战的节奏、局数与每手思考量</td></tr>
+            <tr><td className="mono">promote_threshold</td><td>0.55</td><td>0.55</td><td>晋升线</td></tr>
+            <tr><td className="mono">seed / device / keep_checkpoint_every</td><td>42 / auto / 10</td><td>42 / auto / 5</td><td>可复现性、算力选择、留档节奏</td></tr>
+          </tbody>
+        </table>
+
         <h3>「继续训练」有两种，恢复的程度不一样</h3>
         <p>
           同一进程里的下一轮会保留网络、优化器的动量、随机数发生器和回放池。
@@ -109,7 +145,21 @@ export default function L16() {
         </p>
         <p>
           所以「恢复训练」准确地说是：恢复网络权重和旧样本，再新建优化器（参见：第 3 课）与随机数发生器。
-          恢复的随机数不是「接续」而是确定性重开：同一个种子重新走一遍随机流。逐轮自我对弈的随机流由「种子、轮号、已下局数」三者决定：三者（已下局数只数自我对弈，不含竞技场）都相同且网络权重没变，重做出的就是同一批对局；已下局数写进 metrics 之后再崩，重做时它已经变了，出的是另一批（这是有意的安排，防止同一批样本二次入池）。动量历史则归零：恢复后头几步没有惯性，单批噪声直接拽着权重走、方向比平时颠簸，几步之后惯性重建，对最终收敛通常可容忍。checkpoint 不保存优化器与随机数状态，是因为它的职责只是「权重可复用」（server、竞技场加载权重都靠它）；优化器状态只对续训有用，存它会让文件翻倍、加载路径分叉。这是有意的简化，升级路径是保存时把优化器一并塞进文件。这些合起来就是当前实现的恢复边界。
+          恢复的随机数不是「接续」，而是确定性重开：同一个种子重新走一遍随机流。
+        </p>
+        <p>
+          逐轮自我对弈的随机流由「种子、轮号、已下局数」三者决定（已下局数只数自我对弈，不含竞技场）。
+          三者都相同且网络权重没变，重做出的就是同一批对局；已下局数写进 metrics 之后再崩，
+          重做时它已经变了，出的是另一批。这是有意的安排：防止同一批样本二次入池。
+        </p>
+        <p>
+          动量历史则归零。恢复后头几步没有惯性，单批噪声直接拽着权重走、方向比平时颠簸；
+          几步之后惯性重建，对最终收敛通常可容忍。
+        </p>
+        <p>
+          checkpoint 不保存优化器与随机数状态：它的职责只是「权重可复用」（server、
+          竞技场加载权重都靠它）。优化器状态只对续训有用，存它会让文件翻倍、加载路径分叉；
+          这是有意的简化，升级路径是保存时把优化器一并塞进文件。这些合起来就是当前实现的恢复边界。
         </p>
         <Def term="随机数发生器" en="random number generator, RNG">
           产生随机数序列的机制；它的内部状态决定下一串抽样。checkpoint 不保存它，
@@ -125,8 +175,9 @@ export default function L16() {
         <h3>暂停、停止与崩溃留下的边界各不相同</h3>
         <p>
           暂停在主循环开头检查，所以通常等当前整轮结束后才真正进入暂停状态。
-          轮边界不存在半成品。唯一不受原子写或跳行保护的整文件是 buffer.npz：崩溃或断电恰好落在它写盘的那一瞬间（正常暂停不会停在那），会留下截断文件；它是直接写入，不走原子换名。对局已整块写完、回放池已保存完，
-          在这里停下，任何文件都不会停在半途。
+          轮边界不存在半成品。对局已整块写完、回放池已保存完，在这里停下，任何文件都不会停在半途。
+          唯一既不受原子写也不受跳行保护的整文件是 buffer.npz：它直接写入，不走原子换名。
+          崩溃或断电恰好落在它写盘的那一瞬间，会留下截断文件（正常暂停不会停在那）。
           stop 命令除了在每轮开头被检查一次，自我对弈的下棋过程中也会每隔一会儿被查看一次（竞技场不查：它是固定局数的评估，中途打断得不偿失，停在轮边界即可）；已经完成的对局仍会写入，
           随后程序退出训练。正常退出会在 <span className="mono">finally</span> 中再次保存回放池和
           <span className="mono">latest</span>，并把 status.json 的状态写成 stopped。
@@ -151,7 +202,30 @@ export default function L16() {
       <PipelineStepper />
       <RecoveryProbe />
 
+        <h3>跑起来之后，按症状排障</h3>
+        <p>
+          指标不是看一次就完的数字，而是症状线索。常见的四种症状、先查什么：
+        </p>
+        <table className="l09-table">
+          <thead><tr><th>症状</th><th>先查</th><th>处置</th></tr></thead>
+          <tbody>
+            <tr><td>损失一直不动</td><td>回放池是否还在预热</td><td>攒够 min_buffer 才有更新；够了仍不动，回头查学习率与 z 的视角</td></tr>
+            <tr><td>π 几乎全压在一两手</td><td>每手模拟数与根噪声</td><td>提高 mcts_simulations；确认自我对弈开了根噪声（竞技场不开是设计如此）</td></tr>
+            <tr><td>价值损失贴 0、策略损失高</td><td>z 是否按行棋方视角补的</td><td>对照样本构造一节核对 z；视角错时价值头在拟合错目标</td></tr>
+            <tr><td>训练损失降、受控对战不涨</td><td>对局数与增广是否单一</td><td>过拟合：按「训练损失降、对战不涨」确认后，提升样本多样性（增广与回放混合，第 14 课）</td></tr>
+          </tbody>
+        </table>
+        <p>
+          完成标准也来自证据而不是感觉：受控对战对 best 的得分率稳定过 55% 晋升线
+          （局数有限时过线也可能是运气，第 15 课有算例），对 baseline 明显领先
+          （它是对照尺，不参与晋升），metrics 曲线可追溯到每一轮的对局与样本数，
+          才算这一轮训练在真的变强。
+        </p>
+
       <Ledger title="pipeline.run · 启动恢复、训练门槛与写盘顺序">
+        <p className="mb-2 text-sm">
+          <strong>这段在证什么：</strong>崩溃后接着跑的保证都在 pipeline.run 里，与下面三张证据卡同名：启动时恢复权重与回放池、样本够 min_buffer 才训练（不足只预热）、指标必须排在 checkpoint 之前。
+        </p>
         <div className="card p-5">
           <p className="font-semibold">证据一：启动时自动恢复网络与回放池，再新建优化器</p>
           <pre className="mt-3 overflow-x-auto text-xs leading-relaxed">{`# pipeline.run
@@ -251,15 +325,15 @@ if iteration % cfg.keep_checkpoint_every == 0:
         title="习题"
         questions={[
           {
-            q: "新进程发现 latest.pt 和 buffer.npz 后，实际恢复了什么？",
+            q: "恢复训练后优化器的动量归零。要不要把优化器状态一并存进 checkpoint？依据是什么？",
             options: [
-              "恢复网络权重、下一轮编号和回放池；优化器与 RNG 重新建立",
-              "恢复每一项内存状态，包括动量和随机数走到的位置",
-              "只恢复页面上的训练曲线，网络重新随机初始化",
+              "本项目选择不存：换取文件简单、加载路径统一；代价是恢复后头几步没有惯性、方向比平时颠簸，几步后惯性重建。中断频繁且在意这几步时，再考虑存",
+              "必须存：不存就无法恢复训练",
+              "不用管：动量本来就不起作用",
             ],
             answer: 0,
             explain:
-              "checkpoint 带回网络权重和迭代号，buffer.npz 带回旧样本；make_optimizer 和随机数发生器会在新进程中重新创建，所以这不是逐字节续上旧进程。",
+              "checkpoint 带回网络权重和迭代号，buffer.npz 带回旧样本；make_optimizer 和随机数发生器在新进程里重建，所以这不是逐字节续上旧进程。动量丢失只影响恢复后头几步，这是权衡后的取舍，不是疏漏。",
           },
           {
             q: "回放池还没有达到 min_buffer 时，这一轮会怎样？",

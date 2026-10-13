@@ -27,7 +27,7 @@ export default function L01() {
           "落子就是给对应位置赋当前方的数，然后换手",
           "判胜只从刚落的子向四个方向数连子，含刚落那颗、每个方向数出 5 即胜",
         ]}
-        takeaway="你能把坐标和动作编号来回换算，也能说明为什么新出现的五连一定包含刚落下的子。"
+        takeaway="你能把坐标和动作编号来回换算，写出合法动作判定与判胜检查：以新落的子为锚数四向，为什么不会漏。"
         boundary="本课的 0/+1/−1 是游戏引擎保存棋盘的记法。三个输入平面（平面是一张 9×9 的数表，定义见第 2 课，编码见第 6 课）会把同一事实改写成网络更容易处理的形式，两者用途不同，并不矛盾。"
       />
 
@@ -51,7 +51,7 @@ export default function L01() {
       <div className="prose mt-10">
         <h3>棋盘、棋子与坐标写成 81 个数</h3>
         <p>
-          先把游戏本身说清：五子棋由黑白两方轮流在棋盘的空交叉点上
+          先把游戏本身定清楚：五子棋由黑白两方轮流在棋盘的空交叉点上
           各放一颗自己的子。子落下之后不动、也不被吃掉。谁先让自己的
           <strong>五颗</strong>子横着、竖着或斜着连成一排，谁赢（连到 5 或更长都算赢，实现取 ≥5）。本项目约定黑先白后。棋盘是 9×9，
           共 81 个交叉点。
@@ -135,8 +135,11 @@ export default function L01() {
       <WinCount />
 
       <Ledger title="game.py · Game.play / Game._is_win_at">
+        <p className="mb-2 text-sm">
+          <strong>这段在证什么：</strong>落子与判胜这两件事，就是 Game.play 与 Game._is_win_at 两个函数。
+        </p>
         <p className="mt-0 mb-3">
-          本栏把刚才做过的动作与真实代码逐项对照（这就是「对证」）。
+          本栏是开发落点：刚才做过的动作，就是 <span className="mono">game.py</span> 里你要写的这两段（全书把这一步叫对证）。
           先找输入 <span className="mono">action</span>，再找棋盘赋值、换手和判胜输出。
         </p>
         <div className="codewalk">

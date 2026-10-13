@@ -54,7 +54,7 @@ export default function L11() {
           "扩展新叶，并沿原路径逐层取负回传（negamax）",
           "每条边更新 N、W、Q，根另记搜索汇总 root_value",
         ]}
-        takeaway="一次模拟只有一趟往返：向前选择到叶，取得一个值，再逐层换视角记回统计。"
+        takeaway="你能手推一次模拟（选择→求值→扩展→记回），对拍树上的 N/W/Q 与 root_value，并写出落子后换根复用的要点。"
         boundary="本课只学搜索分哪几步、每步按什么顺序做、怎样把结果记回来。下一课才完整手算 PUCT，并解释（下一课的）访问分布 π、根噪声、温度和实际落子。"
       />
 
@@ -85,7 +85,7 @@ export default function L11() {
         <Def term="蒙特卡洛树搜索" en="Monte Carlo Tree Search,缩写 MCTS">
           沿树选择到叶、在叶处取得一个评价、再把评价逐层记回的搜索算法。
           「蒙特卡洛」来自用随机模拟估计答案的传统；引入神经网络评价后，
-          随机模拟被一次前向取代，记回的形式不变（N/W/Q 照写；但值的来源从真终局换成价值估计 v_net，Q 的含义随之改变）。混用会带来偏差：硬 ±1 是确定结果，价值估计 v_net 带误差，访问少时估计值影响大；访问一多，Q 是许多次回传的平均，单次估计误差被平均稀释掉（其中也掺着少数终局硬结果）。
+          随机模拟被一次前向取代，记回的形式不变（N/W/Q 照写；但值的来源从真终局换成价值估计 v_net，Q 的含义随之改变）。混用会带来偏差：硬 ±1 是确定结果，价值估计 v_net 带误差。访问少时估计值影响大；访问一多，Q 是许多次回传的平均，单次估计误差被平均稀释掉（其中也掺着少数终局硬结果）。
         </Def>
         <Def term="节点、根、边、叶" en="node, root, edge, leaf node">
           搜索记录下来的每个局面叫一个节点；当前局面是根；局面之间的一手棋是边；
@@ -102,7 +102,7 @@ export default function L11() {
           走过的每一手都记下「从哪个节点、选了哪条边」，供回传时按原路写回。
         </Def>
         <Def term="先验" en="prior，代码里是 P">
-          与第 9 课 softmax 后的比例是同一批数，用作先验时只保留合法落点、再重新归一到 1。
+          与第 9 课 softmax 后的比例是同一批数，用作先验时只保留合法落点、再重新归一到 1。遮格后各数之和近于 0 时（策略全压在被禁点上），退化成在合法落点上均匀分布（mcts.py 的兜底分支）。
           它是网络给出的各着点概率：根先验在第一趟模拟展开根时现算，途中每个新叶展开时再各算一次，机制相同。它来自策略头，是「第一眼觉得该下哪」，
           还没有叠加任何后续推演；搜索会在这个基础上继续检验和修正。
         </Def>
@@ -199,6 +199,9 @@ export default function L11() {
       <ReuseProbe />
 
       <Ledger title="mcts.py · SearchTree.select / expand_and_backup / _backup / update_root">
+        <p className="mb-2 text-sm">
+          <strong>这段在证什么：</strong>例 10-1 三按钮的源码落点：选择走 select，求值由调用方喂回，扩展并回传是 expand_and_backup（其中 _backup 逐边记回）；update_root 是落子后复用子树，另证于末段。
+        </p>
         <div className="codewalk">
           <pre>{`# select：沿树走到终局或未展开叶
 while node.expanded:
@@ -215,6 +218,17 @@ if out is not None:
 self._pending_game = game
 self._pending_path = path
 self._pending_leaf = node`}</pre>
+        </div>
+        <div className="codewalk">
+          <pre>{`# _Node：一个节点就是一个岔口，各边统计并排存着
+class _Node:
+    __slots__ = ("prior", "children", "N", "W", "expanded")
+    def __init__(self, num_actions: int):
+        self.prior: np.ndarray | None = None  # (num_actions,) 遮格并归一后的先验
+        self.children: dict[int, "_Node"] = {}
+        self.N = np.zeros(num_actions, dtype=np.float32)  # 各边访问数
+        self.W = np.zeros(num_actions, dtype=np.float32)  # 各边价值合计
+        self.expanded = False`}</pre>
         </div>
         <div className="codewalk">
           <pre>{`# 向后：每退一层先换视角，再更新该边
@@ -279,14 +293,14 @@ self._root_value_count = 0  # 展示统计整体清零；新根若已展开且�
             explain: "Q=W/N=2/4=0.5。",
           },
           {
-            q: "v_net、root_value 和 z 的来源分别是什么？",
+            q: "有人把搜索的 root_value 直接当 z 写进训练样本，断在哪一环？",
             options: [
-              "三者都是同一个网络输出，只是显示位置不同",
-              "v_net 是单个叶的网络输出；root_value 是搜索模拟在根方视角的平均；z 是整盘终局结果",
-              "root_value 是训练标签，z 只用于网页动画",
+              "没断：root_value 想得更远，是更好的 z",
+              "断在样本出生这一环：z 必须是终局事实，root_value 是估计；拿估计当标签等于自己教自己，搜索与网络的偏差会被固化回权重",
+              "断在搜索：应该多跑几次模拟再取平均",
             ],
             answer: 1,
-            explain: "三者来自不同时间和过程。训练会重新计算 v_net 并与 z 比较；搜索过程留下的 root_value 只是记录，不是训练标签。",
+            explain: "z 在终局才补，是事实；root_value 是搜索留下的估计，只作展示记录。把它当标签，训练目标就从「终局事实」降成「自己的旧判断」，偏差会被固化回权重。训练时仍会重新计算 v_net 并与 z 比较。",
           },
         ]}
       />

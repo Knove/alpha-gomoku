@@ -75,15 +75,15 @@ export default function Graduation() {
 
       <LessonGuide
         question="换一个没讲过的局面，你能不能指出整条因果链断在哪一环？"
-        why="复述看过的案例只证明记性；把同一套因果用在新局面上，才算把这台机器真正看懂。"
+        why="复述看过的案例只证明记性；把同一套因果用在新局面上，能定位、能改对，才算会照这条链开发。"
         chain={[
           "和一台机器下一局：权重是真实导出的，搜索也真实跑在浏览器里，记录它的决策痕迹",
           "沿系统图逐环说明每个数从哪里来、经过了谁",
           "分清 v_net、root_value、z 各自回答什么问题",
-          "在四道换了情境的诊断题里，用「因为……所以……」说出断链位置",
+          "在四道换了情境的诊断题里，定位断链并指认该改哪处代码",
         ]}
-        takeaway="每个箭头都能找到原因和证据：结构给归纳偏置，训练目标带来新信息，损失测的是贴合程度，对战给实战证据，运行文件把事实安全留下。"
-        boundary="本章不再引入新机制，只做三件事：下完一局、查清一条链、指出四个断点。"
+        takeaway="你能独立开发并修通一条完整的 alpha-棋类：写出核心模块、配置一次训练、按验收标准判断它是否真的变强。"
+        boundary="本章不再引入新机制，只做四件事：下完一局、查清一条链、定位四个断点、以出师任务三件收官。"
       />
 
       <Quiz
@@ -177,16 +177,42 @@ export default function Graduation() {
       </section>
 
       <div className="prose mt-10">
+        <h3>带走一张开发地图</h3>
+        <p>
+          alpha-棋类 的每个模块，你都已经在某一课对证过它的入口。合起来就是这张图：
+        </p>
+        <table className="l09-table">
+          <thead><tr><th>模块</th><th>职责</th><th>你在哪课写过</th></tr></thead>
+          <tbody>
+            <tr><td className="mono">game.py</td><td>规则、坐标与动作、判胜、规范视角、输入平面</td><td>第 1、2、6 课</td></tr>
+            <tr><td className="mono">model.py</td><td>stem、残差块、双头 forward</td><td>第 4、5、7–9 课</td></tr>
+            <tr><td className="mono">mcts.py</td><td>选择、扩展、记回、换根复用、根噪声</td><td>第 10、11 课</td></tr>
+            <tr><td className="mono">selfplay.py</td><td>多局锁步自我对弈、样本出生</td><td>第 12 课</td></tr>
+            <tr><td className="mono">replay.py</td><td>环形回放池、抽批、重建三个平面</td><td>第 14 课</td></tr>
+            <tr><td className="mono">train.py</td><td>两笔损失、train_step、优化器</td><td>第 3、13、14 课</td></tr>
+            <tr><td className="mono">arena.py</td><td>受控对战、得分率、晋升判定</td><td>第 15 课</td></tr>
+            <tr><td className="mono">pipeline.py</td><td>一轮的阶段顺序、恢复边界、写盘顺序</td><td>第 15、16 课</td></tr>
+            <tr><td className="mono">storage.py / trainer.py</td><td>run 目录证据、原子写、文件锁、入口、checkpoint 读写</td><td>第 15–17 课</td></tr>
+            <tr><td className="mono">server/ / web/</td><td>REST+WS、人机对战会话、页面消费</td><td>第 18 课</td></tr>
+          </tbody>
+        </table>
+        <p>
+          出师任务三件，不再给选项：①用 <span className="mono">configs/fast.json</span> 跑满 4 轮，
+          把每轮的样本数、两笔损失、得分率填成一张自己的表；②改一个配置
+          （模拟数、train_steps 或 ε 任选），预测它会先动哪个指标，再跑一轮对拍；
+          ③故意弄坏一处不变量（比如让 π 的分母取本轮预算），从指标或棋谱里找出破绽并修好。
+          三件都能独立完成，你就具备了开发下一个棋类 AI 项目的全部环节。
+        </p>
         <h3>毕业词</h3>
         <p>
-          序里承诺过，走完十八课后由你亲自检查整台机器。现在你已经知道：棋盘怎样成为
+          序里承诺过：走完十八课，由你把这条链开发出来并修通。先来亲自检查整台机器。现在你已经知道：棋盘怎样成为
           当前方视角的三个输入平面，网络怎样给出 <span className="mono">P</span> 和
           <span className="mono">v_net</span>，搜索怎样留下 <span className="mono">root_value</span>
           与 <span className="mono">π</span>，终局怎样补上 <span className="mono">z</span>，
           π 与 z 两种误差怎样改权重，又为什么必须用竞技场而不是训练损失判断棋力。
           你还能够从 checkpoint、运行文件、REST 与 WebSocket 一直追到浏览器上的画面。
           本课模型出自只训了 4 轮（iteration 0–3）的 run，上场的 best 在第 2 轮晋升；
-          一局输赢仍不够给它下棋力结论；真正的毕业标准，是每个箭头都能找到原因和证据。
+          一局输赢仍不够给它下棋力结论；真正的毕业标准，是能把这条链开发出来、修通它：每个箭头不仅有原因和证据，还有你写得出的那处代码。
           这门课讲的不是五子棋，而是「让 AI 从零自教自学」的方法。舞台换了，那个
           「自己下棋、自己出样本、自己变强」的自我改进循环不换。
         </p>
@@ -200,14 +226,15 @@ export default function Graduation() {
         ]}
         next={
           <>
-            全书正文到此结束。仓库中的介绍站（explainer/）与 learn/archive/ 下的讲义是同一套事实的长文版
+            全书正文到此结束。带着这套模块认知，下一步就是用仓库骨架开发你自己的 alpha-棋类。
+            仓库中的介绍站（explainer/）与 learn/archive/ 下的讲义是同一套事实的长文版
             （讲义按主题命名，与十八课不一一对应），不再补新知识，只方便日后按主题查找。
           </>
         }
       />
 
       <Quiz
-        title="习题 · 毕业诊断：四个新情境，逐题解释断链位置"
+        title="习题 · 毕业诊断：四个新情境，逐题定位断链并指认改哪"
         questions={GRADUATION_DIAGNOSTIC}
       />
     </section>

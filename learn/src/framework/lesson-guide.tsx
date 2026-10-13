@@ -17,7 +17,7 @@ export function LessonGuide({
   why: ReactNode
   /** 读者应能复述的“因为 → 所以”链，保持 2–4 步。 */
   chain: readonly ReactNode[]
-  /** 学完后可以拿走的结论。 */
+  /** 学完后可以动手做的事。 */
   takeaway: ReactNode
   /** 本章范围声明(全章唯一允许前瞻的位置之一)。 */
   boundary?: ReactNode
@@ -36,7 +36,7 @@ export function LessonGuide({
         </ol>
       </div>
       <p className="chapter-intro-goal">
-        <span className="chapter-intro-label">学完你能说清</span>
+        <span className="chapter-intro-label">学完你能动手做</span>
         {takeaway}
       </p>
       {boundary && (

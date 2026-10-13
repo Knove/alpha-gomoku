@@ -3,7 +3,7 @@
  *  → 例 5-1(XOR 切分器：一条直线/一个非线性变换/两个非线性变换三挡对比，|x−y| 构造)
  *  → 例 5-2(折线拼形：ReLU(t)+ReLU(−t)=|t| 徒手拖)→ 求和之后再变换
  *  → 对证(model.py 卷积求和之后接非线性变换)→ ChapterEnd → 习题。 */
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
@@ -37,7 +37,7 @@ export default function L05() {
           "ReLU 把负分截为 0，给直线加一道折痕",
           "加权求和与非线性变换交替叠起来，机器才能拼出复杂棋形",
         ]}
-        takeaway="ReLU 不是魔法名词：它只做「正数通过，负数归零」，却让多层网络能表示直线画不出的边界。"
+        takeaway="你能算出 ReLU 怎样把四点分类切开，并写出非线性该插在每层之后的位置。"
         boundary="四点反例只是证明「需要非线性变换」的最小例子，不是在说真实五子棋判断只靠两个三连数。"
       />
 
@@ -66,7 +66,7 @@ export default function L05() {
           「均衡」；(1,0) 和 (0,1) 恰好一方占优，都属「一边倒」。只做乘和加的机器，
           把「分数够不够高」当作判类标准时，在二维纸上画出的边界总是一条直线。可这两组点
           斜对角交错：无论怎样画一刀直线，都不能把其中一组完整留在一边、
-          另一组完整留在另一边。先接受这个四点反例；例 5-1 会让你转动直线，亲眼验证至少会分错一个点。
+          另一组完整留在另一边。先接受这个四点反例；到例 5-1 里动手转直线，先预测必错哪个点，再对拍结果。
         </p>
         <Def term="异或" en="exclusive or,缩写 XOR">
           两个输入不同时才为「是」的逻辑关系，程序员熟悉的位运算 ⊕ 就是它的真值表。
@@ -95,7 +95,7 @@ export default function L05() {
           本项目的卷积层不带偏置(bias=False)，这份平移由批标准化的 β 承担（β 与偏置同类，都是平移；参见：第 8 课）。
         </Def>
         <p>
-          所以「层多」要产生新能力，层与层之间必须插入会改变形状的步骤。若把非线性只留到最后做一次（前提：输出只有一个数；输出多个数时折痕随分量增加，两道就已够切开四点，这里从单输出讲起）：前面各层全是线性、可以并成一层，整个网络就相当于单个 ReLU，只有一道折痕，分不开那四个点；所以弯要弯在每层之后。
+          所以「层多」要产生新能力，层与层之间必须插入会改变形状的步骤。若把非线性只留到最后做一次（先按单输出讲）：前面各层全是线性、可以并成一层，整个网络就相当于单个 ReLU。它只有一道折痕，分不开那四个点。输出多个数时折痕随分量变多，两层就已够切开这四点，但那是拿输出宽度换来的；要拼更复杂的形状，仍要每层都弯。所以弯要弯在每层之后。
         </p>
 
         <h3>ReLU 在直线上压出一道折痕</h3>
@@ -113,7 +113,7 @@ export default function L05() {
         </p>
         <Def term="ReLU" en="Rectified Linear Unit,线性整流单元">
           <span className="mono">ReLU(s) = max(0, s)</span>：正数通过，负数归零。
-          它只添一个折点，折点两侧的梯度都是常数，几十层叠起来也好算；折点本身没有唯一斜率（不可导），实现上约定此处导数取 0（后文把这个导数开关叫「门」，导数取 0 就是关门）。取 0 与主流实现一致（PyTorch 同此约定）；取 ½ 之类也行，差别只落在恰好踩在 0 点的样本上，实践中极少。有了约定后面的链式法则才写得严格；
+          它只添一个折点，折点两侧的梯度都是常数，几十层叠起来也好算。折点本身没有唯一斜率（不可导），实现上约定此处导数取 0（后文把这个导数开关叫「门」，导数取 0 就是关门）。取 0 与主流实现一致（PyTorch 同此约定）；取 ½ 之类也行，差别只落在恰好踩在 0 点的样本上，实践中极少。有了约定，后面的链式法则才写得严格。
           一次比较就完成计算，是最省事的非线性变换。
         </Def>
         <p>
@@ -141,6 +141,9 @@ export default function L05() {
       </div>
 
       <Ledger title="model.py · 怎样把 ReLU 接在乘加之后">
+        <p className="mb-2 text-sm">
+          <strong>这段在证什么：</strong>非线性接在求和之后：主要写作 F.relu(bn(conv(x)))，块出口的 F.relu(x + h) 与 stem 的 nn.ReLU() 是同一主张的另两处。
+        </p>
         <div className="codewalk">
           <pre>{`# model.py L19-21  残差块(residual block,卷积与非线性叠成的一小段):卷积(求和)→ BN(批标准化)→ 非线性变换
 h = F.relu(self.bn1(self.conv1(x)))   # conv 加权求和，再整体 ReLU
@@ -192,11 +195,11 @@ self.stem = nn.Sequential(
               "在例 5-1 里把直线怎么转怎么挪，最好也分错一个。这不是权重数量问题，是形状问题：直线没有折痕。要切开的形状是「两条平行线夹一条带状区域」，直线一根画不出两根的事。",
           },
           {
-            q: "把两层线性叠起来（第二层读第一层的分数），表示能力涨了吗？",
+            q: "两层线性叠起来仍切不开异或四点。该往哪里加非线性？",
             options: [
-              "涨了：两层看得比一层深",
-              "没涨：w₂·(w₁·x) = (w₂·w₁)·x，两个权重并成一个，叠一百层还是一条直线",
-              "涨了，但只有叠偶数层才涨",
+              "哪里都不用加：两层看得比一层深",
+              "层与层之间要插非线性：w₂·(w₁·x) = (w₂·w₁)·x，线性套线性还是一条直线，叠一百层也一样；真网络在 conv1 后有 ReLU，块出口对 x+h 再做一次（conv2 后只到批标准化）",
+              "只在最后加一次就够",
             ],
             answer: 1,
             explain:
@@ -211,7 +214,7 @@ self.stem = nn.Sequential(
             ],
             answer: 1,
             explain:
-              "ReLU(t) 只留从折点向右的半条线、ReLU(−t) 只留向左的半条（照镜子反过来），相加正好拼成 V。最低点的「均衡」两点各是 v=0，坡上的「一边倒」两点各是 v=1。把 v 相同的点连起来，是一条条跟对角线平行的线；判类规则是 v>½ 判「一边倒」、v≤½ 判「均衡」；本例四点的 v 只有 0 和 1，永远不会落在界上。v=½ 那两条把「均衡」点夹在带状区域里、「一边倒」点推到外侧（在 v 这把尺子上一刀即可，是因为 V 形把斜对角两点折到了同一高度）。这道四点反例（异或）就这么被两个非线性变换切开。",
+              "ReLU(t) 只留从折点向右的半条线，ReLU(−t) 只留向左的半条（照镜子反过来），相加正好拼成 V。最低点的「均衡」两点各是 v=0，坡上的「一边倒」两点各是 v=1。把 v 相同的点连起来，是一条条跟对角线平行的线。判类规则是 v>½ 判「一边倒」、v≤½ 判「均衡」；本例四点的 v 只有 0 和 1，永远不会落在界上。v=½ 那两条把「均衡」点夹在带状区域里，把「一边倒」点推到外侧。在 v 这把尺子上一刀即可，因为 V 形把斜对角两点折到了同一高度。这道四点反例（异或）就这么被两个非线性变换切开。",
           },
         ]}
       />
@@ -462,6 +465,21 @@ const fy = (v: number) => FH - FPB - (v / 3) * (FH - FPT - FPB)
 
 function FoldSum() {
   const [t, setT] = useState(2)
+  const [folding, setFolding] = useState(false)
+  useEffect(() => {
+    if (!folding) return
+    let raf = 0
+    const t0 = performance.now()
+    const dur = 2600
+    const tick = (now: number) => {
+      const u = Math.min(1, (now - t0) / dur)
+      setT(-3 + 6 * u) // 从 −3 扫到 3:看两半折线合成 V
+      if (u < 1) raf = requestAnimationFrame(tick)
+      else setFolding(false)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [folding])
 
   const chart = (name: string, f: (v: number) => number, key: string) => (
     <div className="min-w-0 flex-1">
@@ -505,7 +523,13 @@ function FoldSum() {
           {chart("|t| 两半拼成", reluAbs, "abs")}
         </div>
         <div className="mt-4">
-          <div className="mini-label">拖 t(−3 → 3)</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mini-label">拖 t(−3 → 3)</span>
+            <button type="button" className={`btn ${folding ? "active" : ""}`}
+              onClick={() => setFolding((f) => !f)} data-qa="fold-auto">
+              {folding ? "⏸ 停" : "▶ 自动折一遍"}
+            </button>
+          </div>
           <input type="range" min={-3} max={3} step={0.1} value={t}
             onChange={(e) => setT(Number(e.target.value))} aria-label="t 滑杆"
             style={{ ["--fill" as string]: `${((t + 3) / 6) * 100}%` }}

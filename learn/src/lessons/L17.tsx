@@ -42,7 +42,7 @@ export default function L17() {
           "server 读取同一个 run 目录",
           "四种机制各管一段：当前状态整份换新、历史一行接一行续在末尾、训练器定时报告「我还活着」、一把锁保证同时只有一个训练器写入者",
         ]}
-        takeaway="run 目录是训练器与 server 共用的工作目录：当前快照安全替换，历史逐行追加；网页上的每个真实结论都应能指出来源文件。"
+        takeaway="你能写出 run 目录的快照原子替换与历史追加，用锁文件与 heartbeat 排障死进程与双写，破损尾行跳过不作证据。"
         boundary="本课只讲这个项目的文件约定，不扩展到通用文件系统理论；范围包括每类产物、两种写法、破损尾行、心跳、锁和文件名前缀。"
       />
 
@@ -81,9 +81,9 @@ export default function L17() {
         </Def>
         <p>
           控制按钮走的是反方向：平时是训练器写、server 读；这里是 server 把
-          <span className="mono">run / pause / stop</span> 写进 <span className="mono">control.json</span>。config.json 也由 server 写（首次 start 且尚无 config.json 时，拷入启动配置或默认值），训练器只在缺 config.json 时自行播种一次（用 --config 或默认值），其余时候不再改它；网页改配置（PUT）要求训练器不在运行，改完对随后启动的训练器生效。
+          <span className="mono">run / pause / stop</span> 写进 <span className="mono">control.json</span>。config.json 也由 server 写（首次 start 且尚无 config.json 时，拷入启动配置或默认值）。训练器只在缺 config.json 时自行播种一次（用 --config 或默认值），其余时候不再改它。网页改配置（PUT）要求训练器不在运行，改完对随后启动的训练器生效。
           <span className="mono">run</span> 在这里是「继续训练」这条命令，不是 run 目录。
-         训练器读命令的时机分两种：pause 和 run（继续；网页按钮叫 resume，写进 control.json 的值是 run）只在轮边界这类稳定点生效；
+         训练器读命令的时机分两种。pause 和 run 只在轮边界这类稳定点生效（run 就是继续训练；网页按钮叫 resume，写进 control.json 的值是 run）。
           stop 在自我对弈的下棋途中也会每隔一会儿查看一次（竞技场不查：固定局数的评估中途不打断）。训练器启动时会先把 run 写进
           <span className="mono">control.json</span>，作为默认命令。
         </p>
@@ -94,6 +94,19 @@ export default function L17() {
         </p>
         <ArtifactTable />
 
+        <p>
+          两个整份保存的文件，照着写时要知道里面有哪些键。
+          <span className="mono">buffer.npz</span> 是回放池快照：
+          <span className="mono">boards</span>（int8，容量×9×9 的规范视角棋盘）、
+          <span className="mono">pis</span>（float32，容量×81）、
+          <span className="mono">players</span> 与 <span className="mono">zs</span>（int8，各容量长），
+          外加棋盘边长 <span className="mono">n</span> 与环形游标 <span className="mono">size / pos</span>。
+          <span className="mono">checkpoint</span> 是 torch 字典四个键：
+          <span className="mono">state_dict</span>（权重）、<span className="mono">config</span>
+          （棋盘、通道、块数）、<span className="mono">train_config</span>（整份训练配置）与
+          <span className="mono">meta</span>（轮号等说明）。checkpoint 走 tmp 加原子替换，
+          buffer.npz 不走（第 16 课的崩溃边界）。
+        </p>
         <h3>快照整份替换，历史末尾追加</h3>
         <p>
           只存最新状态的文件需要整份替换。假如训练器直接覆盖
@@ -142,7 +155,10 @@ export default function L17() {
 
       <ArtifactSorter />
 
-      <Ledger title="storage.py 与 trainer.py · 输入、处理、输出都要说清">
+      <Ledger title="storage.py 与 trainer.py · 输入、处理、输出的写读实现">
+        <p className="mb-2 text-sm">
+          <strong>这段在证什么：</strong>文件谁写谁读、写坏怎么办：临时文件写完整再换上、历史只追加、坏行跳过，加上 trainer.py 的文件锁。
+        </p>
         <div className="codewalk mt-3">
           <pre>{`# storage.py · 快照：完整临时文件写完后一次换上
 with open(tmp, "w", encoding="utf-8") as f:
