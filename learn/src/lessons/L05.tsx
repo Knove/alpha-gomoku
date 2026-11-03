@@ -2,12 +2,13 @@
  *  节拍：思考题(一边倒判断，线性学得会吗)→ 直线极限 / 线性叠线性 / ReLU 折痕
  *  → 例 5-1(XOR 切分器：一条直线/一个非线性变换/两个非线性变换三挡对比，|x−y| 构造)
  *  → 例 5-2(折线拼形：ReLU(t)+ReLU(−t)=|t| 徒手拖)→ 求和之后再变换
- *  → 对证(model.py 卷积求和之后接非线性变换)→ ChapterEnd → 习题。 */
+ *  → 源码索引与验证 → ChapterEnd → 习题。 */
 import { useEffect, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
+import { EvidenceCard } from "../framework/evidence"
 import { relu, reluAbs } from "../lib/foundations"
 
 /** 四个教学点：x=我方三连数、y=对方三连数。
@@ -78,12 +79,16 @@ export default function L05() {
           <span className="mono">|x−y|</span>，两边差得越多越一边倒。棋理里的
           「恰好一方占优」「先跌后涨」都属于同一类拐弯判断。
         </p>
+      </div>
 
+      <XorCutter />
+
+      <div className="prose mt-12">
         <h3>线性叠线性仍然是一层</h3>
         <p>
           多叠几层乘加也不会自己变弯。本例没有外加固定数时，
           <span className="mono">w₂(w₁x)=(w₂w₁)x</span>，两层可合成一层（写成矩阵也是同一结论：线性映射的复合仍是线性映射）：两个权重相乘
-          仍是一个权重。即使每层还多加一个固定数，结果仍然是一条直线。
+          仍是一个权重。即使每层还多加一个固定数（记作 <span className="mono">b</span>），结果仍然是一条直线。
           <span className="mono">w₂(w₁x+b₁)+b₂=(w₂w₁)x+(w₂b₁+b₂)</span>，
           合并后还是「一个权重乘 x、再加一个固定数」的形状。
         </p>
@@ -94,8 +99,27 @@ export default function L05() {
           偏置也是训练学出来的数字，但它本身不改变「线性还是线性」这个事实。
           本项目的卷积层不带偏置(bias=False)，这份平移由批标准化的 β 承担（β 与偏置同类，都是平移；参见：第 8 课）。
         </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="首层卷积块 stem：卷积不带偏置，紧接批标准化与 ReLU"
+          source="alphagomoku/model.py · AlphaGomokuNet.__init__（stem）"
+        >
+          <div className="codewalk">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
+              <pre className="min-w-0 flex-1">{`        self.stem = nn.Sequential(
+            nn.Conv2d(3, channels, 3, padding=1, bias=False),
+            nn.BatchNorm2d(channels),
+            nn.ReLU(),
+        )`}</pre>
+              <div className="text-xs leading-relaxed sm:w-56" style={{ color: "var(--fg-faint)" }}>
+                <div>bias=False：卷积层省去独立偏置，平移交由紧随其后的 BatchNorm2d 承担。</div>
+                <div className="mt-1">nn.ReLU() 排在卷积与批标准化之后，对汇总后的分数做非线性截断。</div>
+              </div>
+            </div>
+          </div>
+        </EvidenceCard>
         <p>
-          所以「层多」要产生新能力，层与层之间必须插入会改变形状的步骤。若把非线性只留到最后做一次（先按单输出讲）：前面各层全是线性、可以并成一层，整个网络就相当于单个 ReLU。它只有一道折痕，分不开那四个点。输出多个数时折痕随分量变多，两层就已够切开这四点，但那是拿输出宽度换来的；要拼更复杂的形状，仍要每层都弯。所以弯要弯在每层之后。
+          所以「层多」要产生新能力，层与层之间必须插入会改变形状的步骤。若把非线性只留到最后做一次（先按单输出讲）：前面各层全是线性、可以并成一层，整个网络就相当于单个 ReLU。它只有一道折痕，分不开那四个点。所以弯要弯在每层之后。
         </p>
 
         <h3>ReLU 在直线上压出一道折痕</h3>
@@ -107,61 +131,95 @@ export default function L05() {
           接在加权求和之后、对总分做非线性变换的函数。没有它，多少层线性都能合并成一层；
           有了它，网络的表示能力才随层数增加。
         </Def>
-        <p>
-          最常用的激活函数是 ReLU，规则很短：<span className="mono">ReLU(s)</span> 在
-          s 为正时原样通过，s 为 0 或负时输出 0。于是原本的一条直线被压出折点，变成折线。
-        </p>
-        <Def term="ReLU" en="Rectified Linear Unit,线性整流单元">
+        <Def term="线性整流单元" en="Rectified Linear Unit（缩写 ReLU）">
           <span className="mono">ReLU(s) = max(0, s)</span>：正数通过，负数归零。
           它只添一个折点，折点两侧的梯度都是常数，几十层叠起来也好算。折点本身没有唯一斜率（不可导），实现上约定此处导数取 0（后文把这个导数开关叫「门」，导数取 0 就是关门）。取 0 与主流实现一致（PyTorch 同此约定）；取 ½ 之类也行，差别只落在恰好踩在 0 点的样本上，实践中极少。有了约定，后面的链式法则才写得严格。
           一次比较就完成计算，是最省事的非线性变换。
         </Def>
         <p>
-          两个镜像折痕还能拼成绝对值（不管正负，只留大小）：
-          <span className="mono">ReLU(t)+ReLU(−t)=|t|</span>。
-          例如 t=−3 时得到 0+3=3。把 t 设成「两边三连数的差」，就有
-          <span className="mono">v=|x−y|</span>：差得越多，一边倒那两点的 v 越大。
+          最常用的激活函数 ReLU 把原本的一条直线压出折点，变成折线：
+          <span className="mono">ReLU(s)</span> 在 s 为正时原样通过，s 为 0 或负时输出 0。
+          把 t 设成「两边三连数的差」，就有 <span className="mono">v=|x−y|</span>：差得越多，一边倒那两点的 v 越大。
           <span className="mono">ReLU(x−y)</span> 和 <span className="mono">ReLU(y−x)</span>
           各守一道折痕，一个不够切开四点，两个刚好把「均衡」夹进带状区域（两条平行线之间的带）。
+          这两道镜像折痕拼起来就是绝对值（不管正负，只留大小）：
+          <span className="mono">ReLU(t)+ReLU(−t)=|t|</span>，例如 t=−3 时得到 0+3=3。
         </p>
+        <EvidenceCard
+          fidelity="constructed"
+          title="ReLU：正数原样通过，负数一律归零；两道镜像折痕相加拼出 |t|"
+          source="learn/src/lib/foundations.ts · relu 与 reluAbs"
+        >
+          <div className="codewalk">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
+              <pre className="min-w-0 flex-1">{`export const relu = (s: number): number => (s > 0 ? s : 0)
+export const reluAbs = (t: number): number => relu(t) + relu(-t)`}</pre>
+              <div className="text-xs leading-relaxed sm:w-56" style={{ color: "var(--fg-faint)" }}>
+                <div>relu(s)：三元表达式 s &gt; 0 ? s : 0，即 max(0, s)。</div>
+                <div className="mt-1">reluAbs(t)：右半折线 relu(t) 加左半折线 relu(-t)，拼成 V 形 |t|。</div>
+              </div>
+            </div>
+          </div>
+        </EvidenceCard>
       </div>
-
-      <XorCutter />
 
       <FoldSum />
 
-      <div className="prose mt-8">
+      <div className="prose mt-12">
         <h3>非线性变换接在加权求和之后</h3>
         <p>
-          网络先把多个特征加权求和成一个分数，再对这个总分做 ReLU；不是把每个格子
-          单独做非线性变换。重复「加权求和 → 非线性变换」，才可以逐层拼出复杂形状：
-          每道 ReLU 贡献半条线和一个折点，折线越拼越碎，能表示的边界随之迅速变丰富。
+          重复「加权求和 → 非线性变换」，才可以逐层拼出复杂形状：
+          每道 ReLU 贡献半条线和一个折点，折线越拼越碎，能表示的边界随之迅速变丰富，
           真实网络把这套次序重复许多层，才把许多折线组合成复杂判断。
+          真实路径上卷积先完成一整次乘加、批标准化调整尺度、ReLU 再处理得到的总分；
+          变换落在求和之后的总分上，不是把每个乘积分别截断：网络
+          先把多个特征加权求和成一个分数，再对这个总分做 ReLU，不是把每个格子单独做非线性变换。
         </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="残差块前向计算：每次卷积与批标准化汇总后再接一道 ReLU"
+          source="alphagomoku/model.py · ResBlock.forward"
+        >
+          <div className="codewalk">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
+              <pre className="min-w-0 flex-1">{`    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = F.relu(self.bn1(self.conv1(x)))
+        h = self.bn2(self.conv2(h))
+        return F.relu(x + h)`}</pre>
+              <div className="text-xs leading-relaxed sm:w-56" style={{ color: "var(--fg-faint)" }}>
+                <div>第一层：F.relu 套在 bn1(conv1(x)) 外面，对卷积加权求和后的结果做截断。</div>
+                <div className="mt-1">块出口：第二层输出 h 与原输入 x 相加后，再过一道 F.relu。</div>
+              </div>
+            </div>
+          </div>
+        </EvidenceCard>
       </div>
 
-      <Ledger title="model.py · 怎样把 ReLU 接在乘加之后">
-        <p className="mb-2 text-sm">
-          <strong>这段在证什么：</strong>非线性接在求和之后：主要写作 F.relu(bn(conv(x)))，块出口的 F.relu(x + h) 与 stem 的 nn.ReLU() 是同一主张的另两处。
-        </p>
-        <div className="codewalk">
-          <pre>{`# model.py L19-21  残差块(residual block,卷积与非线性叠成的一小段):卷积(求和)→ BN(批标准化)→ 非线性变换
-h = F.relu(self.bn1(self.conv1(x)))   # conv 加权求和，再整体 ReLU
-...
-return F.relu(x + h)                  # 出口再做一次非线性变换(h=两卷积算出的修正量，加回输入 x)
-
-# model.py L32-36  stem 同款：第一层也是先加权求和再非线性变换
-self.stem = nn.Sequential(
-    nn.Conv2d(3, channels, 3, padding=1, bias=False),
-    nn.BatchNorm2d(channels),
-    nn.ReLU(),                         # ← 非线性变换在最后一道
-)`}</pre>
-        </div>
-        <p className="mt-3">
-          对照这两处真实路径：卷积先完成一整次乘加，BN 调整尺度，ReLU 再处理
-          得到的总分；残差块出口则先算 <span className="mono">x+h</span>，再非线性变换。
-          因此本课公式对应的是「线性结果之后的非线性」，而不是把每个乘积分别截断。
-        </p>
+      <Ledger title="alphagomoku/model.py · ResBlock 与 stem 中的 ReLU">
+        <ul className="ml-5 list-disc space-y-1.5">
+          <li>
+            <span className="mono">alphagomoku/model.py · AlphaGomokuNet.__init__</span>：首层{" "}
+            <span className="mono">self.stem</span> 按「卷积（<span className="mono">bias=False</span>）→ 批标准化 →{" "}
+            <span className="mono">nn.ReLU()</span>」顺序构造。
+          </li>
+          <li>
+            <span className="mono">alphagomoku/model.py · ResBlock.forward</span>：块内第一层走{" "}
+            <span className="mono">F.relu(self.bn1(self.conv1(x)))</span>，第二层经{" "}
+            <span className="mono">self.bn2(self.conv2(h))</span> 与输入 <span className="mono">x</span> 相加后，在出口执行{" "}
+            <span className="mono">F.relu(x + h)</span>。
+          </li>
+          <li>
+            <span className="mono">learn/src/lib/foundations.ts · relu / reluAbs</span>：例 5-2 交互图的教学算子，直接计算{" "}
+            <span className="mono">ReLU(t) + ReLU(−t) = |t|</span>。
+          </li>
+          <li>
+            上下游衔接：<span className="mono">stem</span> 与 <span className="mono">ResBlock</span> 在第 8 课组装成卷积主干，第 9 课接双头读出，第 13 课进入训练步反向传播。
+          </li>
+          <li>
+            验证命令：<span className="mono">pytest tests/test_model.py::test_forward_shapes_and_ranges</span> 与{" "}
+            <span className="mono">cd learn && npm test</span>。
+          </li>
+        </ul>
       </Ledger>
 
       <ChapterEnd
@@ -449,9 +507,9 @@ function XorCutter() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 5-1</span>
-        <strong>教学构造：</strong>一个隐藏层、两个镜像单元（h₁/h₂ 的 (1,−1) 镜像权重是为看清原理摆的；真实网络里这种组合由训练自己找到，没有人手摆权重）：h₁、h₂ 是两个隐藏单元（hidden unit：中间层里做一次乘加再过一道 ReLU 的计算单元），各守一道折痕，
-        h₁=ReLU(x−y)、h₂=ReLU(y−x),v=h₁+h₂。
-        四点逐值验证在右表：不是一个 ReLU(半平面切不开),而是两个(带状区域刚好够用)。
+        一个隐藏层、两个镜像单元（h₁/h₂ 的 (1,−1) 镜像权重是为看清原理摆的；真实网络里这种组合由训练自己找到，没有人手摆权重）：h₁、h₂ 是两个隐藏单元（中间层里做一次乘加再过一道 ReLU 的计算单元），各守一道折痕，
+        h₁=ReLU(x−y)、h₂=ReLU(y−x)，v=h₁+h₂。
+        四点逐值验证在右表：不是一个 ReLU（半平面切不开），而是两个（带状区域刚好够用）。
       </figcaption>
     </figure>
   )
@@ -555,7 +613,7 @@ function FoldSum() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 5-2</span>
-        <strong>教学构造：</strong>折线拼形的最基本一招：每道 ReLU 贡献半条线（带一个折点），
+        折线拼形的最基本一招：每道 ReLU 贡献半条线（带一个折点），
         几道 ReLU 就拼出几段折线。真实网络把「先加权求和再非线性变换」层层重复，
         折线越拼越碎，能拼的形状成倍增加。
       </figcaption>

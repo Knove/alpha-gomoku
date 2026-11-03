@@ -1,12 +1,13 @@
 /** 第 7 课 · 卷积核：在全盘滑动的一组权重。
  *  节拍：思考题(结构先给什么)→ 正文(卷积核=3×3 加权求和 / 同一个扫全盘=权重共享 /
  *  归纳偏置 / 48 个是训练学出来的)→ 例 7-1(滑窗 + 扫全盘热力图，conv2d 真算)→
- *  例 7-2(真卷积核墙：weights-best.json 前 8 个)→ 对证(model.py L33)→ 习题。 */
+ *  例 7-2(真卷积核墙：weights-best.json 前 8 个)→ 源码索引与验证 → 习题。 */
 import { useEffect, useMemo, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
+import { EvidenceCard } from "../framework/evidence"
 import { MiniGrid9 } from "../lib/minigrid"
 import { conv2d, type Tensor } from "../engine/nn"
 import type { WeightsJson } from "../engine/model"
@@ -49,7 +50,7 @@ export default function L08() {
           "同一套数字在各位置共用，避免重复学习",
           "许多训练得到的卷积核一起工作，提供后续层需要的特征",
         ]}
-        takeaway="你能手算一处卷积响应（滑窗、padding、通道）；结构只预先给出「棋形局部、各处复用」，核里各格多重要仍由训练决定。"
+        takeaway="你能手算一处卷积响应（滑窗、padding、通道），并指出结构只预先给出「棋形局部、各处复用」、核里各格的分量仍由训练决定。"
         boundary="卷积核不是人手写的「见三连就堵」规则。它只是一组可学习的局部权重，真正的走法还要靠更深的网络和搜索。"
       />
 
@@ -73,17 +74,21 @@ export default function L08() {
       <div className="prose mt-10">
         <h3>一张 3×3 数表给局部格子分别打分</h3>
         <p>
-          接着上一课的手算例：横三连卷积核中间一行是 1、1、1，其余是 0，
+          接着上一课的手算例：横三连卷积核中间一行是 1、1、1，其余是 0。
           盖在某个 3×3 小窗上，对应格子相乘、九个乘积相加（第 4 课推的正是这套乘加）。
+          哪里分数大，哪里就有「横排三个己方子」的嫌疑。
           拿它手算一遍：盖在正罩住己方三连的窗口上，得 <strong className="num">3</strong>；
           往右挪一格，得 <strong className="num">2</strong>；盖到全空的窗上，得{" "}
-          <strong className="num">0</strong>。哪里分数大，哪里就有「横排三个己方子」的嫌疑。
-          这样一张用来找图案的权重表，第 6 课已经把它叫作卷积核；让它滑过全盘、
-          处处算一遍的这套运算，正式名字如下。
+          <strong className="num">0</strong>。
         </p>
+        <Def term="卷积核" en="kernel，亦称滤波器 filter">
+          一张小数表（教学用单平面卷积核是 3×3 的九个数），盖在输入的同尺寸小窗上，对应格子相乘再把乘积加成一个数。
+          数表里的每个数都是一个权重，沿用第 3 课「特征 × 权重」的配对规则，只是九个格子有固定的空间位置。
+          真实网络的三个输入平面各有自己的一张九数小表，合起来才是一套完整卷积核（9 格 × 3 平面 = 27 个权重）。
+        </Def>
         <Def term="卷积" en="convolution">
-          让卷积核滑过全盘、在每个位置都算一遍乘加的这套运算。严格说它算的是互相关
-          （cross-correlation），不是数学意义上的卷积：真正的卷积要把核翻转 180°，这里不翻。对称核翻不翻结果相同（本课教学核恰对称）。torch 也同样名为 conv、实做互相关，所以两边能逐项对拍。
+          让卷积核滑过全盘、在每个位置都算一遍乘加的这套运算。它算的是互相关
+          （cross-correlation），不是数学意义上的卷积：真正的卷积要把核翻转 180°，这里不翻。对称核翻不翻结果相同（本课的教学用单平面卷积核恰对称）。PyTorch（包名 torch）的同名算子也实做互相关，所以两边能逐项对拍。
           机器学习沿用了数学里「卷积」这个名字。每个位置的输出就是该处窗口的分数（第 4 课的加权和）。
         </Def>
       </div>
@@ -95,30 +100,85 @@ export default function L08() {
           81 个分数排成一张 9×9 的图。棋盘外围虚拟补一圈 0，
           含义是「界外按 0 参与计算」。语义上这是拿「空位」近似「界外」：界外那一格像空位一样不挡路，贴边的威胁因此可能被高估一点，是建模近似而非规则事实（颜色平面的贡献在贴边处反而被削掉一圈，方向相反的两个小偏差都会被训练适应）。好处是 81 个格子每个都能当一次窗口中心，特征图不缩水。
         </p>
+        <EvidenceCard
+          fidelity="mirror-exact"
+          title="3×3 窗口滑过全盘：外层逐格移动窗口中心，内层在三张平面上逐格乘加"
+          source="learn/src/engine/nn.ts · conv2d"
+        >
+          <div className="codewalk">
+            <pre>{`    for (let oy = 0; oy < oh; oy++) {
+      for (let ox = 0; ox < ow; ox++) {
+        let acc = b ? b.data[oc] : 0;
+        const iy0 = oy - pad,
+          ix0 = ox - pad;
+        for (let ic = 0; ic < inC; ic++) {
+          const xBase = ic * xh * xw,
+            wCh = wBase + ic * kh * kw;
+          for (let ky = Math.max(0, -iy0); ky < kyEnd; ky++) {
+            const iy = iy0 + ky;
+            if (iy >= xh) break;
+            const xRow = xBase + iy * xw,
+              wRow = wCh + ky * kw;
+            for (let kx = Math.max(0, -ix0); kx < kxEnd; kx++) {
+              const ix = ix0 + kx;
+              if (ix >= xw) break;
+              acc += x.data[xRow + ix] * w.data[wRow + kx];
+            }
+          }
+        }
+        out[(oc * oh + oy) * ow + ox] = acc;
+      }
+    }`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          当 <span className="mono">pad = 1</span>、窗口 <span className="mono">3×3</span> 时，输出高宽{" "}
+          <span className="mono">oh = ow = 9 + 2 − 3 + 1 = 9</span>，特征图与棋盘同大；外层{" "}
+          <span className="mono">oy, ox</span> 走遍 81 个窗口中心，内层 <span className="mono">acc</span> 累加窗口内的逐格乘积，核下标{" "}
+          <span className="mono">wRow + kx</span> 与输入同向而不翻转 180°。例 7-1 的每个窗口分数都由这段算子实时算出。
+        </p>
         <Def term="填充" en="padding">
           在输入外围虚拟补一圈 0。本模型补一圈后，窗口中心可以落在棋盘边缘甚至角上，
           伸出棋盘的部分按 0 参与乘加，特征图与棋盘同大，都是 9×9。
           补 0 对颜色平面的含义也不是「空位」：该平面整图同值（轮黑为 1），界外却补 0，
           贴边窗口里颜色平面的贡献会被削掉一圈，同属实现近似。
         </Def>
-        <Def term="通道" en="channel">
-          一个卷积核扫全盘得到的那张特征图就叫一个通道；卷积核的个数就是通道数。
-        </Def>
-        <Def term="特征图" en="feature map">
+        <Def term="特征图" en="feature map（亦称通道 channel）">
           一个卷积核扫全盘后得到的那张 9×9 分数图：每个格子放该处窗口的分数。
           分数越高，越像该卷积核在找的局部图案。每个分数本身也是回答一个问题的答案
           （「该卷积核找的图案在此处响应多强」）；到下一层，这 81 个分数就换角色成为下一层的 81 个特征值。
-          一个卷积核对应一张特征图，也叫一个输出通道。
+          一个卷积核对应一张特征图，也叫一个输出通道，卷积核的个数就是通道数。
         </Def>
         <p>
           棋盘正中心（天元）的横三连和边角的横三连，用<strong>同一套权重</strong>发现。
           要是每个位置单配一套，一个卷积核就要从 1 套 9 个数膨胀成 81 套，
           而且同一条棋理要学 81 遍：省下的不只是权重，还有重复的学习。
         </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="首层卷积块 stem：3 张输入平面经 channels 个 3×3 卷积核扫出特征图"
+          source="alphagomoku/model.py · AlphaGomokuNet.__init__（stem）"
+        >
+          <div className="codewalk">
+            <pre>{`self.stem = nn.Sequential(
+    nn.Conv2d(3, channels, 3, padding=1, bias=False),
+    nn.BatchNorm2d(channels),
+    nn.ReLU(),
+)`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          <span className="mono">nn.Conv2d(3, channels, 3, padding=1, bias=False)</span> 指定 3 个输入平面、{" "}
+          <span className="mono">channels</span> 个 3×3 卷积核与外圈补 1 格 0；演示模型的{" "}
+          <span className="mono">channels = 48</span>，每个三平面卷积核含 3×3×3 = 27 个权重，全盘 81 个位置共用同一套参数。
+        </p>
         <Def term="权重共享" en="weight sharing">
           同一个卷积核的同一套数字在棋盘各处使用。共享的是局部形状检测，不是位置无关的棋理：贴边的三连和天元的三连威胁性质不同（边挡住了延长线），位置带来的差别要靠更深的层或末端读出层去补。
           一处学到的局部图案检测方式可以直接迁到其他位置。教学用的单平面卷积核带 9 个数，
-          真实的三平面卷积核带 27 个数，都不是按位置各配一套。
+          真实的三平面卷积核带 27 个数：己方平面、对方平面、颜色平面各配一个 3×3，
+          27 个乘积一起相加（也可以按平面分三组各求和、再把三个组和相加，加法可结合，结果相同）。
+          第 3 课那一对「特征 × 权重」在这里摊成 27 对：窗口 9 格 × 3 个平面共 27 项，
+          每项各问一遍「这里是什么」。两种核带的都是一套数，不是按位置各配一套。
         </Def>
       </div>
 
@@ -141,9 +201,9 @@ export default function L08() {
         </Def>
         <p>
           本模型的窗口选 3×3。它能捕捉短短的局部片段，例如连续三子。
-          横、竖、两种斜线方向上的小图案，它也都能发现。3×3 看不到三连两端是否都空，
+          横、竖、两种斜线方向上的小图案，它也都能发现。3×3 横向只罩 3 列，三连两端的两格落在窗外，看不到两端是否都空，
           所以单个卷积核不能单独判定「活三」（还有延伸成五余地的三连）。
-          窗口大小是取舍：2×2 更省却看得更少；5×5 或 9×9 看得更多，
+          窗口大小是取舍：2×2 更省却看得更少；5×5 或 9×9 看得更多（窗换 5×5 时每平面权重数按窗边长的平方变为 25），
           却需要更多权重、也削弱了「先局部、后整体」的好处：大窗每个位置几乎一眼看完一大片（9×9 窗更是一眼看全盘），「先认局部、再组合」的层次没有了，局部发现也无法在各处复用，权重数还随窗面积上涨（即窗边长的平方）。
         </p>
       </div>
@@ -153,55 +213,38 @@ export default function L08() {
         <p>
           本课程演示模型（小一号的 fast 配置，为了让网页算得快）的网络第一层（代码里叫 stem）是{" "}
           <strong className="num">48</strong>{" "}
-          个这样的卷积核<strong>同时</strong>在 9×9 上扫（48 是本快照配置，不是永恒常数）。
-          这 48 个没有一个是人按棋理画的：每个权重都是训练从「网络自己跟自己下的棋」里学出来的。
+          个这样的卷积核<strong>同时</strong>在 9×9 上扫（48 是演示配置，不是永恒常数；
+          项目默认训练配置是 64 通道，代码中的 <span className="mono">channels</span> 才是可改的通用写法）。
+          这 48 个没有一个是人按棋理画的：每个权重都是训练从自我对弈（同一套网络执黑白互为对手自动产生对局、再用终局结果回头调权重的训练方式，第 12 课详解）里学出来的。
           一共 <strong className="num">48 × 27 = 1296</strong> 个权重。
           第 4 课加权求和演示拖过的那 9 个，就是这 48 个卷积核里某一个的己方平面截取（真实权重，不是另编的教学值）；整套 27 元组合是训练自己长出来的。
+          stem 的五行里卷积一行、非线性变换一行：先卷积求和、再整体做非线性变换（第 5 课的次序），这两步一行不缺。
           例 7-2 给出真实权重。
         </p>
-        <Def term="自我对弈" en="self-play" see="第 12 课">
-          同一套网络执黑白互为对手，自动产生训练对局；终局结果再回头调整权重。
-        </Def>
       </div>
 
       <RealKernels />
 
-      <Ledger title="model.py AlphaGomokuNet.stem / game.py encode">
-        <p className="mb-2 text-sm">
-          <strong>这段在证什么：</strong>卷积核怎样在真实网络里滑过全盘，stem 的 Conv2d 一行写定，三个输入平面由 encode 送来。
-        </p>
-        <div className="codewalk">
-          <pre>{`# model.py · AlphaGomokuNet.__init__:通道数由配置传入
-self.stem = nn.Sequential(
-    nn.Conv2d(3, channels, 3, padding=1, bias=False),
-    nn.BatchNorm2d(channels),
-    nn.ReLU(),
-)`}</pre>
-        </div>
-        <p className="mt-3">
-          在本站演示模型的权重里，
-          <span className="mono">channels=48</span>（48 通道就是 48 个卷积核，数核就是数通道），所以
-          <span className="mono">Conv2d(3,48,3,padding=1)</span> 读作
-          「3 个输入平面进来、48 个 3×3 卷积核扫一遍、界外补一圈 0」。默认训练配置是 64 通道；
-          代码中的 <span className="mono">channels</span> 才是可改的通用写法。
-          卷积核扫全盘就是本课的卷积：你在例 7-1 里按的每一下，
-          都是这行代码在做的事。那行 <span className="mono">nn.ReLU()</span>
-          是第 5 课的非线性变换。先卷积求和、再整体做非线性变换，这两步一行不缺。
-          本站引擎 <span className="mono">learn/src/engine/nn.ts</span> 的{" "}
-          <span className="mono">conv2d</span> 与它逐条对齐（例 7-1 的特征图就是它算的）。
-        </p>
-        <div className="codewalk">
-          <pre>{`# game.py · encode  喂进第一层的，正是第 6 课那三个输入平面
-canon = game.canonical_board()          # 我方 = +1
-cur  = (canon == 1).astype(np.float32)  # 平面 0 己方子
-opp  = (canon == -1).astype(np.float32) # 平面 1 对方子
-color = np.full_like(cur, 1.0 if game.current_player == BLACK else 0.0)`}</pre>
-        </div>
-        <p className="mt-3">
-          （完整版在第 6 课对过证。）每个卷积核其实是「3 个一套」：己方平面、对方平面、
-          颜色平面各配一个 3×3，<strong className="num">27</strong> 个乘积一起相加（也可以按平面分三组各求和、再把三个组和相加，加法可结合，结果相同）
-          （第 3 课那「一对特征 × 权重」，这里摊成 27 对：窗口 9 格 × 3 个平面共 27 项，每项各问一遍「这里是什么」），所以例 7-2 的每个真实卷积核画了三张 3×3 小方格图。
-        </p>
+      <Ledger title="alphagomoku/model.py · stem 与 learn/src/engine/nn.ts · conv2d">
+        <ul className="ml-5 list-disc space-y-1.5">
+          <li>
+            <span className="mono">alphagomoku/model.py · AlphaGomokuNet.__init__（self.stem）</span>：用{" "}
+            <span className="mono">nn.Conv2d(3, channels, 3, padding=1, bias=False)</span> 接收第 6 课{" "}
+            <span className="mono">encode</span> 输出的 <span className="mono">(3, 9, 9)</span> 平面，后接批标准化与{" "}
+            <span className="mono">nn.ReLU()</span>，输出 <span className="mono">(channels, 9, 9)</span> 特征图。
+          </li>
+          <li>
+            <span className="mono">learn/src/engine/nn.ts · conv2d</span>：浏览器端对{" "}
+            <span className="mono">nn.Conv2d</span> 的契约复现，外层遍历 81 个窗口中心，内层在输入通道与 3×3 窗口上逐格乘加。
+          </li>
+          <li>
+            上下游衔接：<span className="mono">game.py · encode</span> 的输出送入本课 <span className="mono">stem</span>；<span className="mono">stem</span> 输出送入第 8 课的残差块序列 <span className="mono">self.blocks</span>；例 7-2 展示的真实权重 <span className="mono">stem.0.weight</span>（形状 <span className="mono">[48, 3, 3, 3]</span>，共 <span className="mono">48 × 27 = 1296</span> 个参数）由 <span className="mono">learn/scripts/export_weights.py</span> 从训练检查点导出。
+          </li>
+          <li>
+            验证命令：<span className="mono">pytest tests/test_model.py</span> 与{" "}
+            <span className="mono">cd learn && npm test</span>（对拍 <span className="mono">parity.test.ts</span>）。
+          </li>
+        </ul>
       </Ledger>
 
       <ChapterEnd
@@ -248,7 +291,7 @@ color = np.full_like(cur, 1.0 if game.current_player == BLACK else 0.0)`}</pre>
             q: "第一层放 16 个还是 48 个卷积核，你拿什么证据做取舍？",
             options: [
               "按棋理枚举：三连、活二各有几种，数清楚再定",
-              "不按棋理定数目：核里权重全是训练学出来的（例 7-2），数目是容量旋钮，拿显存、过拟合与对局表现做取舍",
+              "不按棋理定数目：核里权重全是训练学出来的（例 7-2），数目是容量上的可调项，拿显存、过拟合与对局表现做取舍",
               "越多越好，直接堆到 256",
             ],
             answer: 1,
@@ -439,8 +482,8 @@ function SlideWindow() {
             </button>
           </div>
           <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            内置局面：己方三连 (2,4)(3,4)(4,4)（换成了纯三连的小局面，不是第 6 课那局 9 手）。本页坐标和第 1 课一样写成 (x, y)：
-            前一个数是列，后一个是行。用棋盘下方的箭头按钮（或键盘方向键）逐格挪窗口。
+            内置局面：己方横三连 (2,4)(3,4)(4,4)。坐标写成 (x, y)：
+            前一个数是列，后一个是行。用棋盘下方的箭头按钮（或键盘方向键）逐格挪动窗口。
           </p>
         </div>
 
@@ -475,8 +518,9 @@ function SlideWindow() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 7-1</span>
-        每个分数都由本站引擎 <span className="mono">conv2d</span>（model.py stem 同款算子）
-        现算，不是预录的动画。「扫全盘」就是权重共享：一个卷积核走遍 81 格。
+        每个分数都由本站引擎 <span className="mono">conv2d</span>（learn/src/engine/nn.ts，
+        与 model.py stem 同款算子）现算，不是预录的动画。
+        「扫全盘」就是权重共享：一个卷积核走遍 81 格，扫出的 81 个分数到下一层换角色成为 81 个特征值。
       </figcaption>
     </figure>
   )
@@ -515,7 +559,7 @@ function RealKernels() {
       <div className="p-4 md:p-5">
         {!tpl ? (
           <p className="text-sm" style={{ color: "var(--fg-muted)" }}>
-            正在加载真权重：weights-best.json（约 1.2 MB，由 checkpoint 导出；检查点是训练中保存的一组权重，可随时加载）……
+            正在加载真权重：weights-best.json（约 1.2 MB，由检查点导出）……检查点（checkpoint）是训练中保存的一组权重，可随时加载。
           </p>
         ) : (
           <>
@@ -528,19 +572,22 @@ function RealKernels() {
               这些不是示意图：每一格灰度都是{" "}
               <span className="mono">weights-best.json</span> 里{" "}
               <span className="mono">stem.0.weight</span> 的真权重（悬停可看数值）。
-              每个卷积核是「3 个一套」，分别作用在己方平面 / 对方平面 / 颜色平面上；
+              每个卷积核是「3 个一套」，分别作用在己方平面 / 对方平面 / 颜色平面上，
+              左起第一张 3×3 就是它的己方平面 9 个数，第 4 课拖过的那 9 个出自这一层；
               越黑 = 正权重越大，越白 = 负权重越大，中灰 = 0。单看数值像噪声
               （像没信号的电视上一片乱雪花），但训练的用意正是让它们响应棋形：没有人画过图案，
               <strong>每一个权重都是训练学出来的</strong>。结构只承诺「局部 + 处处通用」，
               每个卷积核最终认出什么图案，是训练的事。
+              先猜哪几个在响应横三连或斜线，再对照三平面上的明暗分布（要看真响应亮区，见例 8-2）。
             </p>
           </>
         )}
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 7-2</span>
-        真数据：weights-best.json 由 learn/scripts/export_weights.py 从 checkpoint 导出；
-        此处展示前 8 个 / 共 48 个。先猜哪几个在响应横三连或斜线，再对照三平面上的明暗分布（要看真响应亮区，见例 8-2）。
+        真数据：weights-best.json 由 learn/scripts/export_weights.py 从检查点导出；
+        此处展示前 8 个 / 共 48 个。stem.0.weight 的形状是 [48, 3, 3, 3]：48 个卷积核、
+        每核 3×3×3 共 27 个数，合计 48 × 27 = 1296 个权重。
       </figcaption>
     </figure>
   )

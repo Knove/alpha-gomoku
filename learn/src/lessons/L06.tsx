@@ -1,11 +1,12 @@
 /** 第 13 课 · 反向传播：两种错误怎样改动所有权重。
- *  节拍：思考题 → 两笔真实损失 → 双权重手推(3 / 1 / 0.25)→ 链式四环 →
- *  门关死/梯度消失/残差捷径 → 例 13-1(拖 w₁/w₂ 前向反向联动)→ 对证(train_step)→ 小结 → 习题。 */
-import { useState } from "react"
+ *  节拍：思考题 → 两笔真实损失(落点码 train_step 前向/两笔损失/log_softmax)→ 双权重手推(3 / 1 / 0.25,落点码 twoLayer)→
+ *  链式四环与更新三行 → 门关死/梯度消失/残差捷径 → 例 13-1(拖 w₁/w₂ 前向反向联动)→ 对证(整链:train_step)→ 小结 → 习题。 */
+import { useEffect, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
+import { EvidenceCard } from "../framework/evidence"
 import { twoLayer, twoLayerStep } from "../lib/foundations"
 
 /* 手推例固定：x=2(窗口里己方子数)、z=+1(假设这局训练对局后来由我赢);
@@ -55,22 +56,27 @@ export default function L06() {
       <div className="prose mt-10">
         <h3>两笔损失各自指出一种错误</h3>
         <p>
-          训练从存旧样本的回放池（第 6 课引入）抽到局面 s 后，会让<strong>当前网络重新做一次前向计算</strong>，
-          得到 81 个 <span className="mono">logits</span> 和一个直接价值输出
-          <span className="mono">v_net</span>（不经搜索，网络自己报的价值）。策略目标是搜索留下的 <span className="mono">π</span>，
+          策略目标是搜索留下的 <span className="mono">π</span>，
           价值目标是终局补上的 <span className="mono">z</span>，它们扮演「标准答案」的角色。
           对局记录里保存的 <span className="mono">root_value</span> 只是搜索时顺手记下的数值，
-          不参与这笔价值损失。
+          不参与这笔价值损失。训练从存旧样本的回放池（第 6 课引入）抽到局面 s 并把每张棋盘与它的 π 改写成同一个等价视图（第 14 课的数据增强）后，
+          会让<strong>当前网络重新做一次前向计算</strong>，
+          得到 81 个 <span className="mono">logits</span> 和一个直接价值输出
+          <span className="mono">v_net</span>（代码里写作 <span className="mono">v</span>，不经搜索，由网络直接报出）。
         </p>
-        <Def term="训练目标" en="training target" see="第 12 课">
-          训练时充当标准答案的量。本课有两个：策略目标 π 是搜索留下的访问分布，
-          价值目标 z 是终局补上的结果（赢 +1、输 −1、和 0）。
-        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="对当前批次重新执行前向计算，取得策略 logits 与价值估计 v"
+          source="alphagomoku/train.py · train_step"
+        >
+          <div className="codewalk">
+            <pre>{`    logits, v = net(x)`}</pre>
+          </div>
+        </EvidenceCard>
         <p>
-          把「错多少」写成可比较的数，先看下文那台双权重玩具的手推例会得到什么，再看两条公式。
-          玩具里网络给出 1.5、答案是 1，误差 0.5，取平方后损失是
-          <span className="mono">0.25</span>；真实网络的价值损失也取这种平方，
-          策略损失则比较网络给的落子概率 p 和目标 π。
+          为了把「错多少」写成可比较的标量，训练分别用交叉熵比较网络给出的落子概率{" "}
+          <span className="mono">p</span> 与目标 <span className="mono">π</span>，用均方误差比较网络价值估计{" "}
+          <span className="mono">v_net</span> 与终局结果 <span className="mono">z</span>。
         </p>
         <Def term="交叉熵" en="cross-entropy">
           策略损失。写成 <span className="mono">−Σπᵢ ln pᵢ</span>：
@@ -85,19 +91,35 @@ export default function L06() {
         </Def>
         <div className="formula">
           L<sub>策略</sub> = −Σπᵢ ln pᵢ（交叉熵）　　L<sub>价值</sub> = (v_net−z)²（均方误差）
-          <br />L<sub>总</sub> = L<sub>策略</sub> + L<sub>价值</sub>（两笔等权 1:1 是起点不是真理）
+          <br />L<sub>总</sub> = L<sub>策略</sub> + L<sub>价值</sub>（等权 1:1 是本项目起点配置，权重可调，见下行）
         </div>
         <p>
-          以上两条公式算的是<strong>单条样本</strong>的量；一次更新在一批样本上各自取平均，总损失是一批一个标量。两笔的天然尺度并不相同：策略损失在 81 格上求和，价值损失只是一个平方，等权不等于同等影响；把价值权重调大，主干偏向读输赢、落子变粗，反之亦然。本项目固定 1:1。
+          以上两条公式算的是<strong>单条样本</strong>的量。两笔的天然尺度并不相同：
+          策略损失在 81 格上求和，价值损失只是一个平方，等权不等于同等影响；
+          把价值权重调大，主干偏向读输赢、落子变粗，反之亦然。
+          一次更新在一批样本上各自取平均，总损失是一批一个标量，本项目固定 1:1。
         </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="分别计算价值均方误差与策略交叉熵，并等权相加为总损失"
+          source="alphagomoku/train.py · train_step"
+        >
+          <div className="codewalk">
+            <pre>{`    value_loss = F.mse_loss(v, target_z)
+    logp = F.log_softmax(logits, dim=-1)
+    policy_loss = -(target_pi * logp).sum(dim=-1).mean()
+    loss = value_loss + policy_loss`}</pre>
+          </div>
+        </EvidenceCard>
         <p>
           <span className="mono">p</span> 是网络在 81 个格子上的落子概率（softmax 的输出，按惯例记小写 p；进搜索充当先验时还要先遮掉已占格、重新归一，那时才叫先验 P，见第 10 课）：logits 先过第 9 课的
-          softmax，凑成和为 1 的 p。代码不先算 p 再取对数，而是一步算出 ln p，
-          这一步合起来叫 log_softmax。 <span className="mono">ln</span> 是以 e 为底的对数，
-          softmax 用的是它的反函数 exp。两个头读同一个主干（两头共用的那段网络），所以两份目标信号必须一起进入同一笔总损失。
+          softmax，凑成和为 1 的 p。<span className="mono">ln</span> 是以 e 为底的对数，
+          softmax 用的是它的反函数 exp。两个头读同一个主干（两头共用的那段网络），所以两份目标信号必须一起进入同一笔总损失；
+          代码不先算 p 再取对数，而是一步算出 ln p，
+          这一步合起来叫对数归一化，代码里写作 <span className="mono">log_softmax</span>。
         </p>
-        <Def term="log_softmax" en="log-softmax">
-          把 logits 变成落子概率 p 并一步算出 ln p 的运算。先算出可能极小的 p 再取对数
+        <Def term="对数归一化" en="log_softmax">
+          把 logits 变成落子概率 p 并一步算出 ln p 的运算，代码里写作 log_softmax。先算出可能极小的 p 再取对数
           容易数值不稳；合成一步更稳。
         </Def>
 
@@ -114,9 +136,9 @@ export default function L06() {
         </Def>
         <p>
           先用两个权重看清规则。令 <span className="mono">x=2</span> 是一个教学特征，
-          <span className="mono">w₁=0.5、w₂=1.5</span>，并假设终局标签是 <span className="mono">z=+1</span>。
-          这台玩具故意省略 tanh（定义见第 9 课），前向得到中间数 <span className="mono">h=1</span>、原始分数 <span className="mono">r=1.5</span>，所以损失是
-          <span className="mono">(1.5−1)²=0.25</span>。现在从这 0.25 分倒着看它怎样摊到两个权重上。
+          <span className="mono">w₁=0.5、w₂=1.5</span>，并假设终局结果是 <span className="mono">z=+1</span>。
+          这台玩具故意省略 tanh（定义见第 9 课），前向先算加权和 <span className="mono">s=w₁·x=1</span>，过 ReLU 门得到中间数 <span className="mono">h=1</span>，再乘 <span className="mono">w₂</span> 得到原始分数 <span className="mono">r=1.5</span>（代码形参写作 <span className="mono">v</span>），所以平方损失是
+          <span className="mono">(1.5−1)²=0.25</span>。
         </p>
         <div className="formula">
           w₁ 的梯度 = <span className="hl">3</span>　　w₂ 的梯度 = <span className="hl">1</span>
@@ -141,18 +163,87 @@ export default function L06() {
           <span className="hl">3</span>
           <br />∂损失/∂w₂ = 2(r−z) × h = 1 × 1 = <span className="hl">1</span>
         </div>
+        <EvidenceCard
+          fidelity="constructed"
+          title="双权重教学模型：前向求损失与反向链式法则求梯度"
+          source="learn/src/lib/foundations.ts · twoLayer"
+        >
+          <div className="codewalk">
+            <pre>{`export function twoLayer(w1: number, w2: number, x: number, z: number): TwoLayer {
+  const s = w1 * x
+  const h = relu(s)
+  const v = w2 * h
+  const loss = quadLoss(v, z)
+  const dv = 2 * (v - z)
+  const gate: 0 | 1 = s > 0 ? 1 : 0
+  return {
+    s,
+    h,
+    v,
+    loss,
+    dv,
+    dW2: dv * h,
+    dW1: dv * w2 * gate * x,
+    gate,
+  }
+}`}</pre>
+          </div>
+        </EvidenceCard>
+        <p>
+          两个梯度算出后，一次权重更新的次序是固定的：先清旧梯度，再沿这次总损失反向传播，
+          最后由优化器把每个权重挪一步。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="清空旧梯度、沿总损失反向传播并执行一步参数更新"
+          source="alphagomoku/train.py · train_step"
+        >
+          <div className="codewalk">
+            <pre>{`    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          其中 <span className="mono">optimizer.step()</span> 在按梯度迈步之外，还会叠加上动量（把最近几次更新方向合成惯性）、Nesterov 预探（先按惯性探一步再算梯度）与权重衰减（每步给权重乘小于 1 的正因子{" "}
+          <span className="mono">1−lr·weight_decay</span>，往零轻拽）；这三项优化器配套只改变「怎么调」，不改变「算什么损失」，将在第 14 课正式展开。
+        </p>
 
         <h3>门关死、梯度消失与残差捷径</h3>
         <p>
-          若把 w₁ 调到 −0.5，玩具中的 ReLU 会让 <span className="mono">h=0</span>；w₂ 的梯度式里含因子
-          h，而 h=0，w₁ 的路径也断在门=0，所以这条路径两个权重都收不到更新。真实网络还有其他通道，
+          在上方 <span className="mono">twoLayer</span> 代码中，若把 <span className="mono">w₁</span> 调到 −0.5，
+          加权和 <span className="mono">s ≤ 0</span>，玩具中的 ReLU 会让{" "}
+          <span className="mono">h=0</span>，同时条件 <span className="mono">s &gt; 0</span> 让{" "}
+          <span className="mono">gate=0</span>。
+          因为 <span className="mono">w₂</span> 的梯度式里乘了因子 <span className="mono">h</span>，
+          <span className="mono">w₁</span> 的路径也乘了 <span className="mono">gate</span>，
+          所以门一关，这条路径上的两个权重都收不到更新。真实网络还有其他通道，
           不能因此断言整张网络都收不到信号；这个例子只说明门关上时该路径不会更新。
         </p>
         <p>
-          深层里很多小于 1 的影响连续相乘，会让靠前的层更新变弱。残差块（第 8 课立目：输出 = 输入 + 修正量）的
-          <span className="mono">x+F(x)</span> 在出口 ReLU 之前留下一条梯度为 1 的捷径，
-          用来缓解这种变弱。
+          梯度为 0 是不动点，纯梯度下降不会把这条路径救活；这族整条路径停摆的现象叫
+          死亡 ReLU（dying ReLU）。真实网络里可能翻案的是带泄漏的线性整流单元
+          （Leaky Rectified Linear Unit，简称 LeakyReLU，负区仍留梯度）、卷积权重共享下
+          其他位置的梯度，或其他路径的扰动。权重衰减救不活死门：它每步只给 <span className="mono">w₁</span> 乘正因子 <span className="mono">1−lr·weight_decay</span>，只会保持符号把 <span className="mono">w₁</span> 慢慢拉向 0，
+          到 0 处门仍然关着。
         </p>
+        <p>
+          深层里很多小于 1 的影响连续相乘，会让靠前的层更新变弱。第 8 课定义的残差块（输出 = 输入 + 修正量）用{" "}
+          <span className="mono">x+F(x)</span> 在出口 ReLU 之前留下一条梯度为 1 的捷径：
+          输入 <span className="mono">x</span> 那一支不经过卷积与批标准化，以系数 1 直通到加法，用来缓解这种变弱。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="残差块前向计算：在出口激活前将输入 x 与卷积支路 h 直接相加"
+          source="alphagomoku/model.py · ResBlock.forward"
+        >
+          <div className="codewalk">
+            <pre>{`    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = F.relu(self.bn1(self.conv1(x)))
+        h = self.bn2(self.conv2(h))
+        return F.relu(x + h)`}</pre>
+          </div>
+        </EvidenceCard>
         <Def term="梯度消失" en="vanishing gradient">
           深层网络里若许多局部变化率的绝对值小于 1，连乘就会消失（大于 1 则相反地爆炸，exploding gradient），靠前的层各权重的梯度极小，几乎不更新。
           残差捷径这一段的总梯度是 <span className="mono">1+F′</span>（F′ 是修正量 F 那条路的梯度）
@@ -163,36 +254,59 @@ export default function L06() {
 
       <TwoLayerBook />
 
-      <Ledger title="train.py · train_step（前向 → 两笔损失 → 反向传播 → 更新）">
-        <p className="mb-2 text-sm">
-          <strong>这段在证什么：</strong>反向梯度接力的全过程就是 train_step 这一段：前向算分、算两笔损失、backward（求梯度）、step（更新）。
-        </p>
-        <Def term="数据增强" en="data augmentation" see="第 14 课">
-          从若干等价视图里随机取一种来呈现当前样本，不增加样本条数。本课只用到「批次在喂网络前已经增广过」这一件事。
-        </Def>
-        <p className="mb-2 text-sm" style={{ color: "var(--fg-faint)" }}>
-          节选从已增广的批次开始。真正的 train_step 在喂网络前，还把每张棋盘和 π 一起做
-          8 种旋转/翻折之一。
+      <Ledger title="alphagomoku/train.py · train_step">
+        <p className="mb-3 text-sm">
+          下面完整展示 <span className="mono">train_step</span> 从批次对称增广、张量搬运、重新前向、计算价值与策略损失到反向传播并一步更新权重的全部实现：
         </p>
         <div className="codewalk">
-          <pre>{`logits, v = net(x)                            # 当前网络重新前向，v 就是 v_net
-value_loss = F.mse_loss(v, target_z)          # 价值目标 z
-logp = F.log_softmax(logits, dim=-1)
-policy_loss = -(target_pi * logp).sum(dim=-1).mean() # 策略目标 π
-loss = value_loss + policy_loss
-optimizer.zero_grad()
-loss.backward()
-optimizer.step()`}</pre>
+          <pre>{`def train_step(
+    net: AlphaGomokuNet,
+    optimizer: torch.optim.Optimizer,
+    batch,
+    device: str,
+    rng: np.random.Generator,
+) -> dict:
+    """One SGD update on a batch from ReplayBuffer.sample(). Returns metrics."""
+    inputs, pis, zs = batch
+    B = inputs.shape[0]
+    n = inputs.shape[-1]
+    ks = rng.integers(0, 8, size=B)
+    aug_in = np.empty_like(inputs)
+    aug_pi = np.empty_like(pis)
+    for i in range(B):
+        k = int(ks[i])
+        aug_in[i] = dihedral_transform(inputs[i], k)
+        aug_pi[i] = dihedral_transform_pi(pis[i], n, k)
+
+    x = torch.from_numpy(aug_in).to(device)
+    target_pi = torch.from_numpy(aug_pi).to(device)
+    target_z = torch.from_numpy(zs.astype(np.float32)).to(device)
+
+    net.train()
+    logits, v = net(x)
+    value_loss = F.mse_loss(v, target_z)
+    logp = F.log_softmax(logits, dim=-1)
+    policy_loss = -(target_pi * logp).sum(dim=-1).mean()
+    loss = value_loss + policy_loss
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    with torch.no_grad():
+        entropy = -(logp.exp() * logp).sum(dim=-1).mean()
+    return {
+        "loss": float(loss.item()),
+        "policy_loss": float(policy_loss.item()),
+        "value_loss": float(value_loss.item()),
+        "policy_entropy": float(entropy.item()),
+        "lr": float(optimizer.param_groups[0]["lr"]),
+    }`}</pre>
         </div>
-        <p className="mt-3">
-          先清旧梯度，再沿<strong>这次</strong>总损失反向接力，最后由优化器更新全部权重。
-          这段代码没有读取搜索时记下的 root_value：它只使用重新计算的 v_net、目标 z 和目标 π。
-          真实的优化器还带三件配套工具，第 3 课点过名。
+        <p className="mt-3 text-sm">
+          运行 <span className="mono">python -m pytest tests/test_train.py -q</span>{" "}
+          可验证单步训练损失计算、梯度反向传播与参数更新。
         </p>
-        <Def term="动量、Nesterov 与权重衰减" en="momentum, Nesterov, weight decay" see="第 14 课">
-          真实优化器的三件配套工具，分别用来稳住更新方向、先按惯性探一步再算梯度、
-          每次更新把权重往零轻拽。它们只改变「怎么调」，不改变「算什么损失」。
-        </Def>
       </Ledger>
 
       <ChapterEnd
@@ -205,7 +319,7 @@ optimizer.step()`}</pre>
           <>
             下一课看许多样本怎样形成一次更新。回放池用环形缓冲区装旧样本，攒够
             min_buffer 后均匀有放回地抽小批；棋盘与 π 同步做八种旋转镜像而 z 不转；
-            然后接上真实优化器的动量、Nesterov、权重衰减，并接上 checkpoint 与 latest
+            然后接上真实优化器的动量、Nesterov、权重衰减，并接上检查点（checkpoint）与 latest
             的恢复口径。到那里，一次 train_step 才在完整的样本流水线上落位。
           </>
         }
@@ -241,7 +355,7 @@ optimizer.step()`}</pre>
             options: [
               "因为只要把两个数字相加，训练速度一定翻倍",
               "同一组权重同时影响「下哪」和「谁优」；把两份反馈合起来，主干才能同时朝两种目标调整",
-              "因为终局 z 和搜索 π 本来就是同一个数",
+              "因为终局结果 z 和搜索 π 本来就是同一个数",
             ],
             answer: 1,
             explain:
@@ -261,12 +375,14 @@ const boxStyle = {
   padding: "0.3rem 0.55rem",
   minWidth: "5.2rem",
   textAlign: "center" as const,
+  transition: "opacity 280ms ease, border-color 280ms ease, background 280ms ease",
 }
 const arrow = <span style={{ color: "var(--fg-faint)" }}>→</span>
 
 function TwoLayerBook() {
   const [w1, setW1] = useState(W1_0)
   const [w2, setW2] = useState(W2_0)
+  const [pulse, setPulse] = useState<number | null>(null)
   const [last, setLast] = useState<{
     b1: number
     b2: number
@@ -278,6 +394,22 @@ function TwoLayerBook() {
 
   const g = twoLayer(w1, w2, X, Z)
   const dead = g.gate === 0
+
+  useEffect(() => {
+    if (pulse === null) return
+    const maxStep = dead ? 7 : 9
+    if (pulse > maxStep) {
+      setPulse(null)
+      return
+    }
+    const id = window.setTimeout(() => setPulse((p) => (p === null ? null : p + 1)), 320)
+    return () => window.clearTimeout(id)
+  }, [pulse, dead])
+
+  const hi = (idx: number) =>
+    pulse === idx
+      ? { borderColor: "var(--accent)", background: "var(--accent-wash)" }
+      : undefined
 
   const stepOnce = () => {
     const before = twoLayer(w1, w2, X, Z)
@@ -326,7 +458,7 @@ function TwoLayerBook() {
 
           <div className="reveal-box mt-4">
             <p className="text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-              x = 2（这扇窗里有 2 颗己方子）。注意 x 已换成「窗内己方子数」，不再是第 3 课的「三连条数」，数值碰巧都是 2。z = +1（假设训练对局后来我赢）。拖 w₁
+              x = 2（这扇窗里有 2 颗己方子）。x 是窗内己方子数，与第 3 课的三连条数数值同为 2。z = +1（假设训练对局后来我赢）。拖 w₁
               <strong>穿过 0</strong>：看这道<strong>双权重玩具题</strong>的反向梯度列全部变为 0。
               ReLU 门关上后，这条路径不会更新。
             </p>
@@ -335,6 +467,10 @@ function TwoLayerBook() {
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <button type="button" className="btn primary" onClick={stepOnce} data-qa="step-btn-two">
               走一步(lr = 0.1)
+            </button>
+            <button type="button" className={`btn ${pulse !== null ? "active" : ""}`}
+              onClick={() => setPulse((p) => (p === null ? 0 : null))}>
+              {pulse !== null ? "⏸ 停" : "▶ 演示前向与反传"}
             </button>
             <button type="button" className="btn" onClick={reset}>↺ 回到手推例</button>
           </div>
@@ -362,29 +498,29 @@ function TwoLayerBook() {
         <div className="min-w-0 flex-1">
           <div className="mini-label">前向：x → s → h → r（玩具原始分数） → 损失</div>
           <div className="mt-2 flex flex-wrap items-center gap-2" data-qa="fwd-chain">
-            <div style={boxStyle}>
+            <div style={{ ...boxStyle, ...hi(0) }}>
               <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>x 子数</div>
               <div className="num font-bold">{X}</div>
             </div>
             {arrow}
-            <div style={boxStyle}>
+            <div style={{ ...boxStyle, ...hi(1) }}>
               <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>s = w₁·x</div>
               <div className="num font-bold">{g.s.toFixed(2)}</div>
             </div>
             {arrow}
-            <div style={{ ...boxStyle, border: dead ? "1px solid var(--accent)" : "1px solid var(--hairline)" }}>
+            <div style={{ ...boxStyle, border: dead ? "1px solid var(--accent)" : "1px solid var(--hairline)", ...hi(2) }}>
               <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>h = ReLU(s)</div>
               <div className="num font-bold" style={{ color: dead ? "var(--accent-deep)" : undefined }}>
                 {g.h.toFixed(2)}
               </div>
             </div>
             {arrow}
-            <div style={boxStyle}>
+            <div style={{ ...boxStyle, ...hi(3) }}>
               <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>r = w₂·h</div>
               <div className="num font-bold">{g.v.toFixed(2)}</div>
             </div>
             {arrow}
-            <div style={{ ...boxStyle, borderColor: "var(--accent)" }}>
+            <div style={{ ...boxStyle, borderColor: "var(--accent)", ...hi(4) }}>
               <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>损失 (r−z)²</div>
               <div className="num font-bold" style={{ color: "var(--accent-deep)" }}>
                 {g.loss.toFixed(3)}
@@ -394,29 +530,29 @@ function TwoLayerBook() {
 
           <div className="mini-label mt-5">反向：损失 → 接力四环 → w₁ 的梯度</div>
           <div className="mt-2 flex flex-wrap items-center gap-2" data-qa="bwd-chain">
-            <div style={{ ...boxStyle, ...dim }}>
+            <div style={{ ...boxStyle, ...dim, ...hi(5) }}>
               <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>① 损失对 r</div>
               <div className="num font-bold">2(r−z) = {g.dv.toFixed(2)}</div>
             </div>
             <span style={{ color: "var(--fg-faint)", ...dim }}>×</span>
-            <div style={{ ...boxStyle, ...dim }}>
+            <div style={{ ...boxStyle, ...dim, ...hi(6) }}>
               <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>② r 对 h</div>
               <div className="num font-bold">w₂ = {w2.toFixed(2)}</div>
             </div>
             <span style={{ color: "var(--fg-faint)", ...dim }}>×</span>
-            <div style={{ ...boxStyle, border: "1px solid var(--accent)" }}>
+            <div style={{ ...boxStyle, border: "1px solid var(--accent)", ...hi(7) }}>
               <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>③ 门(s&gt;0 才开)</div>
               <div className="num font-bold" style={{ color: dead ? "var(--accent-deep)" : undefined }}>
                 {g.gate}
               </div>
             </div>
             <span style={{ color: "var(--fg-faint)", ...dim }}>×</span>
-            <div style={{ ...boxStyle, ...dim }}>
+            <div style={{ ...boxStyle, ...dim, ...hi(8) }}>
               <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>④ s 对 w₁</div>
               <div className="num font-bold">x = {X}</div>
             </div>
             <span style={{ color: "var(--fg-faint)", ...dim }}>=</span>
-            <div style={{ ...boxStyle, borderColor: "var(--accent)", ...dim }}>
+            <div style={{ ...boxStyle, borderColor: "var(--accent)", ...dim, ...hi(9) }}>
               <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>w₁ 的梯度</div>
               <div className="num font-bold" style={{ color: "var(--accent-deep)" }}>
                 {g.dW1.toFixed(2)}
@@ -442,7 +578,7 @@ function TwoLayerBook() {
               s ≤ 0），h=0。w₂ 的梯度恰好乘它前面的 h(0),w₁ 的接力断在
               第③环（门=0）。在这道<strong>双权重玩具题</strong>里，两个权重都
               <strong>收不到梯度</strong>：损失明明是 {g.loss.toFixed(2)}，却没有一个权重知道该动。
-              纯梯度下降不会把这条路径救活：梯度为 0 是不动点。演示里的「拖回」是你在拖滑杆；真实网络里可能翻案的是 LeakyReLU 一类设计（负区仍有梯度）、卷积权重共享下其他位置的梯度，或其他路径的扰动。这族问题叫 dying ReLU。注意权重衰减救不活它：每步 w₁←w₁(1−lr·wd)，括号里的因子为正，w₁ 只会保持符号、慢慢贴近 0；到 0 处门仍然关着。
+              演示里的「拖回」是你在拖滑杆。
             </div>
           ) : (
             <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
@@ -456,7 +592,7 @@ function TwoLayerBook() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 13-1</span>
-        前向与反向同一套数(lib/foundations.ts 的{" "}
+        前向与反向同一套数(learn/src/lib/foundations.ts 的{" "}
         <span className="mono">twoLayer</span>)：拖任何一个权重，两个梯度同时更新。
         「走一步」走的是真训练的同一条主线 w ← w − lr×梯度（真训练还带动量与权重衰减），玩具把 lr 取 0.1
         （真实配置是 0.01）；手推例的数字(3、1、

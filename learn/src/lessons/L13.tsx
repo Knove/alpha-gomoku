@@ -1,11 +1,13 @@
-/** 第 15 课 · 竞技场：证据说话。
- *  节拍：思考题（损失降=棋力涨？）→ 角色(best/latest/baseline/challenger)→
- *  受控对战（换先后手/开局采样/和棋半分）→ 晋升计算器 → 真实对局 → 对证 → 习题。 */
+/** 第 15 课 · 竞技场：谁有资格成为 best。
+ *  节拍：思考题（损失降=棋力涨？）→ 角色(best/latest/baseline/challenger，落点码首任 best/基线/晋升线)→
+ *  受控对战（换先后手/开局采样/和棋半分，落点码 net_assign/采样开关/计分行）→ 晋升计算器 → 真实对局
+ *  → 对证（整链：演示配置、play_match 计分与开关、pipeline 晋升分支）→ 习题。 */
 import { useEffect, useMemo, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
+import { EvidenceCard } from "../framework/evidence"
 import Board from "../lib/board"
 import { REAL } from "../data/real"
 import { emptyBoard, play, type GameState } from "../engine/game"
@@ -62,7 +64,7 @@ export default function L13() {
           "公布局数与结果的不确定度",
           "用固定参照网衡量长期进步",
         ]}
-        takeaway="你能配置一场受控对战（交换先后手、开局按 π 采样），并按得分率执行 55% 晋升判定；损失与访问数集中都不当棋力证据。"
+        takeaway="你能配置一场受控对战（交换先后手、开局按 π 采样），并按得分率执行 55% 晋升判定；并指出损失与访问数集中都不当棋力证据。"
         boundary="少量对局仍有运气，所以竞技场只能提供有限证据；局数、规则和对手都会影响结论强度。"
       />
 
@@ -97,67 +99,151 @@ export default function L13() {
         </Def>
 
         <h3>4 个身份决定谁和谁比</h3>
+        <Def term="四种模型身份：latest、challenger、best、baseline" en="model roles">
+          <strong>最近保存点</strong>（<span className="mono">latest</span>，见第 14 课）是最近一次保存的训练状态，只代表「刚写完」，不自动等于当前最佳模型；
+          <strong>挑战者</strong>（<span className="mono">challenger</span>）是刚完成一轮训练、等待评估的新网络，属于待检验对象，检验方式是分别对战当前最佳模型与基线；
+          <strong>当前最佳模型</strong>（<span className="mono">best</span>）是竞技场认可的最强权重，只有挑战者过晋升线才换主，下棋演示上场的就是它；
+          <strong>基线</strong>（<span className="mono">baseline</span>）是训练开始前冻结的随机网络，充当永远不变的对照基准，挑战者与它比较（演示配置 6 局）量的是长期进步，不参与晋升，只当一把不动的尺。
+        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="对战基线只记录成绩，不参与晋升"
+          source="alphagomoku/pipeline.py · run"
+        >
+          <div className="codewalk">
+            <pre>{`                arena_base = {"win_rate_a": res_b["win_rate_a"], "wins_a": res_b["wins_a"],
+                              "wins_b": res_b["wins_b"], "draws": res_b["draws"],
+                              "promoted": False}`}</pre>
+          </div>
+        </EvidenceCard>
         <p>
-          评估前先认清对战双方的来历：自我对弈下棋用的就是当前网络（latest），它训练完一轮后当挑战者上场对战 best；latest 只是最近保存点，不自动等于 best；
-          baseline 提供长期进步的参照。若项目还没有 <span className="mono">best.pt</span>，
-          第一次评估会先把当前网络直接保存为首任 best；
-          从下一次开始，才需要挑战现任 best 并过晋升线。
+          评估前先认清对战双方的来历：自我对弈下棋用的就是当前网络，它训练完一轮后以挑战者身份上场对战当前最佳模型；最近保存点只代表刚写完，不自动等于当前最佳模型；
+          基线提供长期进步的参照。从第二次评估起，才需要挑战现任并过晋升线；
+          若项目还没有 <span className="mono">best.pt</span>，
+          第一次评估会先把当前网络直接保存为首任当前最佳模型。
         </p>
-        <Def term="竞技场" en="arena">
-          专门用来比较 2 个网络实战能力的受控对战环节。它不加入自我对弈用的根噪声
-          （根噪声见第 11 课，给根节点掺随机），
-          但开局前几手仍按搜索访问分布 π 采样；结果按固定规则记分，并决定挑战者能否成为新的 best。
-        </Def>
-        <Def term="挑战者" en="challenger">
-          刚完成一轮训练、等待评估的新网络。它是待检验的对象，不是现任最强；
-          检验的方式是对战现任 best，并对战 baseline。
-        </Def>
-        <Def term="当前最佳模型" en="best">
-          竞技场认可的最强权重；只有挑战者过晋升线才换主，下棋演示上场的就是它。
-        </Def>
-        <Def term="最近保存点" en="latest" see="第 14 课">
-          最近一次保存的训练状态，只代表「刚写完」，不自动等于 best。
-        </Def>
-        <Def term="基线" en="baseline">
-          训练开始前冻结的随机网络，一个永远不变的对照基准；挑战者与它比较，量的是长期进步：连冻结的初始网都赢不过，训练一定出了大问题。这组对局（演示配置 6 局）不参与晋升，只当一把不动的尺。
+        <Def term="受控对战" en="controlled match">
+          在<strong>竞技场</strong>（arena）中比较 2 个网络实战能力的成组对局：固定局数、交换先后手、关闭自我对弈用的根噪声（根噪声见第 11 课，给根节点掺随机），但开局前几手仍按搜索访问分布 <span className="mono">π</span> 采样分叉；
+          每局按胜 1、和 0.5、负 0 记分，一组对局汇总成得分率，用来决定挑战者能否成为新的当前最佳模型。
         </Def>
         <Def term="晋升线" en="promote threshold">
-          挑战者得分率的及格线，演示配置取 55%（<span className="mono">promote_threshold=0.55</span>）。这条线只看挑战者对 best 那一组的得分率，对 baseline 的得分率不参与晋升。
-          达到或超过这条线，挑战者才成为新的 best。它是让自动训练能继续运转的工程门槛，
+          挑战者得分率的及格线。得分率 =（胜局 + 0.5×和局）/ 总局数，演示配置取 55%（<span className="mono">promote_threshold=0.55</span>）。这条线只看挑战者对当前最佳模型那一组的得分率，对基线的得分率不参与晋升。
+          达到或超过这条线，挑战者才成为新的当前最佳模型。它是让自动训练能继续运转的工程门槛，
           并不等于「已统计证明更强」：局数越少，运气和开局造成的摇摆越大。
         </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="得分率达到 55% 晋升线即保存为新 best，尚无 best 时直接任命"
+          source="alphagomoku/pipeline.py · run"
+        >
+          <div className="codewalk">
+            <pre>{`                best_path = storage.checkpoint_path("best")
+                if best_path.exists():
+                    champ_net, _ = load_checkpoint(str(best_path), device)
+                    res = play_match(challenger, Predictor(champ_net, device), cfg,
+                                     iteration, iter_rng, storage=storage, opponent="best",
+                                     on_progress=on_arena_progress)
+                    promoted = res["win_rate_a"] >= cfg.promote_threshold
+                    if promoted:
+                        save_checkpoint(net, cfg.to_dict(), str(best_path),
+                                        meta={"iteration": iteration})
+                        best_iteration = iteration
+                    arena_best = {"win_rate_a": res["win_rate_a"], "wins_a": res["wins_a"],
+                                  "wins_b": res["wins_b"], "draws": res["draws"],
+                                  "promoted": promoted}
+                    storage.append_event("arena_end", {
+                        "iteration": iteration, "opponent": "best",
+                        "win_rate": res["win_rate_a"], "wins": res["wins_a"],
+                        "losses": res["wins_b"], "draws": res["draws"], "promoted": promoted,
+                    })
+                else:
+                    save_checkpoint(net, cfg.to_dict(), str(best_path),
+                                    meta={"iteration": iteration})
+                    best_iteration = iteration`}</pre>
+          </div>
+        </EvidenceCard>
 
         <h3>受控对战要控制先后手与开局</h3>
-        <Def term="取最大" en="argmax">
-          只取数值最大的那个元素。在动作选择上指选打分最高的那个动作；本课指选访问数最多的动作。
-        </Def>
         <p>
           受控不是把同一局棋重复 6 遍。写程序的人常碰到「确定性陷阱」：
-          argmax 加上不加噪声的搜索是完全确定的，同一局面永远走出同样的棋。
+          若每步都只取访问数最多的动作（取最大，即 <span className="mono">argmax</span>），再加上不加噪声的搜索是完全确定的，同一局面永远走出同样的棋。
           2 个固定的网络只要先手方相同，
           就会下出逐手一模一样的棋，「6 局对抗」等于只下了 2 局：挑战者执黑 1 局、执白 1 局（黑方永远先走，换的是谁拿黑），其余 4 局全是重播。
         </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="按局号奇偶交替分配执黑方"
+          source="alphagomoku/arena.py · play_match"
+        >
+          <div className="codewalk">
+            <pre>{`    def net_assign(gi: int):
+        if gi % 2 == 0:
+            return ({1: pred_a, -1: pred_b}, name_a, name_b)
+        return ({1: pred_b, -1: pred_a}, name_b, name_a)`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          局号 <span className="mono">gi</span> 为偶数时挑战者（<span className="mono">pred_a</span>）执黑、奇数时执白，
+          6 局里挑战者执黑 3 局、执白 3 局。
+        </p>
         <p>
+          自我对弈同理，它的棋谱局局不同，开局采样正是原因之一。
+          开局适度分叉、双方轮流执黑，才能减少把颜色和单一路线误当成棋力的机会；
+          竞技场不加根噪声（见上方定义框「受控对战」），靠的就是把开局引上不同岔路。
           解法是开局采样：前几手仍按 π 采样，概率大的多抽、小的也抽得到，把棋盘引上不同的岔路，
-          之后才认真走 argmax。自我对弈同理，它的棋谱局局不同，开局采样正是原因之一。
-          开局适度分叉、双方轮流执黑，才能减少把颜色和单一路线误当成棋力的机会。
+          之后才取最大（argmax）。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="竞技场关闭根噪声，开局前几手按 π 采样"
+          source="alphagomoku/arena.py · play_match"
+        >
+          <div className="codewalk">
+            <pre>{`        add_noise=False, simulations=cfg.arena_simulations,
+        sample_temperature=True, temp_threshold=max(2, cfg.temp_threshold // 2),`}</pre>
+          </div>
+        </EvidenceCard>
+        <p>
+          采样手数的折半取法写在配置调用处，是配置上的选择，不是算法常量；模拟预算也彼此独立，
+          竞技场与自我对弈各用各的模拟次数配置（演示配置的取值见例 15-2 旁注），
+          混用会让两边用不一样的思考量比棋力。
         </p>
 
-        <h3>胜 1、和 0.5、负 0</h3>
+        <h3>胜 1、和 0.5、负 0 与 55% 晋升线</h3>
         <p>
+          受控对战比训练损失更直接，但它给出的仍是有限证据。
           比赛记分规则固定：胜记 1 分，和棋记 0.5 分，负记 0 分；
           <span className="mono">score = (wins + 0.5×draws) / games</span>，其中 games 为本场局数（例中为 6）。
-          下方例 15-1 的 6 个胜负格就按这套口径计算，演示配置的晋升线是 55%。
-          受控对战比训练损失更直接，但它给出的仍是有限证据。
+          在每局只有胜、负两种结果的独立试验里（暂不计和棋，按二项概率计算），哪怕 2 个网络实力完全一样，6 局里纯靠运气至少赢 4 局（含 4 局，得分率 ≥ 66.7%）的概率也有约 34%。下面先在例 15-1 亲手配几组胜负和，体会 55% 晋升线与有限局数下的运气边界。
         </p>
-        <Def term="二项概率" en="binomial probability">
-          每局只有胜/负 2 种结果的独立试验里，获胜局数的分布。此处暂不计和棋，先按胜/负二结果算；
-          含和棋的算法见例 15-1 末段。例 15-1 用它算了一条运气线：
-          2 个网络一样强时，纯靠运气至少赢 4 局（含 4 局）的概率约 34%。
-        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="得分率按胜 1、和 0.5 计算"
+          source="alphagomoku/arena.py · play_match"
+        >
+          <div className="codewalk">
+            <pre>{`    total = max(len(records), 1)
+    return {
+        "wins_a": wins_a,
+        "wins_b": wins_b,
+        "draws": draws,
+        "win_rate_a": (wins_a + 0.5 * draws) / total,
+        "games": len(records),
+    }`}</pre>
+          </div>
+        </EvidenceCard>
       </div>
 
       <PromoCalc />
+
+      <div className="prose mt-10">
+        <h3>从 6 局汇总走进单局实录</h3>
+        <p>
+          第 2 轮训练结束后，挑战者对现任 <span className="mono">best</span> 下满 6 局受控对战，以 6 胜 0 负（得分率 100% ≥ 55%）顺利晋升。
+          下面例 15-2 抽出其中挑战者执黑的一局实录（<span className="mono">{ARENA.id}</span>）：每手做 30 次模拟，开局前 5 手按 <span className="mono">π</span> 采样分叉，之后取最大访问落子。你可以逐手推进，观察右侧面板里的访问数前三名与当前行棋方视角的搜索汇总 <span className="mono">root_value</span>。
+        </p>
+      </div>
+
       <ArenaReplay />
 
       <div className="prose mt-12">
@@ -165,15 +251,16 @@ export default function L13() {
         <p>
           读训练记录时容易只看单个漂亮点位。下面用一个案例走完整流程：先提假设，再想办法验证。
           第 3 轮（轮号即 iteration 号，自 0 编号）的一局自我对弈
-          （{SP.id}）里，第 10 手（白落）训练保存的记录中的 π 全部集中在天元 (4,4)，
-          看着像「学会了天元最大」。这局棋的完整记录见第 12 课例 12-1，先回想那局，再看下表。
+          （{SP.id}）的完整记录见第 12 课例 12-1，先回想那局，再看下表。
           下表由内置的真实记录（32 手）现算，各列含义如下：
-          「搜索根汇总 root_value」是多次模拟回传到树根后的平均；「π 最热一格」表示最热门落点
+          「搜索汇总 root_value」是多次模拟回传到树根后的平均；「π 最热一格」表示最热门落点
           拿走了全部根访问的多少；「π 完全集中」数一数有几手的 π 几乎全集中在一个格子（≥0.999，下文公式按 100% 记）。
+          待验证的假设是：第 10 手（白落）训练保存的记录中的 π 全部集中在天元 (4,4)，
+          看着像「学会了天元最大」；逐手清单见下方现算区。
         </p>
         <table className="l09-table">
           <thead>
-            <tr><th>行棋方</th><th>搜索根汇总 root_value</th><th>π 最热一格</th><th>π 完全集中</th></tr>
+            <tr><th>行棋方</th><th>搜索汇总 root_value</th><th>π 最热一格</th><th>π 完全集中</th></tr>
           </thead>
           <tbody>
             {[WHITE_STAT, BLACK_STAT].map((s) => (
@@ -187,8 +274,8 @@ export default function L13() {
           </tbody>
         </table>
         <p>
-          白方 16 手的搜索根汇总 <span className="mono">root_value</span> 全是正的，
-          黑方 16 手全是负的（正 = 搜索汇总后偏向「当前方占优」，负 = 偏向「当前方不利」）。备择解释也要摆出来：这局正好白胜，若评估全程准确，形状也会差不多；单凭它分不出「颜色偏向」和「评估准确」。
+          白方 16 手的搜索汇总 <span className="mono">root_value</span> 全是正的，
+          黑方 16 手全是负的（正 = 搜索汇总后偏向「当前行棋方占优」，负 = 偏向「当前行棋方不利」）。备择解释也要摆出来：这局正好白胜，若评估全程准确，形状也会差不多；单凭它分不出「颜色偏向」和「评估准确」。
           它不是价值头（网络直接输出的那个价值估计 v_net）在树根直接给出的
           <span className="mono">v_net</span>，而是多次叶评估和终局结果
           回传后的平均。
@@ -196,16 +283,7 @@ export default function L13() {
         <p>
           这是一条值得怀疑的模式：它可能表示搜索结果过度依赖行棋方或
           与颜色相关的特征，而不怎么看棋盘本身；但只看这一局 32 手，
-          不能直接判定「网络已经偏向某种颜色」，也不能说谁导致了谁。
-        </p>
-        <p>
-          更严谨的对照有 2 种。第一，网络输入里有一层专门标「现在轮到哪边」的颜色平面：
-          棋子上「哪些是我的、哪些是对方的」保持不变，只换掉标颜色的那一层。
-          这能测出颜色平面本身的影响，测不出「换人看棋」的整体效果。
-          第二，若切换行棋方，要承认规范视角（代码里叫 canonical）会把己/敌和颜色一起换掉。
-          这能测出整个视角全换的效果，分不出是哪一层在起作用。再在更多局面上统计，
-          才能判断是否存在稳定偏向。若这种偏向成立，它可能让搜索的访问分布过度集中；现在我们只能
-          把它当作需要验证的假设。
+          不能直接判定「网络已经偏向某种颜色」，也不能说谁导致了谁，只能把它当作需要验证的假设。
         </p>
         <div className="formula">
           {FOCUSED.map((m, i) => (
@@ -217,6 +295,10 @@ export default function L13() {
           ))}
           <br />·<span className="hl">本局 32 手里共 6 手的 π 是 100%，且六手全是白方：天元 (4,4) 一手，另有 (1,0)、(5,4)、(6,1)、(0,7)、(2,1) 五手</span>
         </div>
+        <p className="mt-3">
+          上方逐手清单与表格都出自同一局真实记录 {SP.id}（第 12 课例 12-1 同一局）：
+          π 记成 100% 的 6 手全由白方落下，天元之外的五手都是单点；白方搜索汇总区间落在正侧，黑方落在负侧。
+        </p>
         <p>
           在这局记录里，天元那手看起来合理，其余五手都落在不寻常的点上，值得怀疑；六手全是白方，又正对上文「可能与颜色相关的特征」那条线索。但这只足以说明
           「集中≠棋理对」，还不能说明集中从何而来。
@@ -225,46 +307,56 @@ export default function L13() {
         </p>
       </div>
 
-      <Ledger title="arena.py play_match（计分与开局采样）→ pipeline.py run（晋升）">
-        <p className="mb-2 text-sm">
-          <strong>这段在证什么：</strong>计分 1/0.5/0、55% 过线、开局前几手按 π 采样，分别落在 play_match 的计分行、pipeline 的晋升判断与竞技场的采样开关。
-        </p>
-        <div className="codewalk">
-          <pre>{`# arena.py L75  得分率按「胜 + 和棋×0.5」计(代码字段名 win_rate_a；wins=胜局，draws=和局，total=总局数)
-"win_rate_a": (wins_a + 0.5 * draws) / total,`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# pipeline.py L203  过线才易主：挑战者 ≥ 55% 才成为新 best
-promoted = res["win_rate_a"] >= cfg.promote_threshold
-if promoted:
-    save_checkpoint(net, cfg.to_dict(), str(best_path),
-                    meta={"iteration": iteration})`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# arena.py L56  确定性陷阱的解法：开局 5 手仍按 π 采样
-sample_temperature=True, temp_threshold=max(2, cfg.temp_threshold // 2),`}</pre>
-        </div>
+      <Ledger title="alphagomoku/arena.py · play_match（受控对战与计分）">
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="发起受控对战并按胜 1、和 0.5 汇总挑战者得分率"
+          source="alphagomoku/arena.py · play_match"
+        >
+          <div className="codewalk">
+            <pre>{`    records = play_games(
+        None, cfg, cfg.arena_games, iteration, rng,
+        kind="arena", id_prefix=id_prefix,
+        add_noise=False, simulations=cfg.arena_simulations,
+        sample_temperature=True, temp_threshold=max(2, cfg.temp_threshold // 2),
+        net_assign=net_assign,
+        on_progress=on_progress, on_game_end=on_end,
+    )
+    wins_a = wins_b = draws = 0
+    for rec in records:
+        a_is_black = rec["meta"]["black"] == name_a
+        r = rec["result"]
+        if r == 0:
+            draws += 1
+        elif (r == 1) == a_is_black:
+            wins_a += 1
+        else:
+            wins_b += 1
+    total = max(len(records), 1)
+    return {
+        "wins_a": wins_a,
+        "wins_b": wins_b,
+        "draws": draws,
+        "win_rate_a": (wins_a + 0.5 * draws) / total,
+        "games": len(records),
+    }`}</pre>
+          </div>
+        </EvidenceCard>
         <p className="mt-3">
-          三处对上例：①得分率的「和棋算半分」正是例 15-1 计算器里的分子；
-          ②promote_threshold 就是那条 55% 线，判完当场存新 best；
-          ③这个 fast 演示配置里，自我对弈前 10 手采样，竞技场取 temp_threshold 的一半
-          （至少 2 手），这里是 5 手；这是配置选择，不是算法常量。竞技场只需让棋局适度分叉，不需要
-          自我对弈那样的根噪声。同一调用的上一行还有 <span className="mono">simulations=cfg.arena_simulations</span>：
-          竞技场每手的搜索预算（演示配置 30、默认配置 50）与自我对弈的
-          <span className="mono">mcts_simulations</span>（演示 40、默认 100）是两个独立配置项，
-          混用会让两边用不一样的思考量比棋力。
+          上面这段 <span className="mono">play_match</span> 串联起受控对战的开关（关闭根噪声、开局前几手按 <span className="mono">π</span> 采样分叉）与得分率汇总，再交由 <span className="mono">alphagomoku/pipeline.py</span> 按 <span className="mono">promote_threshold = 0.55</span> 判断是否更新 <span className="mono">best.pt</span>。
+          可运行 <span className="mono">python -m pytest tests/test_regressions.py -q</span> 验证受控对战计分与同色对局分叉。
         </p>
       </Ledger>
 
       <ChapterEnd
         summary={[
           "损失下降，量的是对旧样本的贴合，不是棋力；贴合变好而新局变差的现象叫过拟合。挑战者、best、baseline、latest 4 个身份决定谁和谁比。",
-          "受控对战要交换先后手、让开局按 π 采样适度分叉；否则无噪声加纯 argmax 会让 6 局变成 2 局的重播。胜 1、和 0.5、负 0，得分率过 55% 的晋升线才换 best。",
+          "受控对战要交换先后手、让开局按 π 采样适度分叉；否则无噪声加纯取最大会让 6 局变成 2 局的重播。胜 1、和 0.5、负 0，得分率过 55% 的晋升线才换 best。",
           "π 完全集中、root_value 全正全负都只是值得怀疑的模式，要靠对照与更多局面验证；受控对战是更直接的证据。",
         ]}
         next={
           <>
-            下一课把一轮训练从头到尾走一遍（自我对弈→存回放池→训练→竞技场→写指标→存 checkpoint），
+            下一课把一轮训练从头到尾走一遍（自我对弈→存回放池→训练→竞技场→写指标→存检查点），
             并解释为什么必须按这个顺序，以及进程在中途崩溃之后靠什么接着跑。
           </>
         }
@@ -293,7 +385,7 @@ sample_temperature=True, temp_threshold=max(2, cfg.temp_threshold // 2),`}</pre>
             ],
             answer: 1,
             explain:
-              "受控比较要避免把「先手优势」或「恰好走到同一条路线」误判成实力。交替先后手、让开局适度分叉，都会让每局提供不同的信息。本课展示的开局采样说明：比赛设计会直接影响证据有多可信。",
+              "受控比较要避免把「先手优势」或「恰好走到同一条路线」误判成实力。交替先后手、让开局适度分叉，都会让每局提供不同的信息。本课展示的开局采样说明：比赛设计会直接影响证据有多可信。排障时可对拍 tests/test_regressions.py 的 test_arena_games_diversify：它断言同色对局不再逐手一模一样。",
           },
           {
             q: "一次搜索把访问几乎全压在一个落点，为什么仍不能证明网络已经学会了对应棋理？",
@@ -388,7 +480,7 @@ function PromoCalc() {
         </div>
 
         <div className="reveal-box mt-4 text-sm leading-relaxed">
-          <strong>无和棋时的运气过线率 34%：</strong>假设 2 个网络棋力完全相同（每局五五开），
+          <strong>无和棋时的运气过线概率 34%：</strong>假设 2 个网络棋力完全相同（每局五五开），
           纯靠运气至少赢 4 局（含 4 局）的概率 = (C(6,4)+C(6,5)+C(6,6)) / 2⁶ =
           (15+6+1)/64 ≈ <span className="num">34%</span>。
         </div>
@@ -401,19 +493,14 @@ function PromoCalc() {
           也就是说，2 个网络一样强，大约每 10 回里有 3 回半会纯靠运气赢到 4 局及以上。
         </div>
         <div className="reveal-box mt-3 text-sm leading-relaxed">
-          和棋也算半分：3 胜 1 和 2 负 = 58.3%，一样过线。含和棋的算法要把三类结果（胜/和/负）的排法全数出来：干的事就是「数排法 × 乘概率」，道理简单：
-          设每局胜、和、负的概率为 p、d、1−p−d，六局里胜 W 局、和 D 局、负 6−W−D 局的概率是
-          6!/(W!·D!·(6−W−D)!) × p^W × d^D × (1−p−d)^(6−W−D)，
-          把所有满足 2W+D ≥ 7（即得分率 ≥ 55%）的组合加起来就是过线概率。
-          例：五子棋的和棋是盘满 81 手仍无五连；d = 0.2 只是随手举的假设值，不是实测和棋率。双方等强（p = (1−d)/2）、和棋率 d = 0.2 时，过线概率约 41%，
-          高于 34% 运气线。这条曲线先升后降。低和棋率时，和棋给半分、凑线的组合变多：6 局里 3 胜 1 和 2 负，2W+D=7 就过线，比凑 4 胜容易，过线概率反而升到约 41%（d≈0.2 最高）。和棋再多，得分越挤向五成，才回落（d = 0.8 时约 30%）。
+          和棋也算半分：3 胜 1 和 2 负 = 58.3%，一样过线。
           所以 6 局的晋升线 55% 只比五五开高一档，是工程上的折中，不是强证据；真要证明棋力得打几百局。
           6 局过线只说明改进回路在运转（能自动换 best），并不说明棋力已足够。
         </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 15-1</span>
-        计分公式和 ≥55% 判定分别对应 arena.py 的 play_match 与 pipeline.py 的 run；
+        计分公式和 ≥55% 判定分别对应 alphagomoku/arena.py 的 play_match 与 alphagomoku/pipeline.py 的 run；
         真实记录见第 2 轮：挑战者对 best 组 6 比 0 晋升（同轮另有对 baseline 的 6 局；例 15-2 就是对 best 那 6 局里的一局）。
       </figcaption>
     </figure>

@@ -72,7 +72,7 @@ export const CURRICULUM: readonly CurriculumUnit[] = [
   unit({
     id: "l04", num: "4", title: "加权求和：乘和加，不多不少", puzzle: "多个特征怎样合成一个分数？",
     phase: "数字开始学习", preview: "用正负权重、乘加和点积汇总特征，并看清线性计算的边界。",
-    outcomes: ["手算任意窗口的点积", "指出正负权重各把分数推向哪边，用没见过的局检验泛化"],
+    outcomes: ["手算任意窗口的点积", "指出正负权重各把分数推向哪边，并用例 4-1 换卷积核对拍分数方向"],
     sources: [
       { kind: "browser", path: "learn/src/lib/foundations.ts", symbol: "dot", fidelity: "constructed" },
       { kind: "python", path: "alphagomoku/model.py", symbol: "AlphaGomokuNet", fidelity: "runtime-exact" },
@@ -89,7 +89,7 @@ export const CURRICULUM: readonly CurriculumUnit[] = [
   }),
   unit({
     id: "l06", num: "6", title: "三个输入平面", puzzle: "统一视角后，为什么还要拆成三张图？",
-    phase: "造出真实网络", preview: "把当前方、对方和颜色身份保存为真实网络输入。",
+    phase: "造出真实网络", preview: "把当前行棋方、对方和颜色身份保存为真实网络输入。",
     outcomes: ["从局面构造 own/opponent/color 三个平面并与 encode() 对拍", "写出颜色平面与空位的编码，指出漏写各自坏在哪"],
     sources: [
       { kind: "python", path: "alphagomoku/game.py", symbol: "encode", fidelity: "runtime-exact" },
@@ -125,8 +125,8 @@ export const CURRICULUM: readonly CurriculumUnit[] = [
   }),
   unit({
     id: "l10", num: "10", title: "搜索：一次模拟怎样来回走一遍", puzzle: "网络第一眼之后，一次搜索具体做什么？",
-    phase: "搜索检查第一眼", preview: "沿根、边、叶前进，再按当前方视角把结果逐层记回 N/W/Q。",
-    outcomes: ["手推一次 select/evaluate/expand/backup 并对拍 N/W/Q", "写出 negamax 逐层取负与 rootValue 的记账", "写出子树复用的换根要点"],
+    phase: "搜索检查第一眼", preview: "沿根、边、叶前进，再按当前行棋方视角把结果逐层回传到 N/W/Q。",
+    outcomes: ["手推一次 select/evaluate/expand/backup 并对拍 N/W/Q", "写出负极大值搜索的逐层取负与搜索汇总 root_value 的记账", "写出子树复用的换根要点"],
     sources: [
       { kind: "python", path: "alphagomoku/mcts.py", symbol: "SearchTree", fidelity: "runtime-exact" },
       { kind: "browser", path: "learn/src/engine/mcts.ts", symbol: "SearchTree", fidelity: "mirror-exact" },
@@ -144,7 +144,7 @@ export const CURRICULUM: readonly CurriculumUnit[] = [
   unit({
     id: "l12", num: "12", title: "自我对弈：一手棋怎样成为样本", puzzle: "落子时不知道输赢，终局后怎样补全目标答案？",
     phase: "搜索变成学习", preview: "追踪真实样本，并看真正的训练器如何跨多局批量评估、逐树顺序搜索。",
-    outcomes: ["从一局棋构造全部 (s,π,z) 并对拍记录", "写出 z 按记录时行棋方补 ±1/0", "区分 v_net、rootValue 和 z", "写出跨树批量求值的锁步接口"],
+    outcomes: ["从一局棋构造全部 (s,π,z) 并对拍记录", "写出 z 按记录时行棋方补 ±1/0", "区分 v_net、root_value 和 z", "写出跨树批量求值的锁步接口"],
     sources: [
       { kind: "python", path: "alphagomoku/selfplay.py", symbol: "play_games", fidelity: "runtime-exact" },
       { kind: "artifact", path: "learn/src/data/real.ts", symbol: "REAL.selfplayGame", fidelity: "runtime-exact" },
@@ -152,7 +152,7 @@ export const CURRICULUM: readonly CurriculumUnit[] = [
   }),
   unit({
     id: "l13", num: "13", title: "反向传播：两种错误怎样改动所有权重", puzzle: "π 和 z 的错误怎样穿过共享主干？",
-    phase: "搜索变成学习", preview: "在两个训练目标和真实网络都出现后，完整计算双损失与链式反传。",
+    phase: "搜索变成学习", preview: "在两个训练目标和真实网络都出现后，完整计算双损失与链式反向传播。",
     outcomes: ["计算策略和价值损失", "手算两权重链式法则", "把 backward/step 对应到数学"],
     sources: [
       { kind: "python", path: "alphagomoku/train.py", symbol: "train_step", fidelity: "runtime-exact" },
@@ -178,9 +178,9 @@ export const CURRICULUM: readonly CurriculumUnit[] = [
     ],
   }),
   unit({
-    id: "l16", num: "16", title: "管线：一轮训练怎样运行并恢复", puzzle: "阶段、指标和 checkpoint 为什么必须按这个顺序？",
+    id: "l16", num: "16", title: "管线：一轮训练怎样运行并恢复", puzzle: "阶段、指标和检查点为什么必须按这个顺序？",
     phase: "验收与运行", preview: "从配置、预热和竞技场，走到“先记指标、再存模型”的顺序、暂停、停止与自动恢复。",
-    outcomes: ["跑通一轮 pipeline 并排列各阶段产物", "排障崩溃一致性与恢复边界", "指出 optimizer 与 RNG 不入 checkpoint 的后果"],
+    outcomes: ["跑通一轮 pipeline 并排列各阶段产物", "排障崩溃一致性与恢复边界", "指出优化器与随机数发生器不入检查点的后果"],
     sources: [
       { kind: "python", path: "alphagomoku/pipeline.py", symbol: "run", fidelity: "runtime-exact" },
       { kind: "python", path: "alphagomoku/trainer.py", symbol: "main", fidelity: "runtime-exact" },
@@ -190,7 +190,7 @@ export const CURRICULUM: readonly CurriculumUnit[] = [
   unit({
     id: "l17", num: "17", title: "运行产物：训练事实怎样安全留下", puzzle: "网页上的每项证据究竟来自哪个运行文件？",
     phase: "验收与运行", preview: "检查 run 目录：当前文件怎样完整换新、历史怎样逐行接长、对局怎样取名、谁写谁读。",
-    outcomes: ["把事实追溯到 run artifact", "实现 atomic replace 与 append 的写读", "用 heartbeat、lock 和破损尾行规则排障"],
+    outcomes: ["把事实追溯到 run artifact", "实现 atomic replace 与 append 的写读", "用心跳、锁和破损尾行规则排障"],
     sources: [
       { kind: "python", path: "alphagomoku/storage.py", symbol: "RunStorage", fidelity: "runtime-exact" },
       { kind: "contract", path: "PLAN.md", symbol: "§6 run 目录文件契约", fidelity: "runtime-exact" },
@@ -209,7 +209,7 @@ export const CURRICULUM: readonly CurriculumUnit[] = [
   unit({
     id: "graduation", num: "毕业", title: "毕业：在新局面里找出第一处错误", puzzle: "你能独立修好一条损坏的全系统链吗？",
     phase: "综合验收", preview: "在未见局面中完成计算、修复视角和数据来源错误，再与真模型实战。",
-    outcomes: ["在新局面开发并修通完整系统", "找出并修复第一处不变量破坏", "配置一次训练并按验收标准判断变强", "指出模型与证据的边界，写进自己的验收标准"],
+    outcomes: ["在新局面开发并修通完整系统", "找出并修复第一处不变量破坏", "配置一次训练并按验收标准判断变强", "指出模型与证据的边界"],
     sources: [
       { kind: "browser", path: "learn/src/lessons/L99.tsx", symbol: "PlayGround", fidelity: "recomputed" },
       { kind: "test", path: "learn/tests/parity.test.ts", symbol: "逐层对拍", fidelity: "recomputed" },

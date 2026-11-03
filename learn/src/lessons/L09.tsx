@@ -1,13 +1,15 @@
 /** 第 8 课 · 叠层：看见全盘。
- *  节拍：思考题(单层 3×3 怎么看全盘)→ 正文(感受野每层 +2;越深管的事越大；
- *  残差/BN)→ 例 8-1(层深滑杆：感受野框 3×3 → 15×15)→
+ *  节拍：思考题(单层 3×3 怎么看全盘)→ 正文(感受野每层 +2 与深度、
+ *  残差 x+h 捷径与批标准化)→
+ *  例 8-1(层深滑杆：感受野框 3×3 → 15×15)→
  *  例 8-2(真特征图墙：traceNet + weights-best,stem 与三个残差块各取前 6 通道)→
- *  对证(model.py ResBlock / blocks)→ 习题。 */
+ *  源码索引与验证 → 习题。 */
 import { useEffect, useMemo, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
+import { EvidenceCard } from "../framework/evidence"
 import { encode, type GameState } from "../engine/game"
 import { traceNet, type WeightsJson } from "../engine/model"
 import { loadWeights } from "../lib/weights"
@@ -41,7 +43,7 @@ export default function L09() {
           "每多叠一层，能回看的区域向外扩一圈",
           "深层把局部特征汇成整盘形势",
         ]}
-        takeaway="你能算出叠层后的感受野，写出 ResBlock 里 x+h 捷径与两处 BN 的位置，并区分 BN 的训练与推理统计。"
+        takeaway="你能算出叠层后的感受野，写出 ResBlock 里 x+h 捷径与两处批标准化（Batch Normalization，简称 BN）的位置，并区分它的训练与推理统计。"
         boundary="本站演示权重（小一号的 fast 配置，为了让网页算得快）叠 3 个残差块，共 7 层，感受野 15×15（计算见正文）。项目默认是 4 个残差块、9 层卷积。残差块、感受野都由正文定义；理论感受野只表示可能传来的范围，不保证每个位置实际影响相同。"
       />
 
@@ -78,15 +80,25 @@ export default function L09() {
         </Def>
         <p>
           本模型的第一层叫 stem，后面还叠 6 层；每两层编成一组，一组叫一个残差块，
-          一共 3 组。这是本课程演示权重的配置，其他训练可以选不同深度。
-          合起来 <strong className="num">7</strong> 层，感受野边长可以一步算出：
+          一共 3 组。这是本课程演示权重的配置（<span className="mono">configs/fast.json</span> 的{" "}
+          <span className="mono">net_res_blocks = 3</span>，合起来 <strong className="num">7</strong> 层；项目默认配置{" "}
+          <span className="mono">configs/default.json</span> 取 4 个残差块，合 9 层卷积）。
         </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="主干叠层：首层 stem 之后串联 res_blocks 个残差块"
+          source="alphagomoku/model.py · AlphaGomokuNet.__init__"
+        >
+          <div className="codewalk">
+            <pre>{`        self.blocks = nn.Sequential(*[ResBlock(channels) for _ in range(res_blocks)])`}</pre>
+          </div>
+        </EvidenceCard>
         <div className="formula">
           感受野边长 = <span className="hl">3</span> + 2 × (层数 − 1) → 7 层：
           3 + 2×<span className="hl">6</span> = <span className="hl">15</span>
         </div>
-        <p>式子念出来：层数减 1 就是乘 2 的次数。这是 stride=1、3×3 核、padding=1 下的规律（padding 不改变 +2，只保证输出图不缩水）。15×15 的感受野以该输出格为中心：天元的格子确实罩住全盘，角落的格子要罩住对角得 17×17（8 层），7 层时角落的半径差一格。</p>
-        <p>整盘判断不因此受阻：价值头从整张特征图汇总，81 个格各看 15×15、合起来盖住全盘。单个格看不到对角，读出端看得到。</p>
+        <p>式子念出来：层数减 1 就是乘 2 的次数。这是 stride=1、3×3 核、padding=1 下的规律（padding 不改变 +2，只保证输出图不缩水）。7 层代入得 15，9 层代入得 19。15×15 的感受野以该输出格为中心：天元的格子确实罩住全盘，角落的格子要罩住对角得 17×17（8 层），7 层时角落的半径差一格。</p>
+        <p>整盘判断不因此受阻：单个格看不到对角，末端读出层却会从整张特征图汇总全部 81 个格子（下一课详解），81 个格各看 15×15、合起来早已覆盖全盘。</p>
       </div>
 
       <FovSlider />
@@ -94,19 +106,14 @@ export default function L09() {
       <div className="prose mt-12">
         <h3>深层把局部发现组合成更大范围</h3>
         <p>
-          这种许多层堆叠的网络叫<strong>深度网络</strong>，
-          用它做机器学习就是<strong>深度学习</strong>。
+          这种许多层堆叠的网络叫<strong>深度网络</strong>（deep network），
+          用它做机器学习就是<strong>深度学习</strong>：上一层的输出到下一层就是输入特征，浅层处理小范围原始格子，深层在浅层结果上组合出更大范围的表示（本课程演示模型共 7 层卷积，项目默认 9 层）。
           层叠带来的感受野增长，正是它「深」的意义之一。
           更深的层<strong>有能力</strong>把更大范围的信息组合起来：
           浅层常更容易对局部棋形敏感，深层可能整合成更大的局面特征。
           这是一种常见倾向，不是「第几层必定懂什么」的承诺；
           每个通道实际学到什么，要看训练结果。
         </p>
-        <Def term="深度网络" en="deep network">
-          许多层堆叠起来的网络。上一层的输出，到下一层就是输入特征，浅层处理小范围原始格子，
-          深层在浅层结果上组合出更大范围的表示。层数由配置决定：
-          本课程演示模型 7 层卷积，项目默认 9 层。
-        </Def>
       </div>
 
       <FeatureWall />
@@ -119,20 +126,32 @@ export default function L09() {
         </p>
         <p>
           记号很朴素：<span className="mono">F(x)</span> 是修正量，原输入
-          <span className="mono">x</span> 不动，两路相加，出口再过一次 ReLU，
-          即 <span className="mono">y=ReLU(x+F(x))</span>。想「什么也不修」，
-          让 <span className="mono">F(x)</span> 学成接近 0 就行，x 原样通过
-          （前提是 x≥0，见下）；这是最好学的选择。
+          <span className="mono">x</span> 不动，两路相加，出口再过一次 ReLU。
+          想「什么也不修」，让 <span className="mono">F(x)</span> 学成接近 0 就行，x 原样通过
+          （前提是 x≥0，见下），这是最好学的选择，
+          写成一行就是 <span className="mono">y=ReLU(x+F(x))</span>。
+          倒着看也一样：反向传播（把误差沿各层倒着分解求梯度的算法，第 13 课详述）时，只要出口 ReLU 的门开着，
+          直通路的这份 +1 就让更新信号可以直接穿过，深层不容易收不到更新；
+          直通路只保证这段梯度为 1，梯度仍可能在别处衰减。<span className="mono">F′</span> 是修正量那条路的梯度，
+          这一段的梯度是 <span className="mono">1+F′</span>。
         </p>
-        <p>
-          倒着看也一样：这一段的梯度是 <span className="mono">1+F′</span>
-          （<span className="mono">F′</span> 是修正量那条路的梯度）。出口 ReLU 的门
-          （第 5 课立名的导数开关）开时，这份 +1 让更新信号可以直接穿过。
-          所以深层不容易收不到更新；但这不是「梯度永远不会消失」的保证。
-        </p>
-        <p>
-          细节两句：出口的 ReLU 保证传给下一组的 <span className="mono">x≥0</span>，
-          「原样通过」才成立（stem 出口也有一次 ReLU）。它也让块与块之间保持非线性（与原版 ResNet 一致）。
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="残差块前向计算：两层卷积后把原输入 x 加回修正量 h"
+          source="alphagomoku/model.py · ResBlock.forward"
+        >
+          <div className="codewalk">
+            <pre>{`    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = F.relu(self.bn1(self.conv1(x)))
+        h = self.bn2(self.conv2(h))
+        return F.relu(x + h)`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          两行 <span className="mono">h</span> 是修正量分支（梯度 <span className="mono">F′</span>），<span className="mono">return F.relu(x + h)</span> 中的{" "}
+          <span className="mono">x + h</span> 把直通项（梯度 1）与修正量合成为 <span className="mono">1 + F′</span>；出口的 ReLU 既保证传给下一块的{" "}
+          <span className="mono">x ≥ 0</span>（<span className="mono">stem</span> 出口同样经过 ReLU），也让块与块之间保持非线性。本站{" "}
+          <span className="mono">model.ts</span> 的 <span className="mono">resBlock</span> 复现这条推理路径，例 8-2 的特征图即由它逐层算出。
         </p>
         <Def term="残差连接" en="residual connection，也叫捷径连接 shortcut connection">
           把原输入不加改动地加到本组输出上的那条通路。本模型每组算的是修正量
@@ -147,10 +166,6 @@ export default function L09() {
           第一层走「卷积 + 批标准化 + ReLU」，第二层走「卷积 + 批标准化」（不带 ReLU），最后把两层算出的修正量加回原输入，再过一次 ReLU。
           演示模型叠 3 个残差块，项目默认 4 个。
         </Def>
-        <Def term="反向传播" en="backpropagation" see="第 3 课，详论第 13 课">
-          把误差沿各层倒着分解、求出每个权重梯度的算法。残差连接在这条倒传路径上
-          始终保留一份直接通路。
-        </Def>
       </div>
 
       <div className="prose mt-12">
@@ -161,12 +176,42 @@ export default function L09() {
           训练时，批标准化用当前一批样本的统计先把每个通道标准化：
           <span className="mono">x̂ = (x − μ批) / σ批</span>
           （每通道减去自己在这批上的均值、除以自己在这批上的标准差，把数值拉回 0 附近）；
-          每通道再用自己的一对可学习系数 γ、β 恢复合适表达（48 通道共 96 个数）：
+          每通道再用自己的一对可学习系数 γ、β 恢复合适表达（48 通道共 48×2=96 个数，对应{" "}
+          <span className="mono">weights-best.json</span> 中的 <span className="mono">blocks.0.bn1.weight</span> 与{" "}
+          <span className="mono">blocks.0.bn1.bias</span>）：
           <span className="mono">输出 = γ·x̂ + β</span>。
         </p>
-        <Def term="推理" en="inference">
-          只前向算一遍、不做训练的使用方式；批标准化在此时使用训练期保存的运行统计。
-        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="残差块层定义：两层 3×3 卷积（无偏置）各配一处批标准化"
+          source="alphagomoku/model.py · ResBlock.__init__"
+        >
+          <div className="codewalk">
+            <pre>{`    def __init__(self, channels: int):
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(channels)
+        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(channels)`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          训练与推理（inference，只前向算一遍、不做训练的使用方式）两条统计路径由 <span className="mono">net.eval()</span> 切换：<span className="mono">Predictor</span> 初始化与{" "}
+          <span className="mono">load_checkpoint</span> 加载权重后都会调用一次，使推理阶段改用训练期积累的运行均值与运行方差。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="推理封装初始化：切入 eval 模式以使用运行统计量"
+          source="alphagomoku/model.py · Predictor.__init__"
+        >
+          <div className="codewalk">
+            <pre>{`    def __init__(self, net: AlphaGomokuNet, device: str = "cpu"):
+        self.net = net
+        self.device = torch.device(device)
+        self.net.to(self.device)
+        self.net.eval()`}</pre>
+          </div>
+        </EvidenceCard>
         <Def term="批标准化" en="Batch Normalization，简称 BN">
           <p>按通道把数值拉回同一范围的整理步骤。它的另一重身份是尺度整理的层间自动化：第 4 课讲过权重能吸收特征的尺度差，但那样训练步子会两头难顾；有了批标准化，每层输出先回到同一尺度，下一层拿到的特征值量纲相当，全局学习率才同时照顾各层。</p>
           <p>做法分三步。训练时用当前一批样本的均值与标准差做标准化 <span className="mono">x̂ = (x − μ批) / σ批</span>。再用可学习的缩放与平移 <span className="mono">γ·x̂ + β</span> 恢复表达能力（β 就是卷积层省掉的那份偏置，第 5 课）。同时积累运行统计。标准化的用处在中间过程：先让每层输入回到同一尺度、梯度好走，γ、β 只在最后把表达调回来。</p>
@@ -180,34 +225,33 @@ export default function L09() {
         </Def>
       </div>
 
-      <Ledger title="model.py ResBlock / BatchNorm2d / blocks">
-        <p className="mb-2 text-sm">
-          <strong>这段在证什么：</strong>残差捷径与批标准化的真实写法，主要在 ResBlock 的前向计算（代码叫 forward）里：x + h 是捷径，两处 BN 整理尺度；blocks 一段另证深度由配置定。
-        </p>
-        <p className="text-sm">
-          逐行找输入和输出：<span className="mono">x</span> 是原输入，
-          <span className="mono">h</span> 是两层算出的修正，最后把二者相加。BN 在两次卷积后整理通道尺度；
-          网络切换到 <span className="mono">eval()</span>（代码里的「推理模式」开关）时会使用保存的运行统计。
-        </p>
-        <div className="codewalk">
-          <pre>{`# model.py · ResBlock.forward:两层 3×3 卷积 + 一条捷径(x + h)
-def forward(self, x: torch.Tensor) -> torch.Tensor:
-    h = F.relu(self.bn1(self.conv1(x)))   # 第一层卷积
-    h = self.bn2(self.conv2(h))           # 第二层卷积
-    return F.relu(x + h)                  # ← 捷径：x 原样加上修正量 h`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# model.py · AlphaGomokuNet.__init__:深度来自配置
-self.blocks = nn.Sequential(*[ResBlock(channels) for _ in range(res_blocks)])`}</pre>
-        </div>
-        <p className="mt-3">
-          fast 演示配置在 stem 后叠 3 块，合 stem 共 7 层，理论感受野边长 3 + 2×(7−1) = 15；
-          默认配置叠 4 块，共 9 层卷积、理论感受野边长 19。BN 就是 <span className="mono">bn1/bn2</span>：
-          训练和真正下棋时使用统计量的方式不同。本站 <span className="mono">model.ts resBlock</span>
-          复现演示权重的下棋（推理）路径，例 8-2 各层的特征图由它逐层重新计算；
-          由于导出权重保留 5 位小数、浏览器使用 Float64，它和原版 torch 前向
-          逐项对比时允许末位误差，不是每个小数位都一模一样。
-        </p>
+      <Ledger title="alphagomoku/model.py · ResBlock 与 blocks">
+        <ul className="ml-5 list-disc space-y-1.5">
+          <li>
+            <span className="mono">alphagomoku/model.py · ResBlock</span>：<span className="mono">__init__</span> 定义两层{" "}
+            <span className="mono">3×3</span> 卷积（<span className="mono">padding=1, bias=False</span>）与两处{" "}
+            <span className="mono">BatchNorm2d</span>；<span className="mono">forward</span> 计算修正量{" "}
+            <span className="mono">h</span> 并返回 <span className="mono">F.relu(x + h)</span>。
+          </li>
+          <li>
+            <span className="mono">alphagomoku/model.py · AlphaGomokuNet.__init__（self.blocks）</span>：在{" "}
+            <span className="mono">stem</span> 之后串联 <span className="mono">res_blocks</span> 个残差块，总卷积层数为{" "}
+            <span className="mono">1 + 2 × res_blocks</span>，理论感受野边长为{" "}
+            <span className="mono">3 + 2 × (层数 − 1)</span>（7 层得 15，9 层得 19）。
+          </li>
+          <li>
+            <span className="mono">alphagomoku/model.py · Predictor.__init__ / load_checkpoint</span>：调用{" "}
+            <span className="mono">net.eval()</span> 切入推理模式，确保批标准化使用保存的运行统计量。
+          </li>
+          <li>
+            上下游衔接：主干输出 <span className="mono">h = self.blocks(self.stem(x))</span> 在第 9 课交给策略头与价值头；浏览器端{" "}
+            <span className="mono">learn/src/engine/model.ts · traceNet</span> 逐层复现该主干并驱动例 8-2。
+          </li>
+          <li>
+            验证命令：<span className="mono">pytest tests/test_model.py::test_forward_shapes_and_ranges</span> 与{" "}
+            <span className="mono">cd learn && npm test</span>。
+          </li>
+        </ul>
       </Ledger>
 
       <ChapterEnd
@@ -460,7 +504,7 @@ function FeatureWall() {
         <span className="cap-no">例 8-2</span>
         真引擎 + 真权重：<span className="mono">traceNet</span>（model.ts）对三连局面从头到尾算一遍。
         每层 48 个卷积核，就有 48 张特征图，一张叫一个「通道」；这里每组出口摆出前 {CHANNELS_SHOWN} 张。
-        亮 = 这张图在这里的相对响应高。每张图都按<strong>自己</strong>的最大值着色，所以不同通道的亮度不能直接比较大小。滚动前先猜哪一层还亮在横三连那三格上，再往下对拍。只算一遍，滚动看不卡。
+        亮 = 这张图在这里的相对响应高。每张图都按<strong>自己</strong>的最大值着色，所以不同通道的亮度不能直接比较大小。滚动前先猜哪一层还亮在横三连那三格上，再往下对照。
       </figcaption>
     </figure>
   )

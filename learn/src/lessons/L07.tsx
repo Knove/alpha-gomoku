@@ -8,6 +8,7 @@ import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
+import { EvidenceCard } from "../framework/evidence"
 import Board from "../lib/board"
 import { MiniGrid9 } from "../lib/minigrid"
 
@@ -55,8 +56,8 @@ export default function L07() {
           "卷积核可分别检测两类棋形，不让正负号在一次求和中抵消",
           "颜色平面补上执黑或执白这一全局身份",
         ]}
-        takeaway="你能从任意局面构造 3 张 9×9 输入平面并与 encode() 对拍；「不请人」禁止代机器算棋理特征，不禁止规定这种输入编码。"
-        boundary="直接用一个 ±1 平面并非信息丢失或绝对做不到。不同网络可以选不同编码。"
+        takeaway="你能从任意局面构造 3 个 9×9 输入平面并与 encode() 对拍。"
+        boundary="「不请人」禁止代机器算棋理特征，不禁止规定这种输入编码。直接用一个 ±1 平面并非信息丢失或绝对做不到，不同网络可以选不同编码。"
       />
 
       <Quiz
@@ -85,17 +86,11 @@ export default function L07() {
           让后面的计算自己从格子里形成特征。
         </p>
         <p>
-          网络第一层的算法在第 4 课已经推过：一个个 3×3 的数表盖在棋盘某个小窗上，
-          对应格子相乘，再把 9 个乘积加成一个数（这是单个平面的九项）。比如这个「横三连卷积核」：
+          网络第一层的算法在第 4 课已经推过：比如这个「横三连卷积核」，
           中间一行是 1、1、1，其余是 0，它量的是「这个窗口的中间一横排，
-          是不是我的子」。
+          是不是我的子」。用起来是一张 3×3 的九数权重表盖在棋盘某个小窗上，
+          对应格子相乘，再把 9 个乘积加成一个数（这是单个平面的九项；下一课会正式定义卷积核并展开它在全盘的滑动）。
         </p>
-        <Def term="卷积核" en="kernel，亦称滤波器 filter">
-          一张小数表（本课先看单平面教学核：3×3 的九个数），盖在输入的同尺寸小窗上，对应格子相乘再把乘积加成一个数。
-          数表里的每个数都是一个权重，沿用第 3 课「特征 × 权重」的配对规则，只是这里一对九，
-          且九个格子有固定的空间位置。三个输入平面各有自己的一张九数小表，合起来才是一套完整卷积核
-          （9 格 × 3 平面 = 27 个权重）。
-        </Def>
         <p>
           现在拿它去算一个 ±1 平面。同一个卷积核，盖在「己、敌、己」三格上：
           1×1 + 1×(−1) + 1×1 = <strong>1</strong>；盖在「己、空、己」上：
@@ -115,9 +110,10 @@ export default function L07() {
         <p>
           解法是<strong>一种身份一个平面，每个只放 0 和 1</strong>。
           平面 0「己方子」：我的子在哪些格子，是 1、不是 0；平面 1「对方子」：
-          对手的子在哪些格子。空格不用单独一个：两个平面同为 0 的地方就是空。
-          拆开后，每个平面上「1 越多，这个事实越成立」。例如「己方横三连」在己方平面上
-          得 3；对方棋形则由另一个平面单独判断。两类特征不用在同一次求和里互相抵消。
+          对手的子在哪些格子。拆开后，每个平面上「1 越多，这个事实越成立」，
+          对方棋形由另一个平面单独判断，两类特征不用在同一次求和里互相抵消。
+          空格不用单独一个：<strong>两个平面同为 0 的地方就是空</strong>；
+          「己方横三连」在己方平面上得 3。
         </p>
         <p>
           还差最后一项全局信息：轮黑走时整张填 1，轮白走时整张填 0。
@@ -134,6 +130,26 @@ export default function L07() {
           颜色平面则是一个全局问题（「现在轮到哪一方走」）广播到 81 格的同一答案。本模型共三个：三个叠起来形状是 <span className="mono">(3, 9, 9)</span>，
           读作「3 个 9×9」。拆分没有增加棋子分布的事实，只是把同一批事实写成更方便卷积核读取的形式（颜色一位属于规则状态）。颜色广播成 81 格是卷积输入的形状约定（H×W 的图），不是要问 81 遍。
         </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="把规范视角棋盘拆成己方、对方、颜色三个 0/1 平面"
+          source="alphagomoku/game.py · encode"
+        >
+          <div className="codewalk">
+            <pre>{`def encode(game: Game) -> np.ndarray:
+    """(3, n, n) float32: current player's stones, opponent's stones, color plane."""
+    canon = game.canonical_board()
+    cur = (canon == 1).astype(np.float32)
+    opp = (canon == -1).astype(np.float32)
+    color = np.full_like(cur, 1.0 if game.current_player == BLACK else 0.0)
+    return np.stack([cur, opp, color])`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          <span className="mono">cur</span>、<span className="mono">opp</span>、<span className="mono">color</span>{" "}
+          三个平面按通道维叠成 <span className="mono">(3, 9, 9)</span>；每个平面各配一张 3×3 的九数小表，一套完整卷积核共带
+          <strong className="num"> 9 格 × 3 平面 = 27</strong> 个权重。
+        </p>
       </div>
 
       <ThreePlanes />
@@ -156,45 +172,46 @@ export default function L07() {
           因此在本规则里，当前棋盘加上行棋方已经足够描述下一步。三个输入平面满足这个需要。
         </p>
         <p>
-          本课同时对证训练资料的存取：你要写的存取代码把下过的局面存起来，训练时随机抽取，
-          抽到一条样本时再重新拆出同样的三个输入平面。
+          训练侧的回放池（把自我对弈下过的局面存起来供训练随机抽样的样本仓库，第 14 课详解）为了省内存，只保存单张 ±1 的规范视角棋盘与当时的行棋方身份；训练时每次随机抽出一批样本，再按同一规则批量重建出同样的三个输入平面，还原成 <span className="mono">(B, 3, 9, 9)</span> 输入批次。
         </p>
       </div>
 
-      <Def term="回放池" en="replay buffer" see="第 14 课">
-        把下过的局面存起来、训练时随机抽取的样本仓库；本课对证 sample 里你要写的存取与重建代码。
-      </Def>
+      <EvidenceCard
+        fidelity="runtime-exact"
+        title="回放池采样：将保存的规范棋盘与行棋方批量还原为三个输入平面"
+        source="alphagomoku/replay.py · ReplayBuffer.sample"
+      >
+        <div className="codewalk">
+          <pre>{`        b = self.boards[idx].astype(np.float32)
+        cur = b == 1.0
+        opp = b == -1.0
+        color = np.where(self.players[idx] == 1, 1.0, 0.0).astype(np.float32)
+        color = np.broadcast_to(color[:, None, None], cur.shape)
+        inputs = np.stack([cur, opp, color], axis=1).astype(np.float32)
+        return inputs, self.pis[idx].copy(), self.zs[idx].copy()`}</pre>
+        </div>
+      </EvidenceCard>
 
-      <Ledger title="game.py encode / replay.py ReplayBuffer.sample">
-        <p className="mb-2 text-sm">
-          <strong>这段在证什么：</strong>三个输入平面的拼法由 encode 逐格给出；回放池读出时按同一拼法重建。
-        </p>
-        <div className="codewalk">
-          <pre>{`# game.py · encode:眼前局面直接变成三个输入平面
-canon = game.canonical_board()
-cur = (canon == 1).astype(np.float32)
-opp = (canon == -1).astype(np.float32)
-color = np.full_like(cur, 1.0 if game.current_player == BLACK else 0.0)
-return np.stack([cur, opp, color])`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# replay.py · ReplayBuffer.sample:输入侧只存 canonical 棋盘和 player(π、z 另存)
-b = self.boards[idx].astype(np.float32)
-cur = b == 1.0
-opp = b == -1.0
-color = np.where(self.players[idx] == 1, 1.0, 0.0).astype(np.float32)
-color = np.broadcast_to(color[:, None, None], cur.shape)
-inputs = np.stack([cur, opp, color], axis=1).astype(np.float32)`}</pre>
-        </div>
-        <p className="mt-3">
-          两条路线最后必须得到同一种 <span className="mono">(3,9,9)</span> 输入：下棋时从
-          <span className="mono">Game</span> 当场编码；训练资料为了省空间，只保存那张 ±1 的规范棋盘
-          （代码里叫 canonical）和当时轮到谁（<span className="mono">player</span>）。
-          训练目标 π 与 z 也另存。
-          随机抽到它时再重建己方平面、对方平面、颜色平面。
-          本站 <span className="mono">game.ts encode()</span> 复现第一条路线；它固定为 9×9，
-          Python 项目则由配置决定棋盘大小。
-        </p>
+      <Ledger title="alphagomoku/game.py · encode 与 alphagomoku/replay.py · ReplayBuffer.sample">
+        <ul className="ml-5 list-disc space-y-1.5">
+          <li>
+            <span className="mono">alphagomoku/game.py · encode</span>：对局与搜索时从{" "}
+            <span className="mono">Game</span> 实例当场构造 <span className="mono">(3, n, n)</span> 浮点数组（己方平面、对方平面、颜色平面）；浏览器端对应实现为{" "}
+            <span className="mono">learn/src/engine/game.ts · encode</span>。
+          </li>
+          <li>
+            <span className="mono">alphagomoku/replay.py · ReplayBuffer.sample</span>：训练采样时从压缩存储的规范棋盘{" "}
+            <span className="mono">boards</span> 与行棋方 <span className="mono">players</span> 批量重建{" "}
+            <span className="mono">(B, 3, n, n)</span> 输入张量，保证推理与训练两侧输入编码一致。
+          </li>
+          <li>
+            上下游衔接：<span className="mono">encode</span> 在第 12 课自我对弈与第 10 课搜索评估中被调用；<span className="mono">sample</span> 在第 13 课训练步 <span className="mono">train_step</span> 中提供输入批次。
+          </li>
+          <li>
+            验证命令：<span className="mono">pytest tests/test_game.py tests/test_replay.py</span> 与{" "}
+            <span className="mono">cd learn && npm test</span>（含 <span className="mono">game.test.ts</span> 逐格编码核对）。
+          </li>
+        </ul>
       </Ledger>
 
       <ChapterEnd
@@ -472,9 +489,8 @@ function ThreePlanes() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 6-2</span>
-        下方三个 0/1 平面与 <span className="mono">encode()</span>（把局面切成
-        三个输入平面的代码，对证区细看）的输出逐格一致：这就是网络每次
-        「看到」的东西，叠成 (3, 9, 9)。
+        下方三个 0/1 平面就是 <span className="mono">alphagomoku/game.py · encode</span> 的逐格输出：叠成 (3, 9, 9)
+        就是网络每次读入的完整输入。
       </figcaption>
     </figure>
   )

@@ -1,11 +1,13 @@
 /** 第 1 课 · 棋盘：81 个数。
- *  节拍：思考题(表示法)→ 数组与动作编号(例 1-1 点格子)→ 判胜计数(例 1-2)
- *  → 对证(game.py)→ ChapterEnd → 习题。 */
+ *  节拍：思考题(表示法)→ 数组与动作编号(落点码：常量与初始化、divmod、赋值与换手；例 1-1 点格子)
+ *  → 判胜计数(落点码：_is_win_at；例 1-2)→ 交付物与验证
+ *  → ChapterEnd → 习题。 */
 import { useMemo, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
+import { EvidenceCard } from "../framework/evidence"
 import Board, { type BoardMark } from "../lib/board"
 import { NumTable } from "../lib/numview"
 
@@ -24,7 +26,7 @@ export default function L01() {
         chain={[
           "每个交叉点记为空、黑、白三种数字：0、+1、−1",
           "9×9 棋盘固定成 81 个位置，坐标 (x, y) 与动作编号一一对应",
-          "落子就是给对应位置赋当前方的数，然后换手",
+          "落子就是给对应位置赋当前行棋方的数，然后换手",
           "判胜只从刚落的子向四个方向数连子，含刚落那颗、每个方向数出 5 即胜",
         ]}
         takeaway="你能把坐标和动作编号来回换算，写出合法动作判定与判胜检查：以新落的子为锚数四向，为什么不会漏。"
@@ -58,8 +60,22 @@ export default function L01() {
         </p>
         <p>
           现在把它变成数。给每个交叉点记一个数：<strong>0 = 空，1 = 黑，−1 = 白</strong>。
-          黑和白恰好用一正一负表示：从当前行棋方的立场重看棋盘时（第 2 课要用到这个做法），希望「整盘乘一个数」就完成编码翻号，这要求两方编码互为相反数；0/1/2 式的编码乘任何数都做不到。于是开局、中盘、终局
+          黑和白恰好用一正一负表示：从当前行棋方的立场重看棋盘时，希望「整盘乘一个数」就完成编码翻号，这要求两方编码互为相反数；0/1/2 式的编码乘任何数都做不到。于是开局、中盘、终局
           都是同一种形状：9×9 = 81 个数。这是游戏程序保存棋盘的记法。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="空、黑、白三档取值与 9×9 棋盘初始化"
+          source="alphagomoku/game.py · 常量行与 Game.__init__"
+        >
+          <div className="codewalk">
+            <pre>{`EMPTY, BLACK, WHITE = 0, 1, -1
+#(Game.__init__ 里的棋盘初始化:)
+        self.board = np.zeros((self.n, self.n), dtype=np.int8)`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          代 <span className="mono">self.n = 9</span>，<span className="mono">self.board</span> 就初始化成 9×9 = 81 个全 0 整数，开局全空。
         </p>
         <p>
           落子这个动作也要写成数。x 是列号（向右，0 到 8），y 是行号（向下，0 到 8），
@@ -73,7 +89,7 @@ export default function L01() {
         </Def>
         <p>
           棋盘正中的那一点，棋类术语叫天元，坐标是 (x=4, y=4)，按编号约定是
-          4 × 9 + 4 = <strong>40</strong>。
+          4 × 9 + 4 = <strong>40</strong>；反过来用 <span className="mono">divmod(40, 9)</span> 一次拿回商 4 和余数 4，正好还原出 (x=4, y=4)。
         </p>
         <Def term="天元" en="tengen">
           棋盘正中的交叉点。9×9 棋盘的天元在 (x=4, y=4)，动作编号 40。
@@ -93,10 +109,36 @@ export default function L01() {
 
       <div className="prose mt-8">
         <p>
-          落子这个动作，在数组看来就是<strong>一次「赋值」</strong>：把那一格的数换成
-          当前方的数，黑落写 1，白落写 −1。上面这三条约定（0/1/−1、y×9+x、赋值落子）
-          就是五子棋和机器之间的本课三条约定。例 1-1 把这套换算做成双向练习：
-          它的右侧表格会把每一步落子变成一个数。
+          落子这个动作，在数组看来就是<strong>一次「赋值」</strong>：先用 <span className="mono">divmod</span> 把动作编号拆回行列坐标，再把那一格的数换成当前行棋方的数（黑落写 1，白落写 −1），最后把行棋方取相反数完成换手。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="把动作编号拆回行列坐标，落子赋值并换手"
+          source="alphagomoku/game.py · Game.play"
+        >
+          <div className="codewalk">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
+              <pre className="min-w-0 flex-1">{`        y, x = divmod(action, n)
+        if self.board[y, x] != EMPTY:
+            raise ValueError(f"square ({x}, {y}) is occupied")
+        self.board[y, x] = self._current
+        self._last_move = action
+        self._move_count += 1
+        if self._is_win_at(y, x):
+            self._winner = self._current
+        self._current = -self._current`}</pre>
+              <div className="text-xs leading-relaxed sm:w-56" style={{ color: "var(--fg-faint)" }}>
+                <div>divmod 行：商进 y、余数进 x，与 y×9+x 互逆。</div>
+                <div className="mt-1">赋值与换手：落点格写入当前行棋方，再将 self._current 取反。</div>
+              </div>
+            </div>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          上面这三条约定（0/1/−1、y×9+x、赋值落子）就是五子棋和机器之间的本课三条约定。
+          引擎是让游戏真正跑起来的程序；本课的代码都写在 Python 端的引擎
+          <span className="mono"> alphagomoku/game.py</span> 里。
+          例 1-1 把这套换算做成双向练习：它的右侧表格会把每一步落子变成一个数。
         </p>
       </div>
 
@@ -111,6 +153,25 @@ export default function L01() {
         <p>
           所以判胜只做一件事：以刚落的子为起算格，沿横、竖、左斜、右斜共 4 个方向，
           往一边数一遍同色连子、再往另一边数一遍。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="从刚落的子向四个方向统计同色连子"
+          source="alphagomoku/game.py · Game._is_win_at"
+        >
+          <div className="codewalk">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
+              <pre className="min-w-0 flex-1">{`        for dx, dy in _DIRS:
+            if 1 + self._count_dir(y, x, dy, dx, p) + self._count_dir(y, x, -dy, -dx, p) >= self.win_len:`}</pre>
+              <div className="text-xs leading-relaxed sm:w-56" style={{ color: "var(--fg-faint)" }}>
+                <div>for 行：横、竖、两种斜，共 4 个方向。</div>
+                <div className="mt-1">比较行：1 是刚落的子，加上正反两边同色连子数。</div>
+              </div>
+            </div>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          其中 <span className="mono">self.win_len</span> 是「连几颗算赢」的长度（本项目取 5，连到 5 或更长都算赢）。
         </p>
         <Def term="锚点" en="anchor">
           数连子时固定的起算格，固定在刚落下的这颗子上。判胜从锚点出发，
@@ -134,68 +195,57 @@ export default function L01() {
 
       <WinCount />
 
-      <Ledger title="game.py · Game.play / Game._is_win_at">
-        <p className="mb-2 text-sm">
-          <strong>这段在证什么：</strong>落子与判胜这两件事，就是 Game.play 与 Game._is_win_at 两个函数。
-        </p>
-        <p className="mt-0 mb-3">
-          本栏是开发落点：刚才做过的动作，就是 <span className="mono">game.py</span> 里你要写的这两段（全书把这一步叫对证）。
-          先找输入 <span className="mono">action</span>，再找棋盘赋值、换手和判胜输出。
+      <Ledger title="alphagomoku/game.py · Game.play 与判胜检查">
+        <p className="mb-3">
+          本课的核心实现位于 <span className="mono">alphagomoku/game.py</span>：文件开头定义棋盘常量与四个扫描方向，
+          <span className="mono">Game</span> 类内的 <span className="mono">play</span>、<span className="mono">_count_dir</span> 与 <span className="mono">_is_win_at</span> 三个方法串联起动作校验、落子赋值、锚点四向判胜与换手，后续第 10 课的搜索模拟和第 12 课的自我对弈均直接调用它们：
         </p>
         <div className="codewalk">
-          <pre>{`# L6  一个数装一个格子
-EMPTY, BLACK, WHITE = 0, 1, -1`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# L49-63  落子 = 一次赋值 + 换手
-def play(self, action: int) -> None:
-    n = self.n
-    if not 0 <= action < n * n:
-        raise ValueError(f"action {action} out of range [0, {n * n})")
-    if self._winner != EMPTY:
-        raise ValueError("game is already finished")
-    y, x = divmod(action, n)        # ← y×9+x 倒回去算：商是 y，余数是 x
-    if self.board[y, x] != EMPTY:
-        raise ValueError(f"square ({x}, {y}) is occupied")
-    self.board[y, x] = self._current
-    self._last_move = action
-    self._move_count += 1
-    if self._is_win_at(y, x):
-        self._winner = self._current
-    self._current = -self._current  # 黑白换手：1 变 −1,−1 变 1`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# L65-79  判胜：锚点 + 四方向，1 + 正 + 反 ≥ 5
-def _count_dir(self, y: int, x: int, dy: int, dx: int, p: int) -> int:
-    c = 0
-    yy, xx = y + dy, x + dx
-    while 0 <= yy < self.n and 0 <= xx < self.n and self.board[yy, xx] == p:
-        c += 1
-        yy += dy
-        xx += dx
-    return c
+          <pre>{`    def play(self, action: int) -> None:
+        n = self.n
+        if not 0 <= action < n * n:
+            raise ValueError(f"action {action} out of range [0, {n * n})")
+        if self._winner != EMPTY:
+            raise ValueError("game is already finished")
+        y, x = divmod(action, n)
+        if self.board[y, x] != EMPTY:
+            raise ValueError(f"square ({x}, {y}) is occupied")
+        self.board[y, x] = self._current
+        self._last_move = action
+        self._move_count += 1
+        if self._is_win_at(y, x):
+            self._winner = self._current
+        self._current = -self._current
 
-def _is_win_at(self, y: int, x: int) -> bool:
-    p = self.board[y, x]
-    for dx, dy in _DIRS:            # 横、竖、两种斜，共 4 个方向
-        if 1 + self._count_dir(y, x, dy, dx, p) + self._count_dir(y, x, -dy, -dx, p) >= self.win_len:
-            return True
-    return False`}</pre>
+    def _count_dir(self, y: int, x: int, dy: int, dx: int, p: int) -> int:
+        c = 0
+        yy, xx = y + dy, x + dx
+        while 0 <= yy < self.n and 0 <= xx < self.n and self.board[yy, xx] == p:
+            c += 1
+            yy += dy
+            xx += dx
+        return c
+
+    def _is_win_at(self, y: int, x: int) -> bool:
+        p = self.board[y, x]
+        for dx, dy in _DIRS:
+            if 1 + self._count_dir(y, x, dy, dx, p) + self._count_dir(y, x, -dy, -dx, p) >= self.win_len:
+                return True
+        return False`}</pre>
         </div>
-        <p className="mt-3">
-          引擎是让游戏真正跑起来的程序。Python 的
-          <span className="mono">Game.play / Game._is_win_at</span> 是生产实现；浏览器的
-          <span className="mono">engine/game.ts · play</span> 不改动旧棋盘，而是每次算出一张新棋盘；
-          它和 Python 版遵守同一约定：输入、输出和判胜规则必须一致。
-          <span className="mono">tests/test_game.py</span> 与 <span className="mono">learn/tests/game.test.ts</span>
-          分别自动检查 Python 端与浏览器端。
-          阅读时可依次核对：动作编号在哪里拆成坐标、哪一行拒绝已占格、哪一行记录胜者。
-        </p>
+        <ul className="mt-3 ml-5 list-disc">
+          <li>
+            浏览器侧的 <span className="mono">learn/src/engine/game.ts</span> 以纯函数方式复现同一套规则：不原地改动旧棋盘，每次返回新局面，输入、输出与判胜口径完全一致。
+          </li>
+          <li>
+            验证与测试：运行 <span className="mono">pytest tests/test_game.py</span> 检查判胜、非法落子与满盘和棋用例；运行 <span className="mono">cd learn && npm test</span> 中的 <span className="mono">game.test.ts</span> 核对动作 40 落天元与五连判胜。
+          </li>
+        </ul>
       </Ledger>
 
       <ChapterEnd
         summary={[
-          "一局棋是一个 81 个数的 9×9 数组：0 = 空、+1 = 黑、−1 = 白；落子就是给对应位置赋当前方的数。",
+          "一局棋是一个 81 个数的 9×9 数组：0 = 空、+1 = 黑、−1 = 白；落子就是给对应位置赋当前行棋方的数。",
           "动作编号 action = y×9+x 把坐标拼成 0 到 80 的唯一整数，除以 9 可拆回 x、y；天元 (4,4) 是 40。",
           "判胜以刚落的子为锚点，沿四个方向数「1 + 两边连子」，任一方向达到 5 即胜；新出现的五连一定包含这颗新子。",
         ]}

@@ -1,11 +1,12 @@
 /** 第 12 课 · 自我对弈：一手棋怎样成为 (s,π,z) 训练样本。
- *  节拍：思考题→样本三要素（落子前 s 与 π、终局后补 z）→例 12-1 真实样本拆开看→
- *  多局同时推进（例 12-2）→对证→习题。 */
+ *  节拍：思考题→样本三要素（落点码 _finalize 打包、落子前 s 与 π、终局后补 z）→例 12-1 真实样本拆开看→
+ *  多局同时推进（落点码 play_games 合批、例 12-2）→对证（整链：play_games / _finalize）→习题。 */
 import { useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
+import { EvidenceCard } from "../framework/evidence"
 import Board from "../lib/board"
 import { REAL } from "../data/real"
 import { emptyBoard, play, type GameState } from "../engine/game"
@@ -43,7 +44,7 @@ export default function L12() {
       <h1 className="text-2xl font-bold">自我对弈：一手棋怎样成为样本</h1>
 
       <LessonGuide
-        question="落子时还不知道输赢，机器怎样在棋局结束后得到一条完整的 (s,π,z) 训练样本？"
+        question="落子时还不知道输赢，机器怎样在棋局结束后凑齐一条训练样本的三个要素：局面 s、访问分布 π、终局结果 z？"
         why="搜索会留下当时的思考记录，终局会给出后来才知道的结果。只有把它们按同一个行棋方视角接好，训练才不会拿错样本配错答案。"
         chain={[
           "落子前保存局面 s 和搜索访问分布 π",
@@ -52,7 +53,7 @@ export default function L12() {
           "一局棋因此留下许多条训练样本",
         ]}
         takeaway="你能从一局棋构造出全部 (s, π, z) 并与真实记录对拍：三者都站在记录该手时的行棋方视角，落子前记 s 与 π，终局后补 z；并写出跨树合批、树内串行的四步锁步接口。"
-        boundary="对局记录里的 root_value 是搜索多次回传后的记录值，不是网络直接输出的价值估计；训练会在抽到 s 时重新运行网络。"
+        boundary="对局记录里的 root_value 是搜索汇总，不是网络直接输出的价值估计；训练会在抽到 s 时重新运行网络。"
       />
 
       <Quiz
@@ -66,7 +67,7 @@ export default function L12() {
               "只给最后一手写 z，前面的手都没有答案",
             ],
             answer: 1,
-            explain: "选第二项。落子前能保存 s 和搜索后的 π，终局 z 必须等棋下完才知道。系统记住当时是谁走，再从那一方视角统一补上 +1、−1 或 0。",
+            explain: "选第二项。落子前能保存 s 和搜索后的 π，终局结果 z 必须等棋下完才知道。系统记住当时是谁走，再从那一方视角统一补上 +1、−1 或 0。",
           },
         ]}
       />
@@ -74,32 +75,24 @@ export default function L12() {
       <div className="prose mt-10">
         <h3>一手棋留下 3 个要素</h3>
         <p>
-          让机器越下越强的原料，不是棋谱（棋谱贴的是别人的棋力），而是自己下出来的对局。同一套网络互为对手产生训练对局，
-          这种做法叫自我对弈。落子前后要分开记：落子前的局面和搜索结论当场写下，
-          这手棋的输赢要等终局才补。为什么价值目标只认终局 z，不拿 root_value 或 v_net 当标签？判据和策略侧不同。策略目标要的是「同一问题的更好答案」，π 多看了几十次模拟，所以拿它教 P。
+          让机器越下越强的原料，不是人类棋谱（棋谱贴的是别人的棋力上限），而是自己下出来的对局。
+          同一套网络互为对手产生训练对局，这种做法叫自我对弈。
+          一局棋走过的每一手都会留下一条训练样本，由{" "}
+          <span className="mono">(s, π, z)</span> 3 个要素组成：落子前的局面{" "}
+          <span className="mono">s</span>、搜索得到的访问分布{" "}
+          <span className="mono">π</span>，以及整盘棋的终局结果{" "}
+          <span className="mono">z</span>。落子前后要分开记：落子前的{" "}
+          <span className="mono">s</span> 和 <span className="mono">π</span> 当场写下，
+          这手棋的输赢 <span className="mono">z</span> 要等终局才补，三者始终统一在记录该手时的行棋方视角。
         </p>
-        <p>
-          价值目标要的是<strong>真值</strong>：z 是对局事实，与网络当前水平无关；root_value 与 v_net 都是估计。拿估计当标签等于自己教自己，会把搜索与网络的系统性偏差固化回网络。就可靠性而言 z 优于 root_value、root_value 优于 v_net；就信息密度而言恰好相反（两个判据见下方定义框）。本项目价值侧选可靠性。一局棋因此留下许多条训练样本，每一条都由
-          <span className="mono">(s, π, z)</span> 3 个要素组成。
-        </p>
-        <Def term="可靠性" en="reliability">
-          来源离「无可争辩的事实」有多近的排序判据：z 是对局事实，最可靠；root_value 是搜索估计，次之；
-          v_net 是一次前向的估计，又次之。价值标签要挑可靠性最高的来源。
-        </Def>
-        <Def term="信息密度" en="information density">
-          一局棋能留下多少条互不相同的信息，单位是「条 / 局」。z 一局只定一个事实（输赢），
-          却按各行棋方的立场取正负记在每一手上（胜方各手 +1、负方各手 −1），独立信息仍只有一条；
-          root_value 每手各是一个不同的估计值，一局留下几十条；v_net 更可以随时对池中任意局面重新算。
-          可靠性高的来源一局只出一条独立事实，密度高的来源都是可再生的估计；价值标签因此只认 z，可靠性压倒密度。
-        </Def>
         <Def term="自我对弈" en="self-play">
           同一套网络互为对手产生训练对局的做法。黑白双方共用当前这一个模型，
           下完的对局再拆成样本喂回训练，形成「越下越多经验、越训越会下」的循环。
         </Def>
         <Def term="训练样本" en="training sample">
           一条样本就是一手棋的记录，由 <span className="mono">(s, π, z)</span> 3 个要素组成。
-          <span className="mono">s</span> 是局面（state）：记录里存下的是 81 格标准棋盘（每格空、己、敌三态，共 81 个数）
-          加当时的行棋方（1 个数）；训练抽样时才由它们重建网络要的 3 个输入平面（第 6 课的编码）；
+          <span className="mono">s</span> 是局面（state），与第 4 课的加权和 s 不同：记录里存下的是 81 格标准棋盘（每格空、己、敌三态，共 81 个数）
+          加当时的行棋方（1 个数，代码里写作 <span className="mono">player</span>）；训练抽样时才由它们重建网络要的 3 个输入平面（第 6 课的编码）；
           <span className="mono">π</span>
           是策略目标（policy target），81 个概率的一份分布，告诉网络「搜索认为该下哪」；
           <span className="mono">z</span> 是终局结果（outcome），告诉网络「最后谁赢了」。
@@ -109,25 +102,64 @@ export default function L12() {
           训练时网络被要求逼近的答案。本系统的每条样本带 2 个训练目标：策略目标
           <span className="mono">π</span> 和价值目标（即终局结果）
           <span className="mono">z</span>。
-          网络在训练时分别对着它们调策略头与价值头（网络分出的 2 个输出端）。
+          网络在训练时分别对着它们调策略头与价值头（网络分出的 2 个输出端）：策略侧看重搜索分布的高信息密度，价值侧看重终局事实的高可靠性。
         </Def>
+        <p>
+          为什么策略目标学搜索的 <span className="mono">π</span>，而价值目标只认终局结果{" "}
+          <span className="mono">z</span>（不拿 <span className="mono">root_value</span> 或{" "}
+          <span className="mono">v_net</span> 当训练目标）？因为两个头面对的判据不同。
+          策略侧要的是「同一问题的更好答案」：<span className="mono">π</span>{" "}
+          汇聚了几十次模拟的推演，每手都能给出 81 个格子的完整分布，信息密度（一局棋留下的互不相同信息条数）远高于单一落子动作，适合用来改进网络的先验{" "}
+          <span className="mono">P</span>。
+          价值侧要的则是<strong>真值</strong>：<span className="mono">z</span>{" "}
+          是对局事实，与网络当前水平无关，尽管一局只定一个输赢事实（按各行棋方立场记为胜方 +1、负方 −1），独立信息只有一条，却离事实最近、可靠性最高；<span className="mono">root_value</span>（每手一个搜索估计）与{" "}
+          <span className="mono">v_net</span>（一次前向估计）虽然每局能留下几十条不同数值，却都是可再生的估计，拿估计当价值目标会把搜索与网络的系统性偏差固化回权重。
+          就可靠性而言 <span className="mono">z</span> 优于{" "}
+          <span className="mono">root_value</span>、<span className="mono">root_value</span> 优于{" "}
+          <span className="mono">v_net</span>；就信息密度而言恰好相反。因此策略侧取搜索分布的高信息密度，价值侧取终局事实的高可靠性。
+        </p>
 
         <h3>落子前记下 s 与 π</h3>
         <p>
           <span className="mono">s</span> 是落子前的局面：搜索和真实落子都从这张棋盘出发。
-          生产代码保存前，先把棋盘统一转成当前行棋方视角（代码里叫 canonical），
-          并记下当时的 <span className="mono">player</span>。这样存旧样本的回放池既能还原「己方 / 对方」，
+          这份记录让存放旧训练样本的回放池（第 14 课详解）既能还原「己方 / 对方」，
           也能还原标「现在轮到哪边」的颜色平面（网络输入里专门标轮到谁的那一层）。
+          生产代码保存前，先调用 <span className="mono">canonical_board()</span>（定义于{" "}
+          <span className="mono">alphagomoku/game.py</span>）把 9×9=81 格棋盘统一转成当前行棋方视角，
+          连同 81 维的 <span className="mono">π</span> 与当时的{" "}
+          <span className="mono">current_player</span> 一起追加进样本列表。
         </p>
-        <Def term="回放池" en="replay buffer" see="第 14 课">
-          专门存放旧训练样本的回放池。训练从里面抽样，新旧对局混在一起，
-          使权重不只围着最近几局打转。
-        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="落子前将当前视角棋盘、π 与行棋方追加进样本列表"
+          source="alphagomoku/selfplay.py · play_games"
+        >
+          <div className="codewalk">
+            <pre>{`            # training sample: canonical position BEFORE the move
+            s.samples.append((s.game.canonical_board().astype(np.int8),
+                              pi.astype(np.float32), np.int8(s.game.current_player)))`}</pre>
+          </div>
+        </EvidenceCard>
         <p>
           <span className="mono">π</span> 是全部根访问数的比例。先看数字（举例值，不对应下方案例的默认手数）：某格被访问 24 次、
           根上全部动作共访问 43 次，它的比例就是 <span className="mono">24/43</span>。
           换成公式就是 <span className="mono">π(a)=N(a)/ΣN</span>，
           分母 <span className="mono">ΣN</span> 把根上所有动作算进去。这份 π 是温度 τ=1 的访问分布；温度只在决定实际落子时用来抽样，不会改写样本里的 π。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="取 τ=1 的访问分布 π，并按温度门槛选出落子动作"
+          source="alphagomoku/selfplay.py · play_games"
+        >
+          <div className="codewalk">
+            <pre>{`            pi = s.tree.root_pi(temperature=1.0)
+            if sample_temperature and s.game.move_count < temp_moves:
+                a = int(rng.choice(n * n, p=pi / pi.sum()))
+            else:
+                a = s.tree.best_action()`}</pre>
+          </div>
+        </EvidenceCard>
+        <p>
           页面只列 top 几项方便阅读，不能把 top 列表自己的访问数相加当分母。
           搜索预算（一次搜索计划做的模拟次数）也不保证等于这个分母：第一次模拟可能只展开根，
           复用之前搜过的树时还会带上旧计数。
@@ -154,12 +186,30 @@ export default function L12() {
 
         <h3>终局后补上 z</h3>
         <p>
-          黑胜并不表示所有样本都是 +1。z 的规则只有一句：和棋记 0，否则看这条样本记录时的行棋方
+          各条样本的 z 按记录当时的行棋方分别记，黑胜时黑方样本才记 +1。<span className="mono">s</span>、<span className="mono">π</span>、
+          <span className="mono">z</span> 三者都必须守第 2 课的视角约定。
+          z 的规则只有一句：和棋记 0，否则看这条样本记录时的行棋方
           是不是最终胜者，是就记 +1，不是就记 −1。若某条样本记录时轮到白，而终局是黑胜，
           对那条样本来说「我」输了，所以 z 是 −1。
-          <span className="mono">s</span>、<span className="mono">π</span>、
-          <span className="mono">z</span> 三者都必须守第 2 课的视角约定。
+          注意打包进 <span className="mono">samples</span> 的只有{" "}
+          <span className="mono">(canon, pi, player, z)</span> 四个字段，搜索展示值{" "}
+          <span className="mono">root_value</span> 不进训练样本。
         </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="终局后按每手记录时的行棋方回填胜负结果 z"
+          source="alphagomoku/selfplay.py · _finalize"
+        >
+          <div className="codewalk">
+            <pre>{`def _finalize(slot: _Slot, cfg: Config, iteration: int, kind: str) -> dict:
+    result = slot.game.outcome()
+    assert result is not None
+    samples = []
+    for canon, pi, player in slot.samples:
+        z = 0 if result == 0 else (1 if player == result else -1)
+        samples.append((canon, pi, player, np.int8(z)))`}</pre>
+          </div>
+        </EvidenceCard>
       </div>
 
       <SPZ />
@@ -167,20 +217,51 @@ export default function L12() {
       <div className="prose mt-10">
         <h3>多局同时推进，每棵树内部仍然顺序</h3>
         <p>
-          样本是多局棋同时产生的。搜索树的叶子是等待评价的局面。真正的训练器会同时推进多局棋，
-          但每棵树内部仍然顺序模拟。批量驱动程序让每棵活跃树各走一次
-          选择，把所有等待网络判断的叶局面叠成一批，只调用一次网络，再把每份结果还给原来的树。
-          它批量处理的是不同棋局的叶子，不是让同一棵树的模拟同时乱改统计。
+          样本是多局棋同时产生的。搜索树的叶子是等待评价的局面。真正的训练器（驱动整条管线的进程）会同时推进多局棋，
+          但每棵树内部仍然顺序模拟。这四步就是锁步（lockstep）接口：
+          <span className="mono">select</span> 各树各走一步到待评叶子，
+          <span className="mono">needs_eval</span> 报告哪些树要评，
+          <span className="mono">leaf_input</span> 取叶局面叠成一批前向，
+          <span className="mono">expand_and_backup</span> 逐树回传结果。
+          自我对弈两边是同一个网络，代码仍按叶方（<span className="mono">leaf_player</span>）选网，
+          是为两边用不同网络的场景预留的接口。
         </p>
+        <p>
+          它批量处理的是不同棋局的叶子，不是让同一棵树的模拟同时乱改统计。
+          批量驱动程序让每棵活跃树各走一次选择，待评的树按所用网络归组，再叠成一批调用一次{" "}
+          <span className="mono">predict</span> 并逐树回传。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="多局锁步搜索：各树下探选叶，待求值叶子按网络归组并合批前向"
+          source="alphagomoku/selfplay.py · play_games"
+        >
+          <div className="codewalk">
+            <pre>{`        for _ in range(sims):
+            groups: dict[int, list[SearchTree]] = {}
+            preds: dict[int, Predictor] = {}
+            for s in slots:
+                s.tree.select()
+                if s.tree.needs_eval():
+                    p = s.nets[s.tree.leaf_player]
+                    groups.setdefault(id(p), []).append(s.tree)
+                    preds[id(p)] = p
+            for pid, trees in groups.items():
+                batch = np.stack([t.leaf_input() for t in trees])
+                probs, values = preds[pid].predict(batch)
+                for t, prob, val in zip(trees, probs, values):
+                    t.expand_and_backup(prob, float(val))`}</pre>
+          </div>
+        </EvidenceCard>
         <Def term="虚拟损失" en="virtual loss">
           同一棵树并行搜索时才需要的技巧：给正在评估的路径临时虚增访问计数、虚记一笔负分拉低该路的成绩，
-          让并行线程先走他处，避免各线程挤进同一条路；等网络评完、真实结果写回时就撤销这份虚增计数，
+          让并行线程先走他处，避免各线程挤进同一条路；等网络评完、真实结果回传时就撤销这份虚增计数，
           恢复真实计数。本系统不同树之间合批、树内顺序执行，
           所以用不到它。
         </Def>
       </div>
 
-      <div className="card mt-8 p-5" data-qa="batch-trace">
+      <figure className="card mt-8 p-5" data-qa="batch-trace">
         <div className="mini-label">例 12-2 · 多棵树共用一次网络前向</div>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
           <span className="chip">树 A 选择 1 个叶子</span>
@@ -198,40 +279,66 @@ export default function L12() {
           这里的「一批」是合批（一次前向喂多个叶局面），与训练时每批 128 条样本的小批不是同一件事。
           浏览器里的单局 <span className="mono">SearchTree.run()</span> 是顺序复现；生产训练才会跨棋局合批。
         </p>
-      </div>
+        <figcaption className="figure-cap">
+          <span className="cap-no">例 12-2</span>
+          合批只画形状，不带真实数字；数据链的代码在 alphagomoku/selfplay.py · play_games 的搜索循环。
+        </figcaption>
+      </figure>
 
-      <Ledger title="selfplay.py · play_games / _finalize（样本的出生过程）">
-        <p className="mb-2 text-sm">
-          <strong>这段在证什么：</strong>样本三件套（s、π、z）的出生时刻：落子前连行棋方一起存进 samples，终局后按行棋方补 z；第二段另证多局批量评估。
+      <Ledger title="alphagomoku/selfplay.py · play_games 主循环">
+        <p className="mb-3 text-sm">
+          下面连贯展示 <span className="mono">play_games</span> 每走一手棋的主循环：先对全部在局搜索树做{" "}
+          <span className="mono">sims</span> 轮锁步合批模拟，再逐局取出{" "}
+          <span className="mono">π</span>、选出动作、在落子前记下{" "}
+          <span className="mono">(s, π, player)</span> 并推进棋局，已终局的对局交由{" "}
+          <span className="mono">_finalize</span> 回填 <span className="mono">z</span>：
         </p>
         <div className="codewalk">
-          <pre>{`# 落子前：局面与搜索给出的策略目标已知，终局结果还未知
-s.samples.append((s.game.canonical_board().astype(np.int8),
-                  pi.astype(np.float32), np.int8(s.game.current_player)))
-
-# 终局后：逐条样本按当时 player 补 z
-z = 0 if result == 0 else (1 if player == result else -1)`}</pre>
+          <pre>{`        # --- one search round per active game, batched across games ---
+        for _ in range(sims):
+            groups: dict[int, list[SearchTree]] = {}
+            preds: dict[int, Predictor] = {}
+            for s in slots:
+                s.tree.select()
+                if s.tree.needs_eval():
+                    p = s.nets[s.tree.leaf_player]
+                    groups.setdefault(id(p), []).append(s.tree)
+                    preds[id(p)] = p
+            for pid, trees in groups.items():
+                batch = np.stack([t.leaf_input() for t in trees])
+                probs, values = preds[pid].predict(batch)
+                for t, prob, val in zip(trees, probs, values):
+                    t.expand_and_backup(prob, float(val))
+        # --- pick a move in every game ---
+        finished: list[_Slot] = []
+        for s in slots:
+            pi = s.tree.root_pi(temperature=1.0)
+            if sample_temperature and s.game.move_count < temp_moves:
+                a = int(rng.choice(n * n, p=pi / pi.sum()))
+            else:
+                a = s.tree.best_action()
+            # training sample: canonical position BEFORE the move
+            s.samples.append((s.game.canonical_board().astype(np.int8),
+                              pi.astype(np.float32), np.int8(s.game.current_player)))
+            y, x = divmod(a, n)
+            s.moves.append({
+                "n": s.game.move_count, "x": x, "y": y, "player": s.game.current_player,
+                "value": round(float(s.tree.root_value()), 4),
+                "pi": [round(float(v), 4) for v in pi],
+                "top": s.tree.top_actions(5),
+            })
+            s.tree.update_root(a)
+            s.game.play(a)
+            if on_progress is not None:
+                on_progress(s.idx, iteration, s.game_id, s.game, s.moves[-1])
+            if s.game.outcome() is not None:
+                finished.append(s)
+        for s in finished:
+            rec = _finalize(s, cfg, iteration, kind)`}</pre>
         </div>
-        <div className="codewalk">
-          <pre>{`# play_games 多局批量：每棵树先各走一次，再把等待评价的叶子叠起来
-for s in slots:
-    s.tree.select()
-    if s.tree.needs_eval():
-        p = s.nets[s.tree.leaf_player]
-        groups.setdefault(id(p), []).append(s.tree)
-        preds[id(p)] = p
-for pid, trees in groups.items():
-    batch = np.stack([t.leaf_input() for t in trees])
-    probs, values = preds[pid].predict(batch)
-    for t, prob, val in zip(trees, probs, values):
-        t.expand_and_backup(prob, float(val))`}</pre>
-        </div>
-        <p className="mt-3">
-          第一段回答「样本 3 个要素何时产生」：落子前 append 进 samples 的是
-          <span className="mono">(s, π, player)</span>，终局后逐条按
-          <span className="mono">player</span> 补上 <span className="mono">z</span>。
-          第二段回答「并行多局为什么不是并行改一棵树」。这四步就是你要写的锁步接口：<span className="mono">select</span> 各树各走一步到待评叶子，<span className="mono">needs_eval</span> 报告哪些树要评，<span className="mono">leaf_input</span> 取输入叠成一批前向，<span className="mono">expand_and_backup</span> 逐树记回；跨树只合批求值，树内部仍一次一步。自我对弈两边是同一个网络，代码仍按叶方（leaf_player）选网，是给「两边用不同网络」的场景预留的口子。
-          记录中的 <span className="mono">root_value</span> 只是搜索展示值，不在 samples 的 3 个要素里。
+        <p className="mt-3 text-sm">
+          运行 <span className="mono">python -m pytest tests/test_selfplay.py -q</span>{" "}
+          可验证自我对弈样本生成、终局 <span className="mono">z</span> 视角回填与多局锁步合批。
         </p>
       </Ledger>
 
@@ -278,7 +385,7 @@ for pid, trees in groups.items():
               "它只是把同一张棋盘复制很多遍，答案再取平均",
             ],
             answer: 0,
-            explain: "并行的是多局之间的网络前向，不是单树内部的选择与回传。每棵树下一次选择之前，上一份叶值已经记回统计。",
+            explain: "并行的是多局之间的网络前向，不是单树内部的选择与回传。每棵树下一次选择之前，上一份叶值已经回传进统计。",
           },
         ]}
       />
@@ -358,13 +465,13 @@ function SPZ() {
           </p>
 
           <div className="mt-4 border-t pt-3" style={{ borderColor: "var(--hairline)" }}>
-            <div className="mini-label">root_value 与 z · 搜索记录值和终局结果</div>
+            <div className="mini-label">root_value 与 z · 搜索汇总和终局结果</div>
             <p className="num mt-1.5 text-lg font-bold" style={{ color: "var(--accent-deep)" }}>
               root_value = {mv.rootValue >= 0 ? "+" : ""}{mv.rootValue.toFixed(2)}
             </p>
             <p className="num mt-1 text-lg font-bold" data-qa="spz-z">z = {z > 0 ? "+1" : z < 0 ? "−1" : "0"}</p>
             <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-              root_value 是搜索多次回传后的根平均值，只用于记录和展示。训练抽到 s 时会重新运行当前网络，
+              root_value 是搜索汇总，即多次回传求平均的结果，只用于记录和展示。训练抽到 s 时会重新运行当前网络，
               得到新的 v_net，再与 z 比较算出误差。
             </p>
           </div>
@@ -373,6 +480,7 @@ function SPZ() {
       <figcaption className="figure-cap">
         <span className="cap-no">例 12-1</span>
         {GAME.id}，iteration 3 的一局（训练轮自 0 编号），共 {MOVES.length} 手。局面由动作逐手重建，π、root_value 来自训练保存的记录；z 由终局和该手 player 推得。
+        π 面板每行的「访问次数 / 访问总数」就是正文那个比例的实数版。
       </figcaption>
     </figure>
   )

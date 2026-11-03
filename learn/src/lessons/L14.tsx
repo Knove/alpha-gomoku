@@ -1,11 +1,12 @@
 /** 第 11 课 · 搜索：下一次该查哪条路。
  *  节拍：选择分数(Q+U)→ 例 11-1 三行手算 → π/根噪声/温度 → 例 11-2 真权重预算 →
- *  对证(SearchTree)→ 本章小结 → 习题。 */
+ *  源码与验证 → 本章小结 → 习题。 */
 import { useEffect, useRef, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
+import { EvidenceCard } from "../framework/evidence"
 import Board from "../lib/board"
 import { type GameState } from "../engine/game"
 import { loadNet, type WeightsJson } from "../engine/model"
@@ -46,7 +47,7 @@ export default function L14() {
         question="一棵树有很多候选路，搜索怎样决定下一次把思考机会花在哪里，并把访问次数变成落子？"
         why="第 10 课已经会让一次模拟向前走、再把结果向后回传；现在必须解决预算分配，否则搜索会只盯热门路，或把时间平均浪费在所有路上。"
         chain={[
-          "PUCT 把历史成绩 Q 和探索奖励放在一起",
+          "PUCT 把历史成绩（第 10 课的平均成绩 Q）和探索奖励放在一起",
           "多次模拟把每条根边的访问次数记成 N",
           "把全部根访问数换算成比例（加起来等于 1），得到策略目标 π",
           "根噪声改的是搜索期的根先验，温度管的是搜索完之后的落子",
@@ -75,13 +76,15 @@ export default function L14() {
       <div className="prose mt-10">
         <h3>选择分数把已有成绩和探索奖励相加</h3>
         <p>
-          每条边扩展时写入先验 <span className="mono">P</span>；此后每次模拟沿路径记一笔：
-          <span className="mono">N</span> 加 1、<span className="mono">W</span> 加这次换视角后的值，
-          <span className="mono">Q=W/N</span> 现算。
-          Q 的每个记分都来自叶处 v_net 或终局 z 的回传<span className="def-see">参见：第 10 课</span>。
+          一次模拟每走一条边，边上的数就变一次。
+          Q 的每个记分都来自叶处 v_net 或终局结果 z 的回传<span className="def-see">参见：第 10 课</span>。
           只选 Q 最大的路，会让早期一次好运把后面的次数全占掉；只追求没见过的路（比如永远选 N 最小），
           又会忽略已经发现的好路。
           下一次选择必须同时顾及已有成绩 Q 和访问次数 N，才能把有限的模拟预算分得合理。
+          每条边扩展时写入先验 <span className="mono">P</span>（根节点若开启噪声还会由{" "}
+          <span className="mono">_mix_noise</span> 混合扰动）；此后每次模拟沿路径记一笔：
+          <span className="mono">N</span> 加 1、<span className="mono">W</span> 加这次换视角后的值，
+          <span className="mono">Q=W/N</span> 在选边时现算。
         </p>
         <Def term="利用与探索" en="exploitation and exploration">
           利用（exploit）指沿已知成绩好的路继续走；探索（explore）指把次数分给没看够的路。
@@ -102,24 +105,42 @@ export default function L14() {
         </div>
         <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
           两项直接相加是 PUCT 的约定：Q 是 −1…+1 的价值刻度，U 是同一刻度上的探索加成，
-          靠 c_puct 调探索所占的分量。
+          靠 c（代码名 c_puct）调探索所占的分量。
         </p>
         <p>
-          公式右边第一项是已有成绩，第二项就是探索奖励。这族「多试还没试够的路」的选择规则叫 UCB（置信上界，upper confidence bound）；不带先验 P 的标准版叫 UCB1。
-          <span className="mono">ΣN</span> 是这个岔口全部候选被走过的总次数。探索分怎么读，分三段：先验 P 给各边打底，√ΣN 让探索奖励随总预算缓慢增加，分母 <span className="mono">1+N(a)</span> 让走过的边慢慢失去这份奖励。具体说：没走过的边（N=0）探索分取自身最大值；自己的 N 增加时递减，别的边被访问反而让 √ΣN 变大。比较都发生在同一个 ΣN 之下，所以已经常走的路逐渐失去奖励。不同边还各乘自己的 P，P 很小的未访问边未必压过 P 大的已访问边。这套幅度相当于 UCB1 置信半径（√(2·ln ΣN / N(a))）的变体：标准版用对数增长，这里改用 √ΣN。
-          <span className="mono">c</span> 是探索强度权重：越大越偏爱少走的路；本项目配置固定为 1.5。
-          例 11-1 的三行使用同一个 <span className="mono">c=1.5、ΣN=16</span>，逐行计算后选择总分最高的一条。
+          公式右边第一项是已有成绩，第二项就是探索奖励。<span className="mono">ΣN</span>{" "}
+          是这个岔口全部候选被走过的总次数。探索分怎么读，分三段：先验 P 给各边打底，√ΣN 让探索奖励随总预算缓慢增加，分母{" "}
+          <span className="mono">1+N(a)</span> 让走过的边慢慢失去这份奖励。比较都发生在同一个 ΣN 之下，所以已经常走的路逐渐失去奖励。不同边还各乘自己的 P，P 很小的未访问边未必压过 P 大的已访问边。打分之后，非法动作的分数置为负无穷，永远不进比较。
+          没走过的边（N=0）分母从 1 起步，探索分取自身最大值；自己的 N 增加时递减，别的边被访问反而让 √ΣN 变大。<span className="mono">c</span>{" "}
+          是探索强度权重，越大越偏爱少走的路，本项目配置（<span className="mono">alphagomoku/config.py</span> 的{" "}
+          <span className="mono">c_puct</span>）固定为 1.5。
         </p>
-        <Def term="探索奖励" en="exploration bonus">
-          选择分数里补偿「去查没看够的路」的那一项，大小随该边访问次数增加而减小。
-          走过足够多次后补偿自然消失，分数回到只看成绩；它不是「永远选冷门」的指令。
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="按 PUCT 公式计算各候选边的 Q + U 并选出最高分合法动作"
+          source="alphagomoku/mcts.py · SearchTree._puct_select"
+        >
+          <div className="codewalk">
+            <pre>{`    def _puct_select(self, node: _Node, game: Game) -> int:
+        legal = game.legal_moves()
+        N, W, P = node.N, node.W, node.prior
+        assert P is not None
+        sqrt_total = math.sqrt(float(N.sum()) + 1e-8)
+        Q = np.divide(W, N, out=np.zeros_like(W), where=N > 0)
+        U = self.cfg.c_puct * P * sqrt_total / (1.0 + N)
+        score = Q + U
+        score[legal == 0] = -np.inf
+        return int(np.argmax(score))`}</pre>
+          </div>
+        </EvidenceCard>
+        <Def term="PUCT 与探索奖励" en="Predictor + UCT, exploration bonus">
+          本项目的节点选择公式（Predictor + Upper Confidence bounds applied to Trees）：把已有平均成绩 <span className="mono">Q(a)</span> 与探索奖励 <span className="mono">U(a) = c · P(a) · √ΣN / (1 + N(a))</span> 相加。
+          探索奖励专门补偿「还没看够的路」，网络先验 <span className="mono">P(a)</span> 决定各边的初始权重，随该边访问次数 <span className="mono">N(a)</span> 增加而递减；走过足够多次后补偿自然消失，分数回到只看成绩。
         </Def>
-        <Def term="PUCT" en="Predictor + UCT">
-          带预测网络的上置信界树搜索，本项目的选择规则。名字来自 UCT
-          （Upper Confidence bounds applied to Trees）；UCT 又源自 UCB
-          （Upper Confidence Bound，上置信界）思想：对不确定的选项保持乐观，迫使搜索去查证。
-          PUCT 在这个骨架上用网络先验 P 决定每条边探索奖励的权重。
-        </Def>
+        <p>
+          这套打分先在例 11-1 的三条边上过一遍手算。例 11-1 的三行使用同一个{" "}
+          <span className="mono">c=1.5、ΣN=16</span>，逐行计算后选择总分最高的一条。
+        </p>
       </div>
 
       <PuctTable />
@@ -127,14 +148,39 @@ export default function L14() {
       <div className="prose mt-10">
         <h3>访问次数归一化成 π，温度决定实际落子</h3>
         <p>
-          搜索跑完后，策略目标使用<strong>全部根动作</strong>的累计访问数。用 3 条边的访问
-          10、5、1 举例，分母是全部根访问 16，不是候选动作个数 3，得到的比例加起来等于 1：
+          搜索跑完后，策略目标使用<strong>全部根动作</strong>的累计访问数，写成式子是：
         </p>
         <div className="formula">π(a) = N(a) / Σ<sub>全部根动作</sub>N</div>
         <p>
-          与先验 P 不同：P 是网络一眼给出的把握，π 是搜索访问分布 N/ΣN。树还没跑过模拟时 ΣN=0，这个比值没有定义；本项目此时按合法着均匀给出 π。
+          用 3 条边的访问 10、5、1 举例，分母是全部根访问 16，不是候选动作个数 3，
+          得到的比例加起来等于 1。与先验 P 不同：P 是网络一眼给出的把握，π 是搜索访问分布 N/ΣN。
+          树还没跑过模拟时 ΣN=0，这个比值没有定义，此时按合法着均匀给出 π；
+          温度极低（<span className="mono">temperature &lt;= 1e-3</span>）时直接给出最大访问动作的独热分布；
+          常规温度下则对访问计数取 <span className="mono">1.0 / temperature</span> 次幂后再除以总和归一。
         </p>
-        <Def term="访问分布" en="visit distribution，记作 π">
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="将根访问计数归一为分布 π，含零访问兜底与低温取最大分支"
+          source="alphagomoku/mcts.py · SearchTree.root_pi"
+        >
+          <div className="codewalk">
+            <pre>{`    def root_pi(self, temperature: float = 1.0) -> np.ndarray:
+        """Visit-count distribution at the root (the training target)."""
+        counts = self.root.N
+        total = counts.sum()
+        if total <= 0:
+            legal = self.root_game.legal_moves()
+            s = legal.sum()
+            return legal / s if s > 0 else legal
+        if temperature <= 1e-3:
+            pi = np.zeros_like(counts)
+            pi[self.best_action()] = 1.0
+            return pi
+        c = counts.astype(np.float64) ** (1.0 / temperature)
+        return (c / c.sum()).astype(np.float32)`}</pre>
+          </div>
+        </EvidenceCard>
+        <Def term="访问分布" en="visit distribution">
           搜索跑完后，按各根动作的累计访问数算出的比例分布：
           <span className="mono">π(a) = N(a) / ΣN</span>，分母是全部根动作访问数之和，
           不是预算次数，也不是候选动作个数。它与先验 P 回答同一个问题（「哪里该下」），
@@ -157,58 +203,89 @@ export default function L14() {
           让高访问候选更常出现、冷门候选也有机会；残局每手都可能直接定胜负，
           抽样等于把胜势随手送掉，所以后期温度低，改为直接选访问最多的动作。
         </Def>
-        <p>
-          根节点还会把网络先验 P 和一份随机配比 η 混在一起，让自我对弈走出更多样的路线。
-          随机配比从狄利克雷分布抽出：
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="自我对弈前 temp_moves 手按 π 抽样，之后直接取最大访问动作"
+          source="alphagomoku/selfplay.py · play_games"
+        >
+          <div className="codewalk">
+            <pre>{`            pi = s.tree.root_pi(temperature=1.0)
+            if sample_temperature and s.game.move_count < temp_moves:
+                a = int(rng.choice(n * n, p=pi / pi.sum()))
+            else:
+                a = s.tree.best_action()`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          门槛 <span className="mono">temp_moves</span> 读取配置项{" "}
+          <span className="mono">temp_threshold</span>：默认配置（<span className="mono">alphagomoku/config.py</span>）为 12，演示配置（<span className="mono">configs/fast.json</span>）为 10。
         </p>
-        <Def term="狄利克雷分布" en="Dirichlet distribution">
-          在「和为 1 的非负配比」上取样的分布，抽出的一份配比 η 非负且和为 1。浓度参数 α 越小，抽样越偏向少数几路、其余接近 0；本项目取 α=0.3（小于 1）。
-        </Def>
-        <Def term="根噪声" en="root Dirichlet noise">
-          只在根节点把网络先验 P 和随机配比 η 混合的做法（每次落子换了新根，若新根已展开就重新混一次噪声），新先验为
-          (1−ε)·P + ε·η。ε 控制掺多少，自我对弈取 ε=0.25，即 25%。
-        </Def>
         <p>
+          为了让自我对弈走出更多样的开局路线，根节点还会把网络先验 P 和一份从狄利克雷分布（Dirichlet distribution，在「非负且和为 1 的配比」上抽样的分布，浓度参数 <span className="mono">α=0.3</span>）抽出的随机配比 <span className="mono">η</span> 混在一起：
+        </p>
+        <Def term="根噪声" en="root Dirichlet noise">
+          只在根节点把网络先验 P 和狄利克雷随机配比 η 按比例混合的做法（每次落子换了新根，若新根已展开就重新混一次噪声），新先验为
+          <span className="mono">(1−ε)·P + ε·η</span>。自我对弈取 <span className="mono">ε=0.25</span>（掺入 25% 噪声）与 <span className="mono">α=0.3</span>；竞技场与人机对弈关闭根噪声。
+        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="在根节点按比例混合网络先验与狄利克雷噪声"
+          source="alphagomoku/mcts.py · SearchTree._mix_noise"
+        >
+          <div className="codewalk">
+            <pre>{`    def _mix_noise(self, node: _Node, legal: np.ndarray) -> None:
+        eps = self.cfg.dirichlet_epsilon
+        if eps <= 0:
+            return
+        idx = np.flatnonzero(legal)
+        noise = self.rng.dirichlet(np.full(len(idx), self.cfg.dirichlet_alpha))
+        mixed = (1.0 - eps) * node.prior
+        mixed[idx] += eps * noise.astype(np.float32)
+        node.prior = mixed`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          噪声比例 <span className="mono">ε=0.25</span> 与浓度参数{" "}
+          <span className="mono">α=0.3</span> 分别对应{" "}
+          <span className="mono">alphagomoku/config.py</span> 中的{" "}
+          <span className="mono">dirichlet_epsilon</span> 与{" "}
+          <span className="mono">dirichlet_alpha</span>。
           只在根掺，一处扰动会贯穿这手棋的整次搜索，把整局棋引向不同路线；
           若每个节点都掺，统计里到处是没有意义的随机偏差，反而冲淡真实成绩。
-          竞技场和人机对弈关闭根噪声。开局按 π 抽样属于温度的安排，是另一道独立的控制：竞技场开局按 π 抽样，人机对弈则恒取访问最多、不抽样。
+          开局按 π 抽样属于温度的安排，是另一道独立的控制；竞技场和人机对战关闭根噪声，两处的采样开关见例 11-2。
         </p>
       </div>
 
       <BudgetLab />
 
-      <Ledger title="SearchTree._puct_select / root_pi / update_root">
-        <p className="mb-2 text-sm">
-          <strong>这段在证什么：</strong>PUCT 选点是 _puct_select 的已有成绩加探索奖励；root_pi 把根访问数归一成 π（温度分支从略）；update_root 复用子树后 ΣN 带旧访问数。
+      <Ledger title="alphagomoku/mcts.py · best_action 与 alphagomoku/config.py">
+        <p className="mb-3 text-sm">
+          正文中已经完整展示了选边函数 <span className="mono">_puct_select</span>、访问分布函数{" "}
+          <span className="mono">root_pi</span> 与根噪声函数 <span className="mono">_mix_noise</span>。
+          下面补充展示低温或后期落子调用的 <span className="mono">best_action</span>，以及{" "}
+          <span className="mono">Config</span> 中集中定义的五项搜索超参数：
         </p>
         <div className="codewalk">
-          <pre>{`# _puct_select：历史平均 + 探索奖励；非法动作永远不选
-legal = game.legal_moves()
-N, W, P = node.N, node.W, node.prior
-#（省略一行 assert P is not None）
-sqrt_total = math.sqrt(float(N.sum()) + 1e-8)
-Q = np.divide(W, N, out=np.zeros_like(W), where=N > 0)
-U = self.cfg.c_puct * P * sqrt_total / (1.0 + N)
-score = Q + U
-score[legal == 0] = -np.inf
-return int(np.argmax(score))`}</pre>
+          <pre>{`    def best_action(self) -> int:
+        """Argmax visit count among LEGAL actions (all-zero counts fall back to
+        the first legal move, mirroring root_pi's uniform-legal fallback)."""
+        legal = self.root_game.legal_moves()
+        if legal.sum() == 0:
+            return 0
+        masked = np.where(legal > 0, self.root.N, -np.inf)
+        return int(np.argmax(masked))`}</pre>
         </div>
-        <div className="codewalk">
-          <pre>{`# root_pi：全部根访问数形成 π（含 ΣN=0 的退化分支）
-counts = self.root.N
-total = counts.sum()
-if total <= 0:
-    legal = self.root_game.legal_moves()
-    s = legal.sum()
-    return legal / s if s > 0 else legal
-#（下略温度分支）`}</pre>
+        <div className="codewalk mt-3">
+          <pre>{`    # MCTS
+    mcts_simulations: int = 100
+    c_puct: float = 1.5
+    dirichlet_alpha: float = 0.3
+    dirichlet_epsilon: float = 0.25
+    temp_threshold: int = 12`}</pre>
         </div>
-        <p className="mt-3">
-          两段代码里，<span className="mono">P/Q/N</span> 合成下一次选择，
-          <span className="mono">π</span> 的分母取全部根访问，
-          <span className="mono">update_root</span> 复用子树后，ΣN 可能带着旧访问数。
-          浏览器 <span className="mono">SearchTree</span> 使用 Float64、舍入后的导出权重和
-          JavaScript 随机数，规则和 Python 版一致，小数结果不会一模一样。
+        <p className="mt-3 text-sm">
+          运行 <span className="mono">python -m pytest tests/test_mcts.py -q</span>{" "}
+          可验证 PUCT 选边、根访问分布 <span className="mono">π</span> 归一与狄利克雷根噪声混合。
         </p>
       </Ledger>
 
@@ -221,7 +298,7 @@ if total <= 0:
         next={
           <>
             下一课把一局棋变成一批训练样本。落子当时还不知道输赢，终局才把 z 补进每条记录；
-            顺带分清搜索用过的 v_net、记下的 root_value 和终局 z 各自的角色，以及真训练怎样跨多棵树
+            顺带分清搜索用过的 v_net、记下的 root_value 和终局结果 z 各自的角色，以及真训练怎样跨多棵树
             批量评估、逐树顺序搜索。样本积累好之后，才轮到网络从这些样本里学。
           </>
         }
@@ -267,11 +344,12 @@ if total <= 0:
 }
 
 function PuctTable() {
-  const rows = [
+  const initRows = [
     { name: "A", p: 0.40, n: 10, q: 0.55 },
     { name: "B", p: 0.40, n: 5, q: 0.45 },
     { name: "C", p: 0.20, n: 1, q: 0.10 },
   ]
+  const [rows, setRows] = useState(initRows)
   const total = rows.reduce((s, r) => s + r.n, 0)
   const scored = rows.map((r) => {
     const u = (1.5 * r.p * Math.sqrt(total)) / (1 + r.n)
@@ -279,15 +357,31 @@ function PuctTable() {
   })
   const best = scored.reduce((a, b) => (b.score > a.score ? b : a))
 
+  const stepVisit = () => {
+    setRows((prev) =>
+      prev.map((r) => (r.name === best.name ? { ...r, n: r.n + 1 } : r)),
+    )
+  }
+
   return (
     <figure className="figure mt-8" data-qa="fig-budget">
-      <div className="px-4 pt-4 sm:px-5">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
         <span className="mini-label">例 11-1 · 3 条边下一次选谁</span>
+        <div className="flex gap-2">
+          <button type="button" className="btn" onClick={stepVisit}>
+            试走一步（胜出边 {best.name} 的 N+1）
+          </button>
+          {total > 16 && (
+            <button type="button" className="btn" onClick={() => setRows(initRows)}>
+              ↺ 回到 ΣN=16
+            </button>
+          )}
+        </div>
       </div>
       <div className="p-4 sm:p-5">
         <div className="overflow-x-auto">
           <table className="l09-table">
-            <thead><tr><th>边</th><th>P</th><th>N</th><th>Q</th><th>U=1.5·P·√16/(1+N)</th><th>Q+U</th></tr></thead>
+            <thead><tr><th>边</th><th>P</th><th>N</th><th>Q</th><th>U=1.5·P·√{total}/(1+N)</th><th>Q+U</th><th>Q + U 构成</th></tr></thead>
             <tbody>
               {scored.map((r) => (
                 <tr key={r.name}>
@@ -297,14 +391,21 @@ function PuctTable() {
                   <td className="num">{r.q.toFixed(2)}</td>
                   <td className="num">{r.u.toFixed(2)}</td>
                   <td className="num">{r.score.toFixed(2)}</td>
+                  <td style={{ minWidth: "7.5rem" }}>
+                    <div className="prob-track" style={{ display: "flex" }}>
+                      <span className="motion-bar" style={{ width: `${Math.min(100, r.q * 65)}%`, background: "var(--fg-muted)" }} title={`Q=${r.q.toFixed(2)}`} />
+                      <span className="motion-bar" style={{ width: `${Math.min(100, r.u * 65)}%`, background: "var(--accent)" }} title={`U=${r.u.toFixed(2)}`} />
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
         <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          A 的 Q 最高，但已经看了 10 次，探索奖励很小；B 的成绩不差、访问较少，因此本轮总分最高。
-          C 虽然最少看，P 和 Q 都低，这份探索奖励还不足以让它领先。公式不是「永远选冷门」，而是在证据和探索之间分预算。
+          三行共用同一个 c=1.5 与 ΣN={total}，逐行算出 U（朱砂段）再加 Q（深灰段），总分最高的一行标着「← 下一次」。
+          初始 ΣN=16 时 A 的 Q 最高，但已看了 10 次，探索奖励很小；B 成绩不差、访问较少，因此胜出。
+          点「试走一步」让胜出边的 N 加 1，观察它的探索奖励 U 怎样被分母摊薄、把下一次机会让回给 A。
         </p>
       </div>
       <figcaption className="figure-cap">
@@ -371,7 +472,7 @@ function BudgetLab() {
         <div className="min-w-0 flex-1 md:max-w-[20rem]">
           <Board board={POS.board.flat()} marks={[{ x: 5, y: 4, anchor: true }]} />
           <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            教学构造：轮黑，红圈 F5=(5,4) 是立即成五的动作。它专门检验弱先验和有限预算是否会漏掉明显胜着。
+            轮黑，红圈 F5=(5,4) 是立即成五的胜着，用来检验弱先验与有限预算下搜索能否找到它。
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button type="button" className="btn" disabled={!net || sims >= 1} onClick={() => runTo(1)}>跑 1 次</button>
@@ -411,16 +512,19 @@ function BudgetLab() {
             <p>当前最多访问：<span className="mono">{best === null ? "—" : coord(best)}</span></p>
             <p className="mt-1">F5：<span className="mono">N={f5n} / ΣN={total}</span></p>
             <p className="mt-2" style={{ color: "var(--fg-muted)" }}>
-              若 40 次后 F5 仍未访问，结论不是「搜索代码错了」，而是弱网络先验和有限预算先把机会花在别处。
+              若 40 次后 F5 仍未访问，原因是弱网络先验和有限预算先把机会花在别处。
               增加预算只是提高补上漏点的机会，并不保证一定找到。切换噪声后 P 会变化，N 仍由后续 PUCT 和真实回传共同决定。
+              「开 25%」就是自我对弈的用法；「关」就是竞技场和人机对战的用法，两处建树都把 add_noise 设为 False
+              （alphagomoku/arena.py 与 server/play.py）；同样是这两处，竞技场开局按 π 抽样，人机对战则恒取访问最多、不抽样。
             </p>
           </div>
         </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 11-2</span>
-        棋盘是教学构造；叶子的评价来自演示用的 checkpoint（检查点，训练保存的权重文件；教学站导出的这份只保留五位小数），
-        搜索由浏览器 SearchTree 复现。
+        棋盘是教学构造；叶子的评价来自演示用的检查点（checkpoint，训练保存的权重文件；教学站导出的这份只保留五位小数），
+        搜索由浏览器 SearchTree 复现。浏览器 SearchTree 使用 Float64、舍入后的导出权重和 JavaScript 随机数，
+        规则和 Python 版一致，小数结果不会一模一样。
       </figcaption>
     </figure>
   )

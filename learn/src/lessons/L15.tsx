@@ -1,11 +1,14 @@
 /** 第 14 课 · 训练：许多样本怎样形成一次更新。
- *  节拍：思考题 → 回放环 → 随机批次/min_buffer → 同步对称 → 精确 train_step →
- *  例 14-1/14-2 → 对证（ReplayBuffer/train_step/优化器）→ 小结 → 习题。 */
+ *  节拍：思考题 → 回放环（落点码 add_many）→ 随机批次/min_buffer（落点码 sample）→
+ *  同步对称（落点码 增广）→ 精确 train_step（落点码 两笔损失、更新序）→
+ *  优化器与检查点（落点码 SGD 参数、键表）→ 例 14-1/14-2 →
+ *  对证（整链：ReplayBuffer.sample / train_step / make_optimizer）→ 小结 → 习题。 */
 import { useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
+import { EvidenceCard } from "../framework/evidence"
 import Board from "../lib/board"
 import { REAL } from "../data/real"
 import { dihedral, dihedralPi, emptyBoard, play, type GameState } from "../engine/game"
@@ -41,10 +44,10 @@ export default function L15() {
           "样本写进回放池",
           "累积到 min_buffer 才随机抽一批",
           "每张棋盘与 π 同步做一种旋转或镜像",
-          "重新前向、算 2 笔损失、反传并更新权重",
+          "重新前向、算 2 笔损失、反向传播并更新权重",
         ]}
         takeaway="你能写出回放池抽批与棋盘、π 的同步增广，并复现一次 train_step 的重新前向、两笔损失与更新。"
-        boundary="一条真实记录只贡献一批损失里的一小份梯度，不能说某份 checkpoint 或 best 更换全是它的功劳。"
+        boundary="一条真实记录只贡献一批损失里的一小份梯度，不能说某份检查点或 best 更换全是它的功劳。"
       />
 
       <Quiz
@@ -66,40 +69,88 @@ export default function L15() {
       <div className="prose mt-10">
         <h3>回放池用环形缓冲区装下新旧样本</h3>
         <p>
-          训练样本不是用完即弃。每局自我对弈产生的记录都写进回放池，由它决定更新权重时能抽到哪些旧样本；
-          写到容量末尾会绕回开头覆盖最旧样本。覆盖最旧样本正是设计意图：
-          最旧的样本出自最弱的网络：z 是真值、不会变旧，变旧的是 π 那份搜索答案（预算和先验都来自旧网），棋理价值最低。回放池是一扇跟着棋力向前滑的窗，不是仓库。
+          训练样本不是用完即弃。每局自我对弈产生的记录都写进回放池，由它决定更新权重时能抽到哪些旧样本。
+          覆盖最旧样本正是设计意图：最旧的样本出自最弱的网络：z 是真值、不会变旧，变旧的是 π 那份搜索答案
+          （预算和先验都来自旧网），棋理价值最低。回放池只保留最近若干局，旧样本按容量被覆盖。
+          写到容量末尾会绕回开头覆盖最旧样本。
         </p>
-        <Def term="环形缓冲区" en="ring buffer">
-          固定容量、写满就绕回开头的存储。例 14-1 把真实容量缩到 5 个槽来演示这个绕回。
-        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="把四项数据写入当前槽位，游标对容量取模绕回"
+          source="alphagomoku/replay.py · ReplayBuffer.add_many"
+        >
+          <div className="codewalk">
+            <pre>{`            self.boards[self.pos] = canon
+            self.pis[self.pos] = pi
+            self.players[self.pos] = player
+            self.zs[self.pos] = z
+            self.pos = (self.pos + 1) % self.capacity`}</pre>
+          </div>
+        </EvidenceCard>
         <Def term="回放池" en="replay buffer">
-          用环形缓冲区装旧对局样本的存储区。每条样本保存转成当前行棋方视角的标准棋盘、
+          用固定容量、写满就绕回开头的<strong>环形缓冲区</strong>（ring buffer）装旧对局样本的存储区（例 14-1 把真实容量缩到 5 个槽来演示这个绕回）。每条样本保存转成当前行棋方视角的标准棋盘、
           当时的 player、π 和 z。重启时还能从 <span className="mono">buffer.npz</span> 恢复；
           若新配置容量变小，只保留放得下的最新样本。
         </Def>
+      </div>
 
+      <BufferRing />
+
+      <div className="prose mt-10">
         <h3>均匀有放回抽批，累积到 min_buffer 才开始更新</h3>
         <p>
-          抽样是均匀、有放回的。每个下标由随机数独立抽取：五万条里抽 128 条，从一条样本看一个批次，它本批一次都不出现是常态（约 99.7%），
-          也有个别样本被抽中两次；每条样本的先后顺序被打散了，一次更新不再只代表刚刚那一小段经历。
-          另一种打散顺序的做法是洗牌后无放回发牌；有放回抽样连洗牌都省了，不必每次给整个回放池洗牌。撞车率分两个口径：从单条样本看，
-          它在一批里被抽中两次的概率极低；从整批看，128 条里出现至少一次撞车的概率约 15%。
-          两种抽法「几乎一样」的根据不是「不撞车」，而是结论上几乎等效（更新的平均效果相同，随机波动只是略大）。
+          抽样是均匀、有放回的。每条样本的先后顺序被打散了，一次更新不再只代表刚刚那一小段经历。
+          另一种打散顺序的做法是洗牌后无放回发牌；有放回抽样连洗牌都省了，不必每次给整个回放池洗牌。
+          池子容量 5 万、每批 128 条，单批内抽到重复样本的概率极低，有放回与无放回在训练效果上几乎等效。
         </p>
-        <Def term="小批" en="mini-batch">
-          一次权重更新用到的一小组样本，本项目每批 128 条。
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="有放回均匀抽样并重建三个输入平面"
+          source="alphagomoku/replay.py · ReplayBuffer.sample"
+        >
+          <div className="codewalk">
+            <pre>{`    def sample(self, batch_size: int, rng: np.random.Generator):
+        """Uniform with replacement -> (inputs (B,3,n,n), pis (B,n*n), zs (B,))."""
+        assert self.size > 0, "cannot sample from an empty buffer"
+        idx = rng.integers(0, self.size, size=batch_size)
+        b = self.boards[idx].astype(np.float32)
+        cur = b == 1.0
+        opp = b == -1.0
+        color = np.where(self.players[idx] == 1, 1.0, 0.0).astype(np.float32)
+        color = np.broadcast_to(color[:, None, None], cur.shape)
+        inputs = np.stack([cur, opp, color], axis=1).astype(np.float32)
+        return inputs, self.pis[idx].copy(), self.zs[idx].copy()`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          随机抽出的下标 <span className="mono">idx</span> 同时取出棋盘、行棋方、策略目标 π 与终局结果 z，
+          当场把规范视角棋盘拆回己方、对方、行棋方颜色三个输入平面，输出形状为{" "}
+          <span className="mono">(B, 3, n, n)</span>。
+        </p>
+        <Def term="小批与最小样本门槛" en="mini-batch & min_buffer">
+          <strong>小批</strong>（mini-batch）是一次权重更新用到的一小组样本，本项目每批 128 条。
+          <strong>最小样本门槛</strong>（<span className="mono">min_buffer</span>）是开始权重更新所需的最小样本数：回放池中样本数还小于它时，本轮只继续自我对弈积累样本，
+          不更新网络。回放池太浅时「随机抽一批」抽到的样本重叠很多，
+          一次更新仍被一小段经历带着摇摆；累积到门槛后才开始更新，随机混合才真正成立。演示配置：池容量 5 万条、门槛 256 条；默认配置是 10 万与 512。
         </Def>
-        <Def term="最小样本门槛" en="min_buffer">
-          开始权重更新所需的最小样本数。回放池中样本数还小于它时，本轮只继续自我对弈积累样本，
-          不更新网络：回放回放池太浅时「随机抽一批」抽到的样本重叠很多，
-          一次更新仍被一小段经历带着摇摆。累积到门槛后才开始更新，随机混合才真正成立。演示配置：池容量 5 万条、门槛 256 条；默认配置是 10 万与 512。
-        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="回放池容量与最小样本门槛的默认配置"
+          source="alphagomoku/config.py · Config"
+        >
+          <div className="codewalk">
+            <pre>{`    buffer_size: int = 100_000
+    min_buffer: int = 512`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          演示配置的 5 万与 256 写在 <span className="mono">configs/fast.json</span> 的同名字段上，站里真实记录就出自那份配置。
+        </p>
 
         <h3>棋盘和 π 同步变换，z 不跟着转</h3>
         <p>
-          同一棋形旋转或镜像后棋理完全等价。每条抽中的样本随机选 8 种旋转/镜像之一。
-          同一份经历有 8 种等价读法，每次训练随机借其中一种；不增加样本条数。
+          同一棋形旋转或镜像后棋理完全等价。同一份经历有 8 种等价读法，每次训练随机借其中一种；
+          不增加样本条数。每条抽中的样本随机选 8 种旋转/镜像之一。
         </p>
         <Def term="数据增强" en="data augmentation，简称增广">
           从 8 个等价视图中随机取 1 个来改写当前样本；一条样本仍是一条，批次仍是 128，
@@ -108,59 +159,81 @@ export default function L15() {
           z 只表示输赢，不是坐标，所以不转。例 14-2 用真实记录演示同一种变换下
           棋盘与 π 怎样一起搬家。
         </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="对棋盘与策略目标 π 同步做八重对称变换"
+          source="alphagomoku/train.py · train_step"
+        >
+          <div className="codewalk">
+            <pre>{`    ks = rng.integers(0, 8, size=B)
+    aug_in = np.empty_like(inputs)
+    aug_pi = np.empty_like(pis)
+    for i in range(B):
+        k = int(ks[i])
+        aug_in[i] = dihedral_transform(inputs[i], k)
+        aug_pi[i] = dihedral_transform_pi(pis[i], n, k)
 
-        <h3>train_step 重新作答，2 笔损失合成一次更新</h3>
-        <p>
-          回放池没有保存训练时的 v_net。网络用当前权重重新前向，然后算 2 笔损失：
-          概率 p 离 π 有多远，v_net 离 z 有多远；p=softmax(logits)（训练侧写小写 p，
-          与搜索侧的先验 P 区分开）。
-          再依次清旧梯度、反向传播、由优化器更新。这 2 笔损失是交叉熵与均方误差（见下）。
-        </p>
-        <Def term="交叉熵" en="cross-entropy" see="第 13 课">
-          策略损失，衡量概率 p 离目标 π 有多远。
-        </Def>
-        <Def term="均方误差" en="mean squared error, MSE" see="第 13 课">
-          价值损失，衡量 v_net 离 z 有多远，取平方。
-        </Def>
+    x = torch.from_numpy(aug_in).to(device)
+    target_pi = torch.from_numpy(aug_pi).to(device)
+    target_z = torch.from_numpy(zs.astype(np.float32)).to(device)`}</pre>
+          </div>
+        </EvidenceCard>
       </div>
 
-      <BufferRing />
       <SymmetryTable />
 
-      <Ledger title="replay.py · ReplayBuffer / train.py · train_step">
-        <p className="mb-2 text-sm">
-          <strong>这段在证什么：</strong>三段各管一事：回放池抽批并重建 3 个输入平面、train_step 把（s、π、z）变成两笔损失并更新、make_optimizer 定更新规则。
+      <div className="prose mt-10">
+        <h3>train_step 重新作答，2 笔损失合成一次更新</h3>
+        <p>
+          回放池没有保存训练时的 v_net。网络用当前权重重新前向，然后算第 13 课定义过的 2 笔损失：
+          用<strong>交叉熵</strong>衡量落子概率 p 离目标 π 有多远，用<strong>均方误差</strong>衡量 v_net 离终局 z 有多远，
+          其中 p=softmax(logits)（训练侧写小写 p，与搜索侧的先验 P 区分开）。
+          再依次清旧梯度、反向传播、由优化器更新。
         </p>
-        <div className="codewalk">
-          <pre>{`# ReplayBuffer.sample：有放回随机抽样，再重建 3 个输入平面
-idx = rng.integers(0, self.size, size=batch_size)
-b = self.boards[idx].astype(np.float32)
-cur = b == 1.0
-opp = b == -1.0
-color = np.where(self.players[idx] == 1, 1.0, 0.0).astype(np.float32)
-color = np.broadcast_to(color[:, None, None], cur.shape)
-inputs = np.stack([cur, opp, color], axis=1).astype(np.float32)`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# train_step：样本与 π 同步变换，再重新前向计算损失
-aug_in[i] = dihedral_transform(inputs[i], k)
-aug_pi[i] = dihedral_transform_pi(pis[i], n, k)
-#（略去几行：net.train()、把增广后的批次转成张量并送入设备；
-#  形状是输入 (128,3,9,9) → logits (128,81)、v (128,)，
-#  与 target_pi (128,81)、target_z (128,) 逐条对齐）
-logits, v = net(x)
-value_loss = F.mse_loss(v, target_z)
-logp = F.log_softmax(logits, dim=-1)
-policy_loss = -(target_pi * logp).sum(dim=-1).mean()
-loss = value_loss + policy_loss
-optimizer.zero_grad()
-loss.backward()
-optimizer.step()`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# make_optimizer：本项目当前真实更新规则
-# lr=0.01、weight_decay=1e-4(config.py)；momentum=0.9 写死在 train.py
-def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="重新前向计算双头损失，清梯度、反向传播并更新权重"
+          source="alphagomoku/train.py · train_step"
+        >
+          <div className="codewalk">
+            <pre>{`    net.train()
+    logits, v = net(x)
+    value_loss = F.mse_loss(v, target_z)
+    logp = F.log_softmax(logits, dim=-1)
+    policy_loss = -(target_pi * logp).sum(dim=-1).mean()
+    loss = value_loss + policy_loss
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()`}</pre>
+          </div>
+        </EvidenceCard>
+        <Def term="优化器与随机梯度下降" en="optimizer & Stochastic Gradient Descent, SGD">
+          <strong>优化器</strong>是决定每个权重「怎么调」的更新规则加上它的辅助状态：输入是这次小批的梯度，输出是每个权重挪的那一步，只改变「怎么调」，不改变「算什么损失」。
+          本项目采用<strong>随机梯度下降</strong>（Stochastic Gradient Descent，简称 SGD）：按小批估出的梯度，给每个权重挪一小步；学习率定这一步的大小。
+        </Def>
+
+        <h3>优化器定「怎么调」，检查点不保存优化器状态</h3>
+        <p>
+          下面 3 个正则化与加速手段（动量、Nesterov、权重衰减）各管一件事，只改变「怎么调」，
+          不改变「算什么损失」。
+        </p>
+        <Def term="动量、Nesterov 与权重衰减" en="momentum, Nesterov, weight decay">
+          <strong>动量</strong>（momentum）把最近几次的更新方向合成一股惯性，不让单批噪声把权重来回拽，每个权重各有一份这样的惯性记录；
+          <strong>Nesterov</strong>（Nesterov accelerated gradient）先按惯性探一步，再在那个位置算梯度；
+          <strong>权重衰减</strong>（weight decay）每次更新把每个权重往零轻拽一点点，防止数值无节制长大。
+        </Def>
+        <p>
+          三个手段的取值与开关都写在优化器的构造里：本项目 momentum=0.9，本项目开启 nesterov=True，
+          本项目 weight_decay=1e-4。学习率在一次进程内固定，lr=0.01。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="构造带动量、Nesterov 与权重衰减的 SGD 优化器"
+          source="alphagomoku/train.py · make_optimizer"
+        >
+          <div className="codewalk">
+            <pre>{`def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
     return torch.optim.SGD(
         net.parameters(),
         lr=cfg.lr,
@@ -168,40 +241,106 @@ def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
         weight_decay=cfg.weight_decay,
         nesterov=True,
     )`}</pre>
-        </div>
-        <p className="mt-3">
-          下面 3 个正则化/加速手段（动量、Nesterov、权重衰减）各管一件事，只改变「怎么调」，不改变「算什么损失」。
-        </p>
-        <Def term="动量" en="momentum">
-          把最近几次的更新方向合成一股惯性，不让单批噪声把权重来回拽。每个权重各有一份这样的惯性记录。本项目 momentum=0.9。
-        </Def>
-        <Def term="Nesterov" en="Nesterov accelerated gradient">
-          动量的一种改法：先按惯性探一步，再在那个位置算梯度。本项目开启 nesterov=True。
-        </Def>
-        <Def term="权重衰减" en="weight decay">
-          每次更新把每个权重往零轻拽一点点，防止数值无节制长大。本项目 weight_decay=1e-4。
-        </Def>
-        <p className="mt-3">
-          学习率在一次进程内固定，lr=0.01；目前没有「学着学着自动调整学习率」的装置（scheduler）。
-          训练器若中途崩溃，恢复走 checkpoint 与 latest 这条路，口径如下。
+          </div>
+        </EvidenceCard>
+        <p>
+          目前没有自动调整学习率的装置（scheduler）。训练器若中途崩溃，
+          恢复走检查点与最近保存点这条路，口径如下。
         </p>
         <Def term="检查点" en="checkpoint">
           训练中保存的一份模型文件，内容是网络权重、配置和 meta。
-          不保存优化器的状态（含各权重的动量记录）和随机数发生器的状态。不存是为了文件简单、加载路径统一（第 16 课展开）。代价是恢复后头几步没有惯性、方向比平时颠簸，几步后惯性重建。
+          项目里<strong>最近保存点</strong>（<span className="mono">latest.pt</span>）始终是最近一次保存的检查点，按{" "}
+          <span className="mono">keep_checkpoint_every</span> 另存的{" "}
+          <span className="mono">iter_N.pt</span> 是不会被下一轮覆盖的完整副本。
+          检查点不保存优化器的状态（含各权重的动量记录）和随机数发生器的状态，是为了文件简单、加载路径统一；按项目方式恢复训练时加载 <span className="mono">latest</span> 与 <span className="mono">buffer.npz</span>，权重能接上，但带着更新惯性的动量记录与随机数序列无法原样续接（pipeline 会新建优化器并重设种子，恢复后头几步没有惯性、方向略颠簸，几步后惯性重建）。
         </Def>
-        <Def term="最近保存点" en="latest">
-          指最近一次保存的 checkpoint。按项目方式恢复训练时加载 latest 与
-          <span className="mono">buffer.npz</span>：权重能接上；但带着更新惯性的动量记录、
-          以及随机数序列，都无法原样续接（pipeline 会新建优化器并重设种子）。
-        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="检查点保存字典只含权重、网络结构配置、训练配置与元信息"
+          source="alphagomoku/model.py · save_checkpoint"
+        >
+          <div className="codewalk">
+            <pre>{`        {
+            "state_dict": net.state_dict(),
+            "config": {
+                "board_size": net.n,
+                "channels": net.channels,
+                "res_blocks": net.res_blocks,
+            },
+            "train_config": cfg_dict,
+            "meta": meta or {},
+        },`}</pre>
+          </div>
+        </EvidenceCard>
+      </div>
+
+      <Ledger title="alphagomoku/train.py · train_step">
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="完整单步训练函数：八重对称增广、前向计算、双损失合成、反向传播与指标返回"
+          source="alphagomoku/train.py · train_step"
+        >
+          <div className="codewalk">
+            <pre>{`def train_step(
+    net: AlphaGomokuNet,
+    optimizer: torch.optim.Optimizer,
+    batch,
+    device: str,
+    rng: np.random.Generator,
+) -> dict:
+    """One SGD update on a batch from ReplayBuffer.sample(). Returns metrics."""
+    inputs, pis, zs = batch
+    B = inputs.shape[0]
+    n = inputs.shape[-1]
+    ks = rng.integers(0, 8, size=B)
+    aug_in = np.empty_like(inputs)
+    aug_pi = np.empty_like(pis)
+    for i in range(B):
+        k = int(ks[i])
+        aug_in[i] = dihedral_transform(inputs[i], k)
+        aug_pi[i] = dihedral_transform_pi(pis[i], n, k)
+
+    x = torch.from_numpy(aug_in).to(device)
+    target_pi = torch.from_numpy(aug_pi).to(device)
+    target_z = torch.from_numpy(zs.astype(np.float32)).to(device)
+
+    net.train()
+    logits, v = net(x)
+    value_loss = F.mse_loss(v, target_z)
+    logp = F.log_softmax(logits, dim=-1)
+    policy_loss = -(target_pi * logp).sum(dim=-1).mean()
+    loss = value_loss + policy_loss
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    with torch.no_grad():
+        entropy = -(logp.exp() * logp).sum(dim=-1).mean()
+    return {
+        "loss": float(loss.item()),
+        "policy_loss": float(policy_loss.item()),
+        "value_loss": float(value_loss.item()),
+        "policy_entropy": float(entropy.item()),
+        "lr": float(optimizer.param_groups[0]["lr"]),
+    }`}</pre>
+            <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+              输入 (128,3,9,9) 经前向得到 logits (128,81) 与 v (128,)，分别与 target_pi (128,81)、target_z (128,) 计算交叉熵和均方误差，更新后返回损失、策略熵与学习率。
+            </p>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          运行 <span className="mono">python -m pytest tests/test_train.py -q</span> 与 <span className="mono">python -m pytest tests/test_game.py -q</span>，
+          可验证八重对称变换下棋盘与 <span className="mono">π</span> 的同步性，以及单步训练的输入输出形状。
+        </p>
       </Ledger>
 
       <ChapterEnd
         summary={[
           "回放池是环形缓冲区，覆盖最旧样本；池中样本累积到 min_buffer 才开始均匀、有放回地抽小批，一次更新因此混合了新旧经历。",
           "数据增强把棋盘和 π 同步随机做 8 种之一（旋转/镜像），z 不是坐标所以不转。",
-          "train_step 重新前向，用交叉熵比较概率 p 与 π、用均方误差比较 v_net 与 z，再清梯度、反传、由优化器更新；动量、Nesterov、权重衰减只改「怎么调」。",
-          "checkpoint 只存网络权重、配置和 meta；恢复时权重能接上，动量记录和随机数序列不能原样接上。",
+          "train_step 重新前向，用交叉熵比较概率 p 与 π、用均方误差比较 v_net 与 z，再清梯度、反向传播、由优化器更新；动量、Nesterov、权重衰减只改「怎么调」。",
+          "检查点只存网络权重、配置和 meta；恢复时权重能接上，动量记录和随机数序列不能原样接上。",
         ]}
         next={
           <>
@@ -236,14 +375,14 @@ def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
             explain: "代码用 rng.integers 为 batch 中每个位置独立产生下标，并没有把已抽中的下标移除，所以每步看到的样本分布与池内分布一致。改成按序无放回，步与步之间就带上了入库次序，近况会攒在末尾才被学到。",
           },
           {
-            q: "按项目方式恢复训练后（加载 latest checkpoint 与 buffer.npz，前者是最近一次保存），哪些东西当前不会原样恢复？",
+            q: "按项目方式恢复训练后（加载最近保存点 latest 与 buffer.npz，前者是最近一次保存），哪些东西当前不会原样恢复？",
             options: [
               "网络权重和棋盘大小",
               "优化器的动量记录与随机数状态",
-              "checkpoint 里记录的第几轮等信息",
+              "检查点里记录的第几轮等信息",
             ],
             answer: 1,
-            explain: "checkpoint 保存网络、配置和 meta；pipeline 会新建优化器并重新设随机种子，所以动量历史与随机过程不是逐位续接。",
+            explain: "检查点保存网络、配置和 meta；pipeline 会新建优化器并重新设随机种子，所以动量历史与随机过程不是逐位续接。",
           },
         ]}
       />
@@ -254,6 +393,8 @@ def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
 function BufferRing() {
   const [writes, setWrites] = useState(7)
   const capacity = 5
+  const lastSlot = writes > 0 ? (writes - 1) % capacity : -1
+  const nextSlot = writes % capacity
   const cells = Array.from({ length: capacity }, (_, i) => {
     const start = Math.max(0, writes - capacity)
     const values = Array.from({ length: Math.min(writes, capacity) }, (_, j) => start + j + 1)
@@ -266,12 +407,28 @@ function BufferRing() {
       <div className="px-4 pt-3 sm:px-5"><span className="mini-label">例 14-1 · 容量 5 的环形回放池</span></div>
       <div className="p-4 sm:p-5">
         <div className="flex flex-wrap gap-2" data-qa="replay-ring">
-          {cells.map((value, i) => (
-            <div key={i} className="card px-4 py-3 text-center">
-              <div className="mini-label">槽 {i}</div>
-              <strong className="num">{value === null ? "空" : `样本 ${value}`}</strong>
-            </div>
-          ))}
+          {cells.map((value, i) => {
+            const isLatest = i === lastSlot
+            const isNext = i === nextSlot
+            return (
+              <div
+                key={i}
+                className="card px-4 py-3 text-center"
+                style={{
+                  borderColor: isLatest ? "var(--accent)" : isNext ? "var(--hairline-strong)" : undefined,
+                  background: isLatest ? "var(--accent-wash)" : undefined,
+                  transition: "border-color 280ms ease, background 280ms ease",
+                }}
+              >
+                <div className="mini-label">
+                  槽 {i}{isLatest ? " · 刚写" : isNext ? " · 下一格" : ""}
+                </div>
+                <strong className="num" style={{ color: isLatest ? "var(--accent-deep)" : undefined }}>
+                  {value === null ? "空" : `样本 ${value}`}
+                </strong>
+              </div>
+            )
+          })}
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button type="button" className="btn" onClick={() => setWrites((n) => Math.max(0, n - 1))}>少写一条</button>
@@ -285,6 +442,7 @@ function BufferRing() {
       <figcaption className="figure-cap">
         <span className="cap-no">例 14-1</span>
         教学缩小的容量 5，用来看清「写满绕回、覆盖最旧」这一条；真实回放池的容量大得多。
+        绕回与覆盖的实现见 alphagomoku/replay.py · ReplayBuffer.add_many 的游标行。
       </figcaption>
     </figure>
   )
@@ -302,7 +460,13 @@ function SymmetryTable() {
     <figure className="figure mt-8">
       <div className="px-4 pt-3 sm:px-5"><span className="mini-label">例 14-2 · 棋盘与 π 同步做 8 种变换（演示可逐个查看 8 个视图，训练时每次只取其一）</span></div>
       <div className="flex flex-col gap-5 p-4 sm:flex-row sm:p-5">
-        <div className="w-full sm:w-64 sm:flex-none" data-qa="sym-board"><Board board={boardK} heat={piK} /></div>
+        <div className="w-full sm:w-64 sm:flex-none" data-qa="sym-board">
+          <Board
+            board={boardK}
+            heat={piK}
+            marks={[{ x: moved % 9, y: Math.floor(moved / 9), anchor: true }]}
+          />
+        </div>
         <div className="min-w-0 flex-1">
           <div className="mini-label">k=0..3 旋转；k=4..7 旋转后镜像</div>
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -323,7 +487,9 @@ function SymmetryTable() {
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 14-2</span>
-        棋盘由真实自我对弈记录重建，π 直接取自记录；换 k 时两者必须用同一个变换。换 k 前先预测 π 会搬到哪几格，再切过去对拍。
+        棋盘由真实自我对弈记录重建，π 直接取自记录；换 k 时两者必须用同一个变换。
+        变换实现见 learn/src/engine/game.ts 的 dihedral 与 dihedralPi（镜像 alphagomoku/game.py
+        的 dihedral_transform 与 dihedral_transform_pi）。换 k 前先预测 π 会搬到哪几格，再切过去对拍。
       </figcaption>
     </figure>
   )

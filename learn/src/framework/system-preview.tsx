@@ -18,8 +18,7 @@ export function SystemPreview() {
   return (
     <figure className="system-preview mt-8" aria-labelledby="system-preview-title">
       <div className="system-preview-head">
-        <span className="mini-label" id="system-preview-title">先看整条链 · 后续逐站推导每个名字</span>
-        <span className="text-xs" style={{ color: "var(--fg-faint)" }}>以后每课都会点亮其中一环</span>
+        <span className="mini-label" id="system-preview-title">系统全景 · 点击任意一环可直达对应课程</span>
       </div>
       <ol>
         {STEPS.map((step, i) => (
@@ -33,9 +32,7 @@ export function SystemPreview() {
         ))}
       </ol>
       <figcaption>
-        先抓住这一条主线：<strong>网络先判断、搜索再模拟；结果变成样本，样本再改进判断；运行产物让这些变化可以被检查。</strong>
-        这张图按系统实际发生的顺序画。课程会先补齐每一步需要的知识，再把同一份真实案例逐段接起来；
-        每个概念、公式和项目对证都属于必修内容。
+        整条主线按运行顺序串起：<strong>网络先给第一眼判断，搜索再往后推演；对弈结果存成样本，样本反向传播更新权重；竞技场对战验收新权重，运行产物落盘供网页查看。</strong>
       </figcaption>
     </figure>
   )

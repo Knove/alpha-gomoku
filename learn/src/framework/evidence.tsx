@@ -14,27 +14,6 @@ export function FidelityBadge({ kind }: { kind: FidelityKind }) {
   return <span className={`fidelity-badge fidelity-${kind}`}>{FIDELITY_LABELS[kind]}</span>
 }
 
-export function RequiredStep({
-  no,
-  title,
-  children,
-}: {
-  no: string
-  title: string
-  children: ReactNode
-}) {
-  return (
-    <section className="required-step mt-8">
-      <header>
-        <span className="num">{no}</span>
-        <h3>{title}</h3>
-        <strong>必修</strong>
-      </header>
-      <div className="required-step-body">{children}</div>
-    </section>
-  )
-}
-
 export function EvidenceCard({
   fidelity,
   title,
@@ -47,12 +26,12 @@ export function EvidenceCard({
   children: ReactNode
 }) {
   return (
-    <section className="evidence-card mt-6">
+    <section className="evidence-card mt-5">
       <div className="evidence-card-head">
         <FidelityBadge kind={fidelity} />
-        <strong>{title}</strong>
+        <span className="evidence-source mono">{source}</span>
+        {title && <span className="evidence-title">{title}</span>}
       </div>
-      <div className="evidence-source mono">{source}</div>
       <div className="evidence-card-body">{children}</div>
     </section>
   )

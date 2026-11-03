@@ -6,6 +6,7 @@ import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
+import { EvidenceCard } from "../framework/evidence"
 import Board from "../lib/board"
 import { type GameState } from "../engine/game"
 import { loadNet, type WeightsJson } from "../engine/model"
@@ -51,11 +52,11 @@ export default function L11() {
         chain={[
           "从根沿已经展开的边走到一个叶节点",
           "终局叶直接给答案；普通新叶交给网络，得到 v_net",
-          "扩展新叶，并沿原路径逐层取负回传（negamax）",
-          "每条边更新 N、W、Q，根另记搜索汇总 root_value",
+          "扩展新叶，并沿原路径逐层取负回传",
+          "每条边更新访问次数 N、累计结果 W、平均成绩 Q，根另记搜索汇总 root_value",
         ]}
-        takeaway="你能手推一次模拟（选择→求值→扩展→记回），对拍树上的 N/W/Q 与 root_value，并写出落子后换根复用的要点。"
-        boundary="本课只学搜索分哪几步、每步按什么顺序做、怎样把结果记回来。下一课才完整手算 PUCT，并解释（下一课的）访问分布 π、根噪声、温度和实际落子。"
+        takeaway="你能手推一次模拟（选择→求值→扩展→回传），对拍树上的 N、W、Q 与 root_value，并写出换根复用的实现（保留子树的 N、W、Q，清零 root_value 展示统计）。"
+        boundary="本课只学搜索分哪几步、每步按什么顺序做、怎样把结果回传。下一课才完整手算 PUCT，并解释访问分布 π、根噪声、温度和实际落子。"
       />
 
       <Quiz
@@ -69,7 +70,7 @@ export default function L11() {
               "删除整棵树，从根重新随机落子",
             ],
             answer: 1,
-            explain: "选第二项。非终局的新叶没有真实输赢，网络先给出各着点概率（先验 prior，网络给出的各着点概率 P，新叶展开时现算），再给一个局面分数 v_net；随后叶节点展开，这个分数才沿选择路径逐层换视角记回。",
+            explain: "选第二项。非终局的新叶没有真实输赢，网络先给出各着点概率 P（即下文的先验），再给一个价值估计 v_net；随后叶节点展开，这个价值估计才沿选择路径逐层换视角回传。",
           },
         ]}
       />
@@ -77,191 +78,301 @@ export default function L11() {
       <div className="prose mt-10">
         <h3>一次模拟是一趟向前、一趟向后的往返</h3>
         <p>
-          网络给出第一眼判断之后，搜索还要真的走到后续局面再把结果带回来。
-          「沿树选择、叶处求值、逐层回传」这套算法有正式名字：蒙特卡洛树搜索。
-          AlphaGo 系列让它出了名，本项目的搜索就是它的一个实现。
-          一次模拟走一趟：向前选择到叶，取得一个值，再逐层换视角记回统计。
+          网络一眼看完棋盘给了个判断，为什么不能直接信它落子？因为看漏一步就可能踩进对手的四连陷阱，所以要顺着候选点往后试走几步。
+          搜索从当前局面出发，沿棋路走到后续局面，再把沿途见到的结果带回来；这套「沿树选择、叶处求值、逐层回传」的算法叫蒙特卡洛树搜索。
         </p>
-        <Def term="蒙特卡洛树搜索" en="Monte Carlo Tree Search,缩写 MCTS">
-          沿树选择到叶、在叶处取得一个评价、再把评价逐层记回的搜索算法。
+        <Def term="蒙特卡洛树搜索" en="Monte Carlo Tree Search">
+          沿树选择到叶、在叶处取得一个价值估计、再把它逐层回传的搜索算法（缩写 MCTS）。
           「蒙特卡洛」来自用随机模拟估计答案的传统；引入神经网络评价后，
-          随机模拟被一次前向取代，记回的形式不变（N/W/Q 照写；但值的来源从真终局换成价值估计 v_net，Q 的含义随之改变）。混用会带来偏差：硬 ±1 是确定结果，价值估计 v_net 带误差。访问少时估计值影响大；访问一多，Q 是许多次回传的平均，单次估计误差被平均稀释掉（其中也掺着少数终局硬结果）。
+          随机模拟被一次前向计算取代，沿路径回传并累加统计的形式保持不变。
         </Def>
+        <p>
+          这套算法因 AlphaGo 系列而广为人知，本项目的搜索就是它的一个实现。它把推演过的局面组织成一棵搜索树，并按固定的调用序驱动每一趟模拟：
+          先 <span className="mono">select</span> 沿树走到叶，再由调用方把网络算好的策略与价值交回搜索树，
+          最后 <span className="mono">expand_and_backup</span> 把新长出的边接上，并把这次取得的值回传到走过的各条边。
+        </p>
         <Def term="节点、根、边、叶" en="node, root, edge, leaf node">
           搜索记录下来的每个局面叫一个节点；当前局面是根；局面之间的一手棋是边；
-          沿边走到的那个尚未展开的节点叫叶节点。一次模拟的路径就是一串「节点，边」交替的链条。
+          沿边走到的那个尚未展开的节点叫叶节点。一次模拟的路径就是一串「节点、边」交替的链条。
         </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="一次搜索模拟的主循环：选择、求值、扩展并回传"
+          source="alphagomoku/mcts.py · 模块文档字符串"
+        >
+          <div className="codewalk">
+            <pre>{`    for _ in range(cfg.mcts_simulations):
+        tree.select()                      # descend to a leaf (may need eval)
+        if tree.needs_eval():
+            policy, value = net(tree.leaf_input())   # batched across trees by caller
+            tree.expand_and_backup(policy, value)`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          例 10-1 的三个按钮按这个次序接力，其中按钮③「扩展并回传」调用{" "}
+          <span className="mono">expand_and_backup</span>，其内部由{" "}
+          <span className="mono">_backup</span> 完成逐边回传。
+        </p>
 
         <h3>选择沿已展开的边走到一个叶</h3>
         <p>
-          向下走时沿选出的边前进，边上的子节点没有就当场建一个，直到停在尚未展开的叶节点；
-          岔口上比较候选边的那条规则叫 PUCT。本课先看选择之后发生的数据变化。
+          第一步是<strong>选择</strong>（selection）：从根沿已经展开的边向下走，直到到达终局或尚未展开的叶节点（终局节点不必再展开，直接读真实输赢，也算叶）；走过的每一手都记下「从哪个节点、选了哪条边」，供回传时按原路返回。
+          岔口上比较候选边的规则叫 PUCT（把网络给的先验和边上已有的平均成绩合成一个分数，既不放弃已见好成绩的路，也不长期忽略访问不足的候选；下一课完整手算）。
+          向下走时沿选出的边前进，边上的子节点没有就当场建一个，直到停在叶节点。
         </p>
-        <Def term="选择" en="selection">
-          从根沿已经展开的边向下走，直到到达终局或尚未展开的叶节点（终局节点也算叶：它不必再展开，直接读真实输赢）。
-          走过的每一手都记下「从哪个节点、选了哪条边」，供回传时按原路写回。
-        </Def>
-        <Def term="先验" en="prior，代码里是 P">
-          与第 9 课 softmax 后的比例是同一批数，用作先验时只保留合法落点、再重新归一到 1。遮格后各数之和近于 0 时（策略全压在被禁点上），退化成在合法落点上均匀分布（mcts.py 的兜底分支）。
-          它是网络给出的各着点概率：根先验在第一趟模拟展开根时现算，途中每个新叶展开时再各算一次，机制相同。它来自策略头，是「第一眼觉得该下哪」，
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="沿已展开边下探至叶节点，缺子节点时当场创建"
+          source="alphagomoku/mcts.py · SearchTree.select"
+        >
+          <div className="codewalk">
+            <pre>{`        while node.expanded:
+            a = self._puct_select(node, game)
+            path.append((node, a))
+            child = node.children.get(a)
+            if child is None:
+                child = _Node(game.n * game.n)
+                node.children[a] = child
+            game.play(a)
+            node = child`}</pre>
+          </div>
+        </EvidenceCard>
+        <Def term="先验" en="prior">
+          网络给出的各着点概率（代码里是 P），与第 9 课 softmax 后的比例是同一批数，用作先验时只保留合法落点、再重新归一到 1。遮住非法落点后各数之和近于 0 时（策略全压在被禁点上），退化成在合法落点上均匀分布。
+          根先验在第一趟模拟展开根时现算，途中每个新叶展开时再各算一次，机制相同。它来自策略头，是「第一眼觉得该下哪」，
           还没有叠加任何后续推演；搜索会在这个基础上继续检验和修正。
         </Def>
-        <Def term="PUCT" en="Predictor + UCT" see="第 11 课">
-          给每条候选边打分的选择规则。它把网络给的先验和边上已有的成绩合成一个分数，
-          既不放弃已见好成绩的路，也不长期忽略访问不足的候选。
-        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="遮住非法落点后将先验重新归一，全零时退化为合法格均匀分布"
+          source="alphagomoku/mcts.py · SearchTree.expand_and_backup"
+        >
+          <div className="codewalk">
+            <pre>{`        legal = game.legal_moves()
+        prior = policy.astype(np.float64) * legal
+        s = prior.sum()
+        prior = (prior / s) if s > 1e-8 else (legal / legal.sum()).astype(np.float64)`}</pre>
+          </div>
+        </EvidenceCard>
 
-        <h3>叶处取得一个值</h3>
+        <h3>叶处取得一个价值估计</h3>
         <p>
-          若叶局面已经终局，就按叶节点轮走方的视角直接给值，不再询问网络：
+          第二步是在叶节点<strong>求值</strong>（evaluation），取得一个价值估计。若叶局面已经终局，就按叶节点行棋方的视角直接给值，不再询问网络：
           对方刚成五则记 −1，和记 0。合法对局里成五的必是刚落完子的对方，
-          所以叶值本身（叶处直读的那一个数）不会出现 +1；回传时逐手翻号，「赢」才以 +1 的形式出现在上方的边上。
+          所以叶处直读的这个值不会出现 +1；回传时逐手翻号，「赢」才以 +1 的形式出现在上方的边上。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="走到终局叶节点时直接按胜负定值并回传"
+          source="alphagomoku/mcts.py · SearchTree.select"
+        >
+          <div className="codewalk">
+            <pre>{`        if out is not None:
+            if out == 0:
+                v = 0.0
+            else:
+                v = 1.0 if out == game.current_player else -1.0
+            self._backup(path, v)
+            return`}</pre>
+          </div>
+        </EvidenceCard>
+        <p>
           若棋还没结束，网络对该叶从头到尾算一遍前向，给出
           <span className="mono">v_net</span>。这个数站在
-          <strong>叶节点当前行棋方</strong>的视角。更早的做法是随机走子到终局、
-          用真实输赢当评价；一局随机棋噪声极大，要很多次 rollout 才抵得上网络一眼的判断。
+          <strong>叶节点当前行棋方</strong>的视角。更早的传统蒙特卡洛做法叫<strong>随机走子</strong>（rollout）：从叶局面开始双方随机落子直到终局，
+          用真实输赢当评价；一局随机棋噪声极大，要多走很多局才抵得上网络一眼的判断。
           网络把「看过的成千上万局」压缩进一次前向，所以本系统用
           <span className="mono">v_net</span> 代替随机下完，搜索则负责修正网络的漏看。
+          演示在浏览器里单树顺序执行；真正的训练把多局棋等待评价的叶子合成一批一起算，
+          但每棵树内部仍然一次走一步，顺序不变。
         </p>
-        <Def term="求值" en="evaluation">
-          在叶节点取得一个局面分的动作。终局叶直接读真实输赢；非终局叶交给网络前向，
-          得到当前行棋方视角的 <span className="mono">v_net</span>。
-        </Def>
-        <Def term="随机走子" en="rollout">
-          从叶局面开始双方随机落子直到终局，用真实输赢当评价的旧做法。
-          一局随机棋噪声极大，要很多次 rollout 才抵得上网络一次前向的判断，
-          所以本系统用 <span className="mono">v_net</span> 取代它。
-        </Def>
 
         <h3>扩展新叶，沿原路径逐层取负回传</h3>
         <p>
-          普通新叶收到网络策略后，才拥有可以继续向下选择的边。
-          一次模拟最多展开一个新叶，下一次模拟才能利用这次新长出的树枝。
-          一次只长一片叶，一是让每片新叶都先拿到网络评价、再参与下一次选择；二是统计对得上证据量：一次模拟只产生一个新评价、只给一条路径的边记一笔 N/W，展开多个新叶会让新边的计数与真实访问脱节，或迫使一次模拟调用多次网络。
+          第三步是<strong>扩展</strong>（expansion）：普通新叶收到网络给出的先验后，在叶节点上长出各条候选边，使它从叶变成可以继续向下选择的内部节点。
+          一次只长一片叶，一是让每片新叶都先拿到网络评价、再参与下一次选择；二是让边上的计数与真实访问对得上：一次模拟只产生一个新评价、只给一条路径的边记一笔 N、W，展开多个新叶会让新边的计数与真实访问脱节，或迫使一次模拟调用多次网络。
           若一口气把整条路径全展开，后面的节点没有网络先验，只好用均匀先验
-          （uniform prior，各着点等概率）乱选。
+          （uniform prior，各着点等概率）任选一着。
+          因此一次模拟最多展开一个新叶，下一次模拟才能利用这次新长出的边。
         </p>
-        <Def term="扩展" en="expansion">
-          在叶节点上按网络给出的先验长出各条候选边，使它从「叶」变成可以继续向下选择的节点
-          （相对于叶，可称内部节点）。
-        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="暂存待求值的叶局面、路径与叶节点"
+          source="alphagomoku/mcts.py · SearchTree.select"
+        >
+          <div className="codewalk">
+            <pre>{`        self._pending_game = game
+        self._pending_path = path
+        self._pending_leaf = node`}</pre>
+          </div>
+        </EvidenceCard>
         <p>
-          从叶回到根时，每退一层就换到另一方，所以先把值变成相反数再写进那条边。
-          先看数字：叶方 <span className="mono">v_net</span> = +0.6，上一层边记 −0.6，
+          第四步是<strong>回传</strong>（backup）：从叶回到根，把这次取得的值按原路径回传到每条经过的边。
+          每退一层就换到另一方，所以先把值变成相反数再写进那条边。
+          先看数字：叶节点行棋方的 <span className="mono">v_net</span> = +0.6，上一层边记 −0.6，
           再上一层边记 +0.6。
         </p>
-        <Def term="回传" en="backup">
-          从叶回到根，把这次取得的值按原路径写回每条经过的边。
-          每写一条边就更新它的 N、W，Q 由 W/N 现算。
+        <Def term="负极大值搜索" en="negamax">
+          回传时「每退一层先取负」的符号约定（英文原名 negamax）。五子棋的终局值严格零和（一方所得就是另一方所失），所以同一结果对对手就是它的相反数，逐层取负合法；非零和的计分不能这样回传。具体到符号：
+          叶节点行棋方的「我赢」是上一层对手的「我输」，所以退一层必须换一次视角。
         </Def>
-        <Def term="negamax" en="negamax,负极大值搜索">
-          回传时「每退一层先取负」的符号约定。五子棋的终局值严格零和（一方所得就是另一方所失），所以同一结果对对手就是它的相反数，逐层取负合法；非零和的计分不能这样回传。具体到符号：
-          叶方的「我赢」是上一层对手的「我输」，所以退一层必须换一次视角。
-        </Def>
-        <p>
-          每写回一条边，就更新它上面的 N、W 两笔（Q=W/N 现算）。一条边经过 4 次，累计
-          <span className="mono">W=+2</span>，则 <span className="mono">Q=+0.5</span>。
-          <span className="mono">N</span> 说明证据量，<span className="mono">W</span>
-          是累计结果，<span className="mono">Q</span> 才是平均成绩。
-        </p>
         <Def term="N、W、Q" en="visit count, total action value, mean action value">
-          记在每条边上的 3 个数：<span className="mono">N</span> 是这条边被走过的次数，
-          说明证据量；<span className="mono">W</span> 是由选这手的一方所见的累计结果；
+          记在每条边上的 3 个数：<span className="mono">N</span> 是这条边被走过的次数；
+          <span className="mono">W</span> 记的是这手棋的行棋方所见的累计结果；
           <span className="mono">Q=W/N</span> 是平均成绩。
         </Def>
         <p>
-          根上还另记一个搜索汇总 <span className="mono">root_value</span>：
-          它把每次模拟最终换算到根方视角的值求平均，所以可能混合许多叶的
-          <span className="mono">v_net</span> 和真实终局结果。它只是搜索过程的记录值，
-          用来展示。它与「根边按访问数加权的 Q 平均」接近，但不相等：首趟只展开根的那次模拟，值只进 root_value、不动任何根边；换新根后 root_value 统计清零，根边却保留旧计数。训练答案 <span className="mono">z</span> 则来自整盘真实终局。
+          每回传到一条边，就更新它上面的 N、W 两笔（Q=W/N 现算）。一条边经过 4 次，累计
+          <span className="mono">W=+2</span>，则 <span className="mono">Q=+0.5</span>。
+          一次回传的值可能来自真终局结果的 ±1，也可能来自价值估计{" "}
+          <span className="mono">v_net</span>。后者带有估计误差：访问次数少时，单次估计值对{" "}
+          <span className="mono">Q</span> 的影响大；访问次数增多后，平均成绩{" "}
+          <span className="mono">Q</span> 是许多次回传结果的平均（其中也掺着少数真终局结果），单次估计误差就被平均稀释掉了。
+          回传走完整条路径后，此时的 <span className="mono">v</span> 已经翻回根节点行棋方的视角，顺手累加进{" "}
+          <span className="mono">_root_value_sum</span> 与{" "}
+          <span className="mono">_root_value_count</span>，两者的商就是搜索汇总{" "}
+          <span className="mono">root_value</span>。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="沿路径倒序回传：每退一层先取反，再累加边统计与根汇总"
+          source="alphagomoku/mcts.py · SearchTree._backup"
+        >
+          <div className="codewalk">
+            <pre>{`    def _backup(self, path: list[tuple[_Node, int]], v: float) -> None:
+        for node, a in reversed(path):
+            v = -v  # value flips perspective each ply
+            node.N[a] += 1.0
+            node.W[a] += v
+        self._root_value_sum += v
+        self._root_value_count += 1`}</pre>
+          </div>
+        </EvidenceCard>
+        <Def term="搜索汇总" en="root value">
+          根上另记的一个数（代码里写作 <span className="mono">root_value</span>）：
+          它把每次模拟最终换算到根方视角的值求平均，所以可能混合许多叶的价值估计{" "}
+          <span className="mono">v_net</span> 和真实终局结果。
+        </Def>
+        <p>
+          搜索汇总只是搜索过程的记录值，用来展示。
+          它与「根边按访问数加权的 Q 平均」接近，但不相等：首趟只展开根的那次模拟，值只进 root_value、不动任何根边；换新根后 root_value 统计清零，根边却保留旧计数。终局结果 <span className="mono">z</span> 则来自整盘真实终局。
           <span className="mono">v_net</span>、
           <span className="mono">root_value</span>、
           <span className="mono">z</span> 是 3 个不同的量。
         </p>
+      </div>
 
+      <SimulationStepper />
+
+      <div className="prose mt-12">
         <h3>落子后把搜过的子树提作新根</h3>
         <p>
           真实对局里，一方落子之后局面才往前走一步。这一步之下的许多变化，
           刚才那阵搜索多半已经查过；整棵丢掉重来，等于把做过的搜索扔了。
           所以落子后把已选动作的子节点提作新根，它下面的 N、W、Q 原样保留，
           只有上一根的 <span className="mono">root_value</span> 展示统计清零。
-          保留下来的访问数使新根的访问总数不等于这一步新增的模拟次数，
-          读访问分布 π 的分母时要记在心上。若对手走了搜索里没有的着，就新建一个空节点当新根，从头展开。
+          保留下来的访问数使新根的访问总数（记作 ΣN）不等于这一步新增的模拟次数；下一课按根下各落点访问数占 ΣN 的比例算出访问分布 π 时，分母正是这个保留并继续累加的 ΣN（而不是新增模拟次数或候选动作个数）。
+          若对手走了搜索里没有的着，就走 else 分支新建一个空节点当新根，从头展开。
         </p>
-        <Def term="访问分布" en="visit distribution，记作 π" see="第 11 课">
-          根下各落点访问数占根下访问数之和的比例。分母是这个和（记作 ΣN），
-          不是这一步新增的模拟次数，也不是候选动作的个数。
-        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="落子后将对应子节点提作新根，并清零根汇总统计"
+          source="alphagomoku/mcts.py · SearchTree.update_root"
+        >
+          <div className="codewalk">
+            <pre>{`        child = self.root.children.get(action)
+        self.root_game.play(action)
+        self.root = child if child is not None else _Node(self.root_game.n * self.root_game.n)
+        self._root_value_sum = 0.0
+        self._root_value_count = 0`}</pre>
+          </div>
+        </EvidenceCard>
       </div>
-
-      <SimulationStepper />
 
       <ReuseProbe />
 
-      <Ledger title="mcts.py · SearchTree.select / expand_and_backup / _backup / update_root">
-        <p className="mb-2 text-sm">
-          <strong>这段在证什么：</strong>例 10-1 三按钮的源码落点：选择走 select，求值由调用方喂回，扩展并回传是 expand_and_backup（其中 _backup 逐边记回）；update_root 是落子后复用子树，另证于末段。
+      <Ledger title="alphagomoku/mcts.py · _Node / select / expand_and_backup">
+        <p className="mb-3 text-sm">
+          下面连贯展示搜索树节点的数据结构 <span className="mono">_Node</span>，以及一次模拟中负责向下走叶的{" "}
+          <span className="mono">select</span> 与负责扩展并触发回传的{" "}
+          <span className="mono">expand_and_backup</span> 完整实现：
         </p>
         <div className="codewalk">
-          <pre>{`# select：沿树走到终局或未展开叶
-while node.expanded:
-    a = self._puct_select(node, game)
-    path.append((node, a))
-    #（节选省略：途中创建子节点 child 并挂上）
-    game.play(a)
-    node = child
-out = game.outcome()
-if out is not None:
-    #（节选省略：按 out 定 v，终局叶给真实 ±1/0，见上方提示）
-    self._backup(path, v)
-    return
-self._pending_game = game
-self._pending_path = path
-self._pending_leaf = node`}</pre>
-        </div>
-        <div className="codewalk">
-          <pre>{`# _Node：一个节点就是一个岔口，各边统计并排存着
-class _Node:
+          <pre>{`class _Node:
     __slots__ = ("prior", "children", "N", "W", "expanded")
+
     def __init__(self, num_actions: int):
-        self.prior: np.ndarray | None = None  # (num_actions,) 遮格并归一后的先验
+        self.prior: np.ndarray | None = None  # (num_actions,) masked + normalized
         self.children: dict[int, "_Node"] = {}
-        self.N = np.zeros(num_actions, dtype=np.float32)  # 各边访问数
-        self.W = np.zeros(num_actions, dtype=np.float32)  # 各边价值合计
+        self.N = np.zeros(num_actions, dtype=np.float32)  # visit counts per action
+        self.W = np.zeros(num_actions, dtype=np.float32)  # total value per action
         self.expanded = False`}</pre>
         </div>
-        <div className="codewalk">
-          <pre>{`# 向后：每退一层先换视角，再更新该边
-for node, a in reversed(path):
-    v = -v  # value flips perspective each ply
-    node.N[a] += 1.0
-    node.W[a] += v
-self._root_value_sum += v
-self._root_value_count += 1`}</pre>
+        <div className="codewalk mt-3">
+          <pre>{`    def select(self) -> None:
+        """Run one simulation: descend PUCT to a leaf.
+
+        Terminal leaves are backed up immediately; otherwise the leaf is stashed
+        as pending and must be resolved with expand_and_backup().
+        """
+        assert self._pending_game is None, "previous leaf not resolved"
+        node = self.root
+        game = self.root_game.clone()
+        path: list[tuple[_Node, int]] = []
+        while node.expanded:
+            a = self._puct_select(node, game)
+            path.append((node, a))
+            child = node.children.get(a)
+            if child is None:
+                child = _Node(game.n * game.n)
+                node.children[a] = child
+            game.play(a)
+            node = child
+        out = game.outcome()
+        if out is not None:
+            if out == 0:
+                v = 0.0
+            else:
+                v = 1.0 if out == game.current_player else -1.0
+            self._backup(path, v)
+            return
+        self._pending_game = game
+        self._pending_path = path
+        self._pending_leaf = node`}</pre>
         </div>
-        <div className="codewalk">
-          <pre>{`# 落子后复用已经存在的子树
-child = self.root.children.get(action)
-self.root_game.play(action)
-self.root = child if child is not None else _Node(self.root_game.n * self.root_game.n)
-self._root_value_sum = 0.0
-self._root_value_count = 0  # 展示统计整体清零；新根若已展开且开噪声，还会重混一次（第 11 课）`}</pre>
+        <div className="codewalk mt-3">
+          <pre>{`    def expand_and_backup(self, policy: np.ndarray, value: float) -> None:
+        """Expand the pending leaf with network prior and back up its value.
+
+        value: from the perspective of the player to move at the leaf.
+        """
+        node = self._pending_leaf
+        game = self._pending_game
+        assert node is not None and game is not None
+        legal = game.legal_moves()
+        prior = policy.astype(np.float64) * legal
+        s = prior.sum()
+        prior = (prior / s) if s > 1e-8 else (legal / legal.sum()).astype(np.float64)
+        node.prior = prior.astype(np.float32)
+        node.expanded = True
+        if node is self.root and self.add_noise:
+            self._mix_noise(node, legal)
+        self._backup(self._pending_path, float(value))
+        self._pending_game = None
+        self._pending_path = []
+        self._pending_leaf = None`}</pre>
         </div>
-        <p className="mt-3">
-          例 10-1 的 3 个按钮与源码一一对应：「选择」按钮就是 <span className="mono">select</span>，
-          走到等待评价的叶子；「求值」把叶局面交给网络（源码里由调用方算好 policy、value 喂回来）；
-          「扩展并回传」按钮才是 <span className="mono">expand_and_backup</span>，
-          其中逐边记回统计的一段是 <span className="mono">_backup</span>。
-          浏览器使用单树顺序执行和舍入权重；真正训练时还能把多局棋等待评价的叶子
-          合成一批一起算，但每棵树内部仍然一次走一步，顺序不变。
+        <p className="mt-3 text-sm">
+          运行 <span className="mono">python -m pytest tests/test_mcts.py -q</span>{" "}
+          可验证访问计数守恒、终局直接回传与子树换根复用。
         </p>
       </Ledger>
 
       <ChapterEnd
         summary={[
-          "一次模拟是一趟往返：向前选择到叶，叶处求值，扩展新叶，再沿原路径逐层取负回传(negamax)。",
-          "叶处的答案分 2 种：终局读真实 ±1/0，非终局读网络的 v_net；更早的 rollout 随机下完一整盘，噪声大，已被一次前向取代。",
-          "边上记 N、W、Q=W/N；根另记 root_value，它是模拟值的平均，与 v_net、终局标签 z 是 3 个不同的量。",
+          "一次模拟是一趟往返：向前选择到叶，叶处求值，扩展新叶，再沿原路径逐层取负回传。",
+          "叶处的答案分 2 种：终局读真实 ±1/0，非终局读网络的价值估计 v_net；更早的做法是随机走子一整盘，噪声大，已被一次前向取代。",
+          "边上记 N、W、Q=W/N；根另记 root_value，它是模拟值的平均，与价值估计 v_net、终局结果 z 是 3 个不同的量。",
           "落子后把已搜过的子树提作新根，只清零 root_value 展示统计，已积累的 N、W、Q 保留下来。",
         ]}
         next={
@@ -284,7 +395,7 @@ self._root_value_count = 0  # 展示统计整体清零；新根若已展开且�
               "因为 N 增加后 W 必须变成负数",
             ],
             answer: 1,
-            explain: "黑白每走一手交换一次。叶方的「我赢」就是上一层对手的「我输」，所以回传先取负（negamax）再写入那条边。",
+            explain: "黑白每走一手交换一次。叶节点行棋方的「我赢」就是上一层对手的「我输」，所以回传先取负再写入那条边。",
           },
           {
             q: "一条边经过 4 次，累计 W=+2，它的 Q 是多少？",
@@ -327,6 +438,7 @@ function SimulationStepper() {
   const [simulations, setSimulations] = useState(0)
   const [version, setVersion] = useState(0)
   const [terminalNote, setTerminalNote] = useState<string | null>(null)
+  const [autoTrip, setAutoTrip] = useState(false)
   const treeRef = useRef<SearchTree | null>(null)
 
   useEffect(() => {
@@ -353,6 +465,7 @@ function SimulationStepper() {
     } else {
       setSimulations((n) => n + 1)
       setTerminalNote("这次选择直接到达终局：SearchTree 已把真实 ±1/0 沿路径回传，不需要网络。")
+      setAutoTrip(false)
       setVersion((v) => v + 1)
     }
   }
@@ -373,6 +486,7 @@ function SimulationStepper() {
     setLeaf(null)
     setAnswer(null)
     setStage(0)
+    setAutoTrip(false)
     setSimulations((n) => n + 1)
     setVersion((v) => v + 1)
   }
@@ -385,8 +499,26 @@ function SimulationStepper() {
     setAnswer(null)
     setSimulations(0)
     setTerminalNote(null)
+    setAutoTrip(false)
     setVersion((v) => v + 1)
   }
+
+  useEffect(() => {
+    if (!autoTrip || !net) return
+    const id = window.setTimeout(() => {
+      if (stage === 0) select()
+      else if (stage === 1) evaluate()
+      else if (stage === 2) backup()
+    }, 420)
+    return () => window.clearTimeout(id)
+  }, [autoTrip, stage, net, leaf, answer])
+
+  const activePath = (answer ?? leaf)?.path ?? []
+  const pathMarks = activePath.map((a, idx) => ({
+    x: a % 9,
+    y: Math.floor(a / 9),
+    anchor: idx === activePath.length - 1,
+  }))
 
   const tree = treeRef.current
   const rootRows = tree
@@ -406,7 +538,7 @@ function SimulationStepper() {
       </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
         <div className="min-w-0 flex-1 md:max-w-[21rem]">
-          <Board board={POS.board.flat()} lastMove={{ x: 5, y: 5 }} />
+          <Board board={POS.board.flat()} lastMove={{ x: 5, y: 5 }} marks={pathMarks} />
           <div className="mt-3 flex flex-wrap gap-2">
             <button type="button" className="btn" disabled={!net || stage !== 0}
               onClick={select} data-qa="step-select">① 选择</button>
@@ -414,17 +546,21 @@ function SimulationStepper() {
               onClick={evaluate} data-qa="step-evaluate">② 求值（网络评价）</button>
             <button type="button" className="btn" disabled={stage !== 2}
               onClick={backup} data-qa="step-backup">③ 扩展并回传</button>
+            <button type="button" className={`btn ${autoTrip ? "active" : ""}`} disabled={!net}
+              onClick={() => setAutoTrip((v) => !v)}>
+              {autoTrip ? "⏸ 停" : "▶ 自动走一趟"}
+            </button>
             <button type="button" className="btn" disabled={!net} onClick={reset}>↺ 重置</button>
           </div>
           <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
             已完成 <span className="num">{simulations}</span> 次模拟。每个等待评价的叶子，
-            必须先让网络评价完、把结果记回，才能开始下一次选择；同一棵树一次只处理一个这样的叶子。
+            必须先让网络评价完、把结果回传，才能开始下一次选择；同一棵树一次只处理一个这样的叶子。
           </p>
           {terminalNote && <div className="reveal-box mt-3 text-sm">{terminalNote}</div>}
           {(answer ?? leaf) && (
             <div className="reveal-box mt-3 text-sm" data-qa="leaf-state">
               <p>路径：根{(answer ?? leaf)!.path.map((a) => ` → ${coord(a)}`).join("") || "（根自身）"}</p>
-              <p className="mt-1">叶方：{(answer ?? leaf)!.leaf.current === 1 ? "黑" : "白"}</p>
+              <p className="mt-1">叶节点的行棋方：{(answer ?? leaf)!.leaf.current === 1 ? "黑" : "白"}</p>
               {answer ? (
                 <p className="num mt-1" style={{ color: "var(--accent-deep)" }}>
                   v_net={answer.value >= 0 ? "+" : ""}{answer.value.toFixed(3)}（{answer.ms.toFixed(1)} ms）
@@ -435,7 +571,7 @@ function SimulationStepper() {
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="mini-label">根节点统计 · 每条边记 N/W/Q（三个数都记在选边一方的视角上；根下的边就记根方，也就是当前行棋方）</div>
+          <div className="mini-label">根节点统计 · 每条边记 N、W、Q（N 记访问次数，W 与 Q 记在这手棋行棋方的视角上；根下的边记在当前行棋方视角上）</div>
           {rootRows.length === 0 ? (
             <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
               第一趟只展开根本身，路径为空，所以还没有根边统计。继续做第二趟才会经过一条根边。
@@ -445,6 +581,9 @@ function SimulationStepper() {
               {rootRows.map((row) => (
                 <div key={row.action} className="l00-top-row" data-qa="root-ledger-row">
                   <span className="mono">{coord(row.action)}</span>
+                  <span className="prob-track">
+                    <span className="prob-fill" style={{ width: `${Math.min(100, (row.n / Math.max(1, simulations)) * 100)}%` }} />
+                  </span>
                   <span className="num">N={row.n}</span>
                   <span className="num">W={row.w >= 0 ? "+" : ""}{row.w.toFixed(2)}</span>
                   <span className="num">Q={(row.w / row.n) >= 0 ? "+" : ""}{(row.w / row.n).toFixed(2)}</span>
@@ -458,14 +597,15 @@ function SimulationStepper() {
               {rootValue >= 0 ? "+" : ""}{rootValue.toFixed(3)}
             </p>
             <p className="mt-2" style={{ color: "var(--fg-muted)" }}>
-              它是每次模拟换算到根方视角后的平均；不等于任何一个叶的 v_net，也不是终局标签 z。
+              它是每次模拟换算到根方视角后的平均；不等于任何一次叶处的价值估计，也不是终局结果 z。
             </p>
           </div>
         </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 10-1</span>
-        三键直接调用 SearchTree 的 select、leafInput、expandAndBackup；权重舍入和 JS 数值属于浏览器适配。
+        三键直接调用 alphagomoku/mcts.py 的 SearchTree.select 与 SearchTree.expand_and_backup（站内镜像名 leafInput、expandAndBackup）；权重舍入和 JavaScript 数值属于浏览器适配。
+        root_value 面板按模拟次数求平均，每次模拟贡献换算到根方视角的一笔。
       </figcaption>
     </figure>
   )

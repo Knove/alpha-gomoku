@@ -8,7 +8,7 @@ import { loadNet, type WeightsJson } from "../engine/model"
 import { SearchTree, type MctsConfig } from "../engine/mcts"
 import { Quiz } from "../framework/quiz"
 import { LessonGuide } from "../framework/lesson-guide"
-import { ChapterEnd, Def } from "../framework/def"
+import { ChapterEnd } from "../framework/def"
 import { loadWeights } from "../lib/weights"
 
 const SIMS = 20 // 每手 20 次模拟（比训练时的 40 少一半，网页上 <1 秒）
@@ -82,7 +82,7 @@ export default function Graduation() {
           "分清 v_net、root_value、z 各自回答什么问题",
           "在四道换了情境的诊断题里，定位断链并指认该改哪处代码",
         ]}
-        takeaway="你能独立开发并修通一条完整的 alpha-棋类：写出核心模块、配置一次训练、按验收标准判断它是否真的变强。"
+        takeaway="你能独立开发并修通一条完整的 alpha-棋类：写出核心模块、配置一次训练、按验收标准判断它是否真的变强，并把一处断链修通。"
         boundary="本章不再引入新机制，只做四件事：下完一局、查清一条链、定位四个断点、以出师任务三件收官。"
       />
 
@@ -110,16 +110,8 @@ export default function Graduation() {
         <h3 className="text-lg font-bold">六条结论随身带走</h3>
         <div className="prose mt-3">
           <p>
-            全系统图把十三个环节收在一张图上。下面这张单子收下你的六个结论：它们散在各课，换个场景照样用得上。
-            括号里是教会你它的那一课。
+            全系统图把十三个环节收在一张图上。下面这六条核心结论散在各课，换个棋类或自博弈场景照样用得上（括号里是对应课程）：
           </p>
-          <Def term="归纳偏置" en="inductive bias" see="第 7 课">
-            结构里事先写死的「答案大概长什么样」的假设。它没有把「三连要堵」这条规则塞进网络，
-            那仍要靠数据和训练学出来。第一条结论说的就是这件事。
-          </Def>
-          <Def term="先验" en="prior" see="第 10 课">
-            网络第一眼给出的各着点判断，搜索从它出发继续检验。
-          </Def>
           <ul>
             <li>
               <strong>结构只给归纳偏置，不替你手写棋理。</strong>
@@ -185,32 +177,33 @@ export default function Graduation() {
           <thead><tr><th>模块</th><th>职责</th><th>你在哪课写过</th></tr></thead>
           <tbody>
             <tr><td className="mono">game.py</td><td>规则、坐标与动作、判胜、规范视角、输入平面</td><td>第 1、2、6 课</td></tr>
-            <tr><td className="mono">model.py</td><td>stem、残差块、双头 forward</td><td>第 4、5、7–9 课</td></tr>
-            <tr><td className="mono">mcts.py</td><td>选择、扩展、记回、换根复用、根噪声</td><td>第 10、11 课</td></tr>
+            <tr><td className="mono">model.py</td><td>第一层（stem）、残差块、双头 forward</td><td>第 4、5、7–9 课</td></tr>
+            <tr><td className="mono">mcts.py</td><td>选择、扩展、回传、换根复用、根噪声</td><td>第 10、11 课</td></tr>
             <tr><td className="mono">selfplay.py</td><td>多局锁步自我对弈、样本出生</td><td>第 12 课</td></tr>
-            <tr><td className="mono">replay.py</td><td>环形回放池、抽批、重建三个平面</td><td>第 14 课</td></tr>
+            <tr><td className="mono">replay.py</td><td>环形回放池、抽批、重建三个平面</td><td>第 6、14 课</td></tr>
             <tr><td className="mono">train.py</td><td>两笔损失、train_step、优化器</td><td>第 3、13、14 课</td></tr>
             <tr><td className="mono">arena.py</td><td>受控对战、得分率、晋升判定</td><td>第 15 课</td></tr>
             <tr><td className="mono">pipeline.py</td><td>一轮的阶段顺序、恢复边界、写盘顺序</td><td>第 15、16 课</td></tr>
-            <tr><td className="mono">storage.py / trainer.py</td><td>run 目录证据、原子写、文件锁、入口、checkpoint 读写</td><td>第 15–17 课</td></tr>
-            <tr><td className="mono">server/ / web/</td><td>REST+WS、人机对战会话、页面消费</td><td>第 18 课</td></tr>
+            <tr><td className="mono">storage.py / trainer.py</td><td>run 目录证据、原子写、文件锁、入口、检查点（checkpoint）读写</td><td>第 15–17 课</td></tr>
+            <tr><td className="mono">server/ / web/</td><td>REST 与 WebSocket、人机对战会话、页面消费</td><td>第 18 课</td></tr>
           </tbody>
         </table>
         <p>
           出师任务三件，不再给选项：①用 <span className="mono">configs/fast.json</span> 跑满 4 轮，
           把每轮的样本数、两笔损失、得分率填成一张自己的表；②改一个配置
-          （模拟数、train_steps 或 ε 任选），预测它会先动哪个指标，再跑一轮对拍；
+          （每手模拟数、每轮更新步数 <span className="mono">train_steps</span> 或根噪声掺入比例 ε 任选），
+          预测它会先动哪个指标，再跑一轮对拍；
           ③故意弄坏一处不变量（比如让 π 的分母取本轮预算），从指标或棋谱里找出破绽并修好。
-          三件都能独立完成，你就具备了开发下一个棋类 AI 项目的全部环节。
+          三件都能独立完成，你就具备了开发下一个棋类人工智能项目的全部环节。
         </p>
         <h3>毕业词</h3>
         <p>
           序里承诺过：走完十八课，由你把这条链开发出来并修通。先来亲自检查整台机器。现在你已经知道：棋盘怎样成为
-          当前方视角的三个输入平面，网络怎样给出 <span className="mono">P</span> 和
+          当前行棋方视角的三个输入平面，网络怎样给出 <span className="mono">P</span> 和
           <span className="mono">v_net</span>，搜索怎样留下 <span className="mono">root_value</span>
           与 <span className="mono">π</span>，终局怎样补上 <span className="mono">z</span>，
           π 与 z 两种误差怎样改权重，又为什么必须用竞技场而不是训练损失判断棋力。
-          你还能够从 checkpoint、运行文件、REST 与 WebSocket 一直追到浏览器上的画面。
+          你还能够从检查点、运行文件、REST 与 WebSocket 一直追到浏览器上的画面。
           本课模型出自只训了 4 轮（iteration 0–3）的 run，上场的 best 在第 2 轮晋升；
           一局输赢仍不够给它下棋力结论；真正的毕业标准，是能把这条链开发出来、修通它：每个箭头不仅有原因和证据，还有你写得出的那处代码。
           这门课讲的不是五子棋，而是「让 AI 从零自教自学」的方法。舞台换了，那个
@@ -432,11 +425,11 @@ interface SysNode {
 
 const BRAIN: SysNode[] = [
   { x: 12, name: "棋盘", sub: "动作与规则", href: "#/l01" },
-  { x: 124, name: "三个输入平面", sub: "当前方视角", href: "#/l06" },
+  { x: 124, name: "三个输入平面", sub: "当前行棋方视角", href: "#/l06" },
   { x: 236, name: "叠层", sub: "局部到全盘", href: "#/l08" },
   { x: 348, name: "双头", sub: "P + v_net", href: "#/l09" },
   { x: 460, name: "搜索", sub: "PUCT 推演", href: "#/l11" },
-  { x: 572, name: "root_value", sub: "搜索根估值·第 10 课", href: "#/l10" },
+  { x: 572, name: "root_value", sub: "搜索汇总·第 10 课", href: "#/l10" },
   { x: 680, name: "π", sub: "访问分布·第 11 课", href: "#/l11" },
 ].map((n) => ({ ...n, y: 34 }))
 
@@ -445,7 +438,7 @@ const LOOP: SysNode[] = [
   { x: 492, y: 132, name: "(s, π, z)", sub: "每手样本", href: "#/l12" },
   { x: 584, y: 222, name: "回放训练", sub: "小批抽样与增广", href: "#/l14" },
   { x: 404, y: 296, name: "竞技场", sub: "挑战 best", href: "#/l15" },
-  { x: 196, y: 296, name: "checkpoint", sub: "保存与恢复", href: "#/l16" },
+  { x: 196, y: 296, name: "检查点", sub: "保存与恢复", href: "#/l16" },
   { x: 16, y: 222, name: "网页", sub: "run 目录 + 实时消息", href: "#/l18" },
 ]
 
@@ -515,7 +508,7 @@ function SystemMap() {
       <figcaption className="figure-cap">
         <span className="cap-no">例 G-2</span>
         上半把棋局变成输入，由网络给出 P 与 v_net，再由搜索形成 π 与 root_value。
-        下半把一局棋记录成样本，小批抽样训练出挑战者，经竞技场、checkpoint 和 run 目录留下证据，
+        下半把一局棋记录成样本，小批抽样训练出挑战者，经竞技场、检查点和 run 目录留下证据，
         最后由服务器送到网页。每个节点都对应前面完成的一课；点击可回到那条因果和真实代码。
       </figcaption>
     </figure>

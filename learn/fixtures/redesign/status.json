@@ -1,0 +1,1 @@
+{"state": "stopped", "iteration": 1, "iteration_phase": "idle", "progress": 0.0, "games_done": 12, "samples": 370, "buffer": 370, "best_iteration": 0, "board_size": 9, "win_len": 5, "device": "mps", "pid": 56549, "heartbeat": 1791881866.839802}
