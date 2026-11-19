@@ -1,9 +1,8 @@
-/** 第 14 课 · 训练：许多样本怎样形成一次更新。
- *  节拍：思考题 → 回放环（落点码 add_many）→ 随机批次/min_buffer（落点码 sample）→
- *  同步对称（落点码 增广）→ 精确 train_step（落点码 两笔损失、更新序）→
- *  优化器与检查点（落点码 SGD 参数、键表）→ 例 14-1/14-2 →
- *  对证（整链：ReplayBuffer.sample / train_step / make_optimizer）→ 小结 → 习题。 */
-import { useState } from "react"
+/** 第 15 课 · 竞技场：谁有资格成为 best。
+ *  节拍：思考题（损失降=棋力涨？）→ 角色(best/latest/baseline/challenger，落点码首任 best/基线/晋升线)→
+ *  受控对战（换先后手/开局采样/和棋半分，落点码 net_assign/采样开关/计分行）→ 晋升计算器 → 真实对局
+ *  → 对证（整链：演示配置、play_match 计分与开关、pipeline 晋升分支）→ 习题。 */
+import { useEffect, useMemo, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
@@ -11,342 +10,238 @@ import { ChapterEnd, Def } from "../framework/def"
 import { EvidenceCard } from "../framework/evidence"
 import Board from "../lib/board"
 import { REAL } from "../data/real"
-import { dihedral, dihedralPi, emptyBoard, play, type GameState } from "../engine/game"
+import { emptyBoard, play, type GameState } from "../engine/game"
 
-const GAME = REAL.selfplayGame
-const MOVES = GAME.moves
-const SYM_IDX = Math.min(17, MOVES.length - 1)
+const ARENA = REAL.arenaGame!
 
-const STATES: GameState[] = (() => {
-  const arr: GameState[] = [emptyBoard()]
-  for (const m of MOVES) arr.push(play(arr[arr.length - 1], m.y * 9 + m.x, m.player as 1 | -1))
-  return arr
-})()
-
-const coord = (a: number) => `(${a % 9},${Math.floor(a / 9)})`
-const argmaxPi = (pi: number[]) => {
-  let a = 0
-  for (let i = 1; i < pi.length; i++) if (pi[i] > pi[a]) a = i
-  return a
-}
+const coord = (x: number, y: number) => `(${x},${y})`
 
 export default function L15() {
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
-      <div className="eyebrow mb-3">第 14 课</div>
-      <h1 className="text-2xl font-bold">训练：许多样本怎样形成一次更新</h1>
+      <div className="eyebrow mb-3">第 15 课</div>
+      <h1 className="text-2xl font-bold">竞技场：谁有资格成为 best</h1>
 
       <LessonGuide
-        question="前后相邻的棋局彼此很像，机器怎样把它们整理成更可靠的一次权重更新？"
-        why="直接按产生顺序学习容易被最近几局带着摇摆；而且棋盘方向不同、棋理却相同，可以等价改写，不增加样本条数。回放池、随机批次和数据增强先把样本整理好，真实 train_step 才开始算损失和更新。"
+        question="训练日志显示「损失变低」时，怎样判断机器是真的更会下棋，而不是只更会背旧样本？"
+        why="训练损失只衡量它对已有训练目标的贴合程度；棋力是实战能力，必须在控制先后手和随机性的对战中验证。"
         chain={[
-          "样本写进回放池",
-          "累积到 min_buffer 才随机抽一批",
-          "每张棋盘与 π 同步做一种旋转或镜像",
-          "重新前向、算 2 笔损失、反向传播并更新权重",
+          "新网络作为挑战者，对战当前 best",
+          "交替先后手，避免把颜色优势误判成实力",
+          "比较多局、不同开局，避免把同一条路线重复当证据",
+          "达到 55% 才换 best；baseline 只当长期进步的尺",
         ]}
-        takeaway="你能写出回放池抽批与棋盘、π 的同步增广，并复现一次 train_step 的重新前向、两笔损失与更新。"
-        boundary="一条真实记录只贡献一批损失里的一小份梯度，不能说某份检查点或 best 更换全是它的功劳。"
+        takeaway="你能配置一场受控对战（交换先后手、开局按 π 采样），并按得分率执行 55% 晋升判定。"
+        boundary="少量对局仍有运气，所以竞技场只能提供有限证据；局数、规则和对手都会影响结论强度。"
       />
 
       <Quiz
         title="思考题 · 先选一个答案"
         questions={[
           {
-            q: "为什么训练不只拿刚结束的最后一局棋，按顺序从头学到尾？",
+            q: "训练日志里的损失曲线降了。损失降了，棋力就涨了吗？",
             options: [
-              "因为最后一局没有 z，不能训练",
-              "相邻局面高度相关；随机混合新旧样本能减少被一小段经历带偏，也减轻遗忘",
-              "因为回放池会自动把输棋改成赢棋",
+                "是，损失降就是变强，曲线是唯一标准",
+                "不一定，可能只是背熟了回放池里的样本，换个局面就露馅",
+                "损失根本不重要，训练白训了",
             ],
             answer: 1,
-            explain: "随机批次不会改变样本答案，但会把不同时间、不同棋局的样本混在一起，让一次更新不只代表刚刚那一小段经历。",
+            explain:
+              "选第二项。损失衡量的是「答案离样本多近」，不是「棋下得多好」：把训练用的样本贴合得更好，也能让曲线下降。这种「贴合旧样本却不见得更会下新局」的现象，就是过拟合。受控对战更接近真正要测的实战能力，但少量对局同样会受运气影响；训练离不开损失这个信号，但损失低不等于棋力高。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>回放池用环形缓冲区装下新旧样本</h3>
+        <h3>损失下降，量的是贴合，不是棋力</h3>
         <p>
-          训练样本不是用完即弃。每局自我对弈产生的记录都写进回放池，由它决定更新权重时能抽到哪些旧样本。
-          覆盖最旧样本正是设计意图：最旧的样本出自最弱的网络：z 是真值、不会变旧，变旧的是 π 那份搜索答案
-          （预算和先验都来自旧网），棋理价值最低。回放池只保留最近若干局，旧样本按容量被覆盖。
-          写到容量末尾会绕回开头覆盖最旧样本。
+          损失只回答「网络把旧样本答得多像」。把回放池里的局面拟合得更好，曲线就会下降；
+          但棋力要在没见过的局面上检验。两者可以一起变好，也可以一个变好、另一个原地不动。
         </p>
+        <Def term="过拟合" en="overfitting">
+          贴合旧样本的能力涨了，面对新局面的判断却没跟上。
+          单看训练曲线分不出这两种情况，所以还要让网络上场对战。
+        </Def>
+
+        <h3>4 个身份决定谁和谁比</h3>
+        <Def term="四种模型身份：latest、challenger、best、baseline" en="model roles">
+          <strong>latest</strong> 是最近保存的训练状态，只代表「刚写完」；
+          <strong>challenger</strong> 是刚训练完、等待上场检验的新网络；
+          <strong>best</strong> 是竞技场认可的当前最强权重，只有挑战者过线才换；
+          <strong>baseline</strong> 是训练开始前冻结的随机网络，只提供长期进步的参照，不参与晋升。
+        </Def>
+        <ArenaRoles />
         <EvidenceCard
           fidelity="runtime-exact"
-          title="把四项数据写入当前槽位，游标对容量取模绕回"
-          source="alphagomoku/replay.py · ReplayBuffer.add_many"
+          title="对战基线只记录成绩，不参与晋升"
+          source="alphagomoku/pipeline.py · run"
         >
           <div className="codewalk">
-            <pre>{`            self.boards[self.pos] = canon
-            self.pis[self.pos] = pi
-            self.players[self.pos] = player
-            self.zs[self.pos] = z
-            self.pos = (self.pos + 1) % self.capacity`}</pre>
+            <pre>{`                arena_base = {"win_rate_a": res_b["win_rate_a"], "wins_a": res_b["wins_a"],
+                              "wins_b": res_b["wins_b"], "draws": res_b["draws"],
+                              "promoted": False}`}</pre>
           </div>
         </EvidenceCard>
-        <Def term="回放池" en="replay buffer">
-          用固定容量、写满就绕回开头的<strong>环形缓冲区</strong>（ring buffer）装旧对局样本的存储区（例 14-1 把真实容量缩到 5 个槽来演示这个绕回）。每条样本保存转成当前行棋方视角的标准棋盘、
-          当时的 player、π 和 z。重启时还能从 <span className="mono">buffer.npz</span> 恢复；
-          若新配置容量变小，只保留放得下的最新样本。
-        </Def>
-      </div>
-
-      <BufferRing />
-
-      <div className="prose mt-10">
-        <h3>均匀有放回抽批，累积到 min_buffer 才开始更新</h3>
         <p>
-          抽样是均匀、有放回的。每条样本的先后顺序被打散了，一次更新不再只代表刚刚那一小段经历。
-          另一种打散顺序的做法是洗牌后无放回发牌；有放回抽样连洗牌都省了，不必每次给整个回放池洗牌。
-          池子容量 5 万、每批 128 条，单批内抽到重复样本的概率极低，有放回与无放回在训练效果上几乎等效。
+          第一次评估时还没有 <span className="mono">best.pt</span>，当前网络直接成为首任 best；
+          从第二次开始，挑战者必须战胜现任 best 才能换主。基线那一组只写成绩，永远不会把
+          <span className="mono">promoted</span> 设为真。
+        </p>
+        <Def term="受控对战" en="controlled match">
+          在竞技场里比较两个网络的成组对局：固定局数、交换先后手、关闭根噪声，
+          但开局前几手仍按 <span className="mono">π</span> 采样分叉，避免每局重播同一条路线。
+          每局按胜 1、和 0.5、负 0 记分，整组汇总成挑战者的得分率。
+        </Def>
+        <Def term="晋升线" en="promote threshold">
+          挑战者对战 best 的得分率达到 55%（<span className="mono">promote_threshold=0.55</span>），才成为新 best。
+          得分率 =（胜局 + 0.5×和局）/ 总局数。它是让自动训练稳定前进的工程门槛，不是「已统计证明更强」：
+          局数越少，运气和开局造成的摆动越大。
+        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="得分率达到 55% 晋升线即保存为新 best，尚无 best 时直接任命"
+          source="alphagomoku/pipeline.py · run"
+        >
+          <div className="codewalk">
+            <pre>{`                best_path = storage.checkpoint_path("best")
+                if best_path.exists():
+                    champ_net, _ = load_checkpoint(str(best_path), device)
+                    res = play_match(challenger, Predictor(champ_net, device), cfg,
+                                     iteration, iter_rng, storage=storage, opponent="best",
+                                     on_progress=on_arena_progress)
+                    promoted = res["win_rate_a"] >= cfg.promote_threshold
+                    if promoted:
+                        save_checkpoint(net, cfg.to_dict(), str(best_path),
+                                        meta={"iteration": iteration})
+                        best_iteration = iteration
+                    arena_best = {"win_rate_a": res["win_rate_a"], "wins_a": res["wins_a"],
+                                  "wins_b": res["wins_b"], "draws": res["draws"],
+                                  "promoted": promoted}
+                    storage.append_event("arena_end", {
+                        "iteration": iteration, "opponent": "best",
+                        "win_rate": res["win_rate_a"], "wins": res["wins_a"],
+                        "losses": res["wins_b"], "draws": res["draws"], "promoted": promoted,
+                    })
+                else:
+                    save_checkpoint(net, cfg.to_dict(), str(best_path),
+                                    meta={"iteration": iteration})
+                    best_iteration = iteration`}</pre>
+          </div>
+        </EvidenceCard>
+
+        <h3>受控对战要控制先后手与开局</h3>
+        <p>
+          受控不是把同一局重复 6 遍。无噪声搜索加上每步都取最大访问动作，会让固定网络走上完全确定的路线；
+          只换先后手，6 局实际只有 2 种棋：挑战者执黑一局、执白一局，其余 4 局全是重播。
         </p>
         <EvidenceCard
           fidelity="runtime-exact"
-          title="有放回均匀抽样并重建三个输入平面"
-          source="alphagomoku/replay.py · ReplayBuffer.sample"
+          title="按局号奇偶交替分配执黑方"
+          source="alphagomoku/arena.py · play_match"
         >
           <div className="codewalk">
-            <pre>{`    def sample(self, batch_size: int, rng: np.random.Generator):
-        """Uniform with replacement -> (inputs (B,3,n,n), pis (B,n*n), zs (B,))."""
-        assert self.size > 0, "cannot sample from an empty buffer"
-        idx = rng.integers(0, self.size, size=batch_size)
-        b = self.boards[idx].astype(np.float32)
-        cur = b == 1.0
-        opp = b == -1.0
-        color = np.where(self.players[idx] == 1, 1.0, 0.0).astype(np.float32)
-        color = np.broadcast_to(color[:, None, None], cur.shape)
-        inputs = np.stack([cur, opp, color], axis=1).astype(np.float32)
-        return inputs, self.pis[idx].copy(), self.zs[idx].copy()`}</pre>
+            <pre>{`    def net_assign(gi: int):
+        if gi % 2 == 0:
+            return ({1: pred_a, -1: pred_b}, name_a, name_b)
+        return ({1: pred_b, -1: pred_a}, name_b, name_a)`}</pre>
           </div>
         </EvidenceCard>
         <p className="mt-3">
-          随机抽出的下标 <span className="mono">idx</span> 同时取出棋盘、行棋方、策略目标 π 与终局结果 z，
-          当场把规范视角棋盘拆回己方、对方、行棋方颜色三个输入平面，输出形状为{" "}
-          <span className="mono">(B, 3, n, n)</span>。
+          局号 <span className="mono">gi</span> 为偶数时挑战者执黑、奇数时执白，所以 6 局里两边各执黑 3 次。
         </p>
-        <Def term="小批与最小样本门槛" en="mini-batch & min_buffer">
-          <strong>小批</strong>（mini-batch）是一次权重更新用到的一小组样本，本项目每批 128 条。
-          <strong>最小样本门槛</strong>（<span className="mono">min_buffer</span>）是开始权重更新所需的最小样本数：回放池中样本数还小于它时，本轮只继续自我对弈积累样本，
-          不更新网络。回放池太浅时「随机抽一批」抽到的样本重叠很多，
-          一次更新仍被一小段经历带着摇摆；累积到门槛后才开始更新，随机混合才真正成立。演示配置：池容量 5 万条、门槛 256 条；默认配置是 10 万与 512。
-        </Def>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="回放池容量与最小样本门槛的默认配置"
-          source="alphagomoku/config.py · Config"
-        >
-          <div className="codewalk">
-            <pre>{`    buffer_size: int = 100_000
-    min_buffer: int = 512`}</pre>
-          </div>
-        </EvidenceCard>
-        <p className="mt-3">
-          演示配置的 5 万与 256 写在 <span className="mono">configs/fast.json</span> 的同名字段上，站里真实记录就出自那份配置。
-        </p>
-
-        <h3>棋盘和 π 同步变换，z 不跟着转</h3>
         <p>
-          同一棋形旋转或镜像后棋理完全等价。同一份经历有 8 种等价读法，每次训练随机借其中一种；
-          不增加样本条数。每条抽中的样本随机选 8 种旋转/镜像之一。
+          另一半解法是开局采样：前几手仍按 π 抽，概率大的更容易被选中、小的也有机会，
+          之后才取最大。这样同一对网络能走出不同棋局，而不是把一条路线数六遍。
         </p>
-        <Def term="数据增强" en="data augmentation，简称增广">
-          从 8 个等价视图中随机取 1 个来改写当前样本；一条样本仍是一条，批次仍是 128，
-          只是换了坐标系呈现。空间变换必须让样本与策略答案同步：
-          棋盘上的棋形转到新坐标，π 对应格的概率也必须搬到相同位置。
-          z 只表示输赢，不是坐标，所以不转。例 14-2 用真实记录演示同一种变换下
-          棋盘与 π 怎样一起搬家。
-        </Def>
         <EvidenceCard
           fidelity="runtime-exact"
-          title="对棋盘与策略目标 π 同步做八重对称变换"
-          source="alphagomoku/train.py · train_step"
+          title="竞技场关闭根噪声，开局前几手按 π 采样"
+          source="alphagomoku/arena.py · play_match"
         >
           <div className="codewalk">
-            <pre>{`    ks = rng.integers(0, 8, size=B)
-    aug_in = np.empty_like(inputs)
-    aug_pi = np.empty_like(pis)
-    for i in range(B):
-        k = int(ks[i])
-        aug_in[i] = dihedral_transform(inputs[i], k)
-        aug_pi[i] = dihedral_transform_pi(pis[i], n, k)
-
-    x = torch.from_numpy(aug_in).to(device)
-    target_pi = torch.from_numpy(aug_pi).to(device)
-    target_z = torch.from_numpy(zs.astype(np.float32)).to(device)`}</pre>
+            <pre>{`        add_noise=False, simulations=cfg.arena_simulations,
+        sample_temperature=True, temp_threshold=max(2, cfg.temp_threshold // 2),`}</pre>
           </div>
         </EvidenceCard>
+        <p>
+          采样手数取自我对弈门槛的一半；模拟预算也单列，竞技场每手 30 次、自我对弈 40 次（演示配置）。
+          两边使用不同的思考量时，不能把结果当成同条件对局。
+        </p>
+
+        <h3>胜 1、和 0.5、负 0 与 55% 晋升线</h3>
+        <p>
+          记分公式只有一行：
+          <span className="mono">score = (wins + 0.5×draws) / games</span>。
+          如果这 6 局都没有和棋、两边又其实一样强，纯靠运气至少赢 4 局（得分率 ≥ 66.7%）的概率约为 34%。
+          和棋会贡献半分，所以 34% 只是无和棋时的基准，实际过线概率还会随和棋率变化。
+          所以 55% 线能驱动自动迭代，却远不足以证明实力；先亲手改几组胜负，看它怎样过线。
+        </p>
       </div>
 
-      <SymmetryTable />
+      <PromoCalc />
 
       <div className="prose mt-10">
-        <h3>train_step 重新作答，2 笔损失合成一次更新</h3>
+        <h3>从 6 局汇总走进单局实录</h3>
         <p>
-          回放池没有保存训练时的 v_net。网络用当前权重重新前向，然后算第 13 课定义过的 2 笔损失：
-          用<strong>交叉熵</strong>衡量落子概率 p 离目标 π 有多远，用<strong>均方误差</strong>衡量 v_net 离终局 z 有多远，
-          其中 p=softmax(logits)（训练侧写小写 p，与搜索侧的先验 P 区分开）。
-          再依次清旧梯度、反向传播、由优化器更新。
+          真实第 2 轮里，挑战者对现任 best 下满 6 局，以 6 胜 0 负晋升。
+          例 15-2 抽出其中挑战者执黑的一局：逐手推进，看每手的访问前三名和搜索汇总
+          <span className="mono">root_value</span>，并记住整局只是 6 局证据中的 1 局。
         </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="重新前向计算双头损失，清梯度、反向传播并更新权重"
-          source="alphagomoku/train.py · train_step"
-        >
-          <div className="codewalk">
-            <pre>{`    net.train()
-    logits, v = net(x)
-    value_loss = F.mse_loss(v, target_z)
-    logp = F.log_softmax(logits, dim=-1)
-    policy_loss = -(target_pi * logp).sum(dim=-1).mean()
-    loss = value_loss + policy_loss
-
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()`}</pre>
-          </div>
-        </EvidenceCard>
-        <Def term="优化器与随机梯度下降" en="optimizer & Stochastic Gradient Descent, SGD">
-          <strong>优化器</strong>是决定每个权重「怎么调」的更新规则加上它的辅助状态：输入是这次小批的梯度，输出是每个权重挪的那一步，只改变「怎么调」，不改变「算什么损失」。
-          本项目采用<strong>随机梯度下降</strong>（Stochastic Gradient Descent，简称 SGD）：按小批估出的梯度，给每个权重挪一小步；学习率定这一步的大小。
-        </Def>
-
-        <h3>优化器定「怎么调」，检查点不保存优化器状态</h3>
-        <p>
-          下面 3 个正则化与加速手段（动量、Nesterov、权重衰减）各管一件事，只改变「怎么调」，
-          不改变「算什么损失」。
-        </p>
-        <Def term="动量、Nesterov 与权重衰减" en="momentum, Nesterov, weight decay">
-          <strong>动量</strong>（momentum）把最近几次的更新方向合成一股惯性，不让单批噪声把权重来回拽，每个权重各有一份这样的惯性记录；
-          <strong>Nesterov</strong>（Nesterov accelerated gradient）先按惯性探一步，再在那个位置算梯度；
-          <strong>权重衰减</strong>（weight decay）每次更新把每个权重往零轻拽一点点，防止数值无节制长大。
-        </Def>
-        <p>
-          三个手段的取值与开关都写在优化器的构造里：本项目 momentum=0.9，本项目开启 nesterov=True，
-          本项目 weight_decay=1e-4。学习率在一次进程内固定，lr=0.01。
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="构造带动量、Nesterov 与权重衰减的 SGD 优化器"
-          source="alphagomoku/train.py · make_optimizer"
-        >
-          <div className="codewalk">
-            <pre>{`def make_optimizer(net: AlphaGomokuNet, cfg: Config) -> torch.optim.Optimizer:
-    return torch.optim.SGD(
-        net.parameters(),
-        lr=cfg.lr,
-        momentum=0.9,
-        weight_decay=cfg.weight_decay,
-        nesterov=True,
-    )`}</pre>
-          </div>
-        </EvidenceCard>
-        <p>
-          目前没有自动调整学习率的装置（scheduler）。训练器若中途崩溃，
-          恢复走检查点与最近保存点这条路，口径如下。
-        </p>
-        <Def term="检查点" en="checkpoint">
-          训练中保存的一份模型文件，内容是网络权重、配置和 meta。
-          项目里<strong>最近保存点</strong>（<span className="mono">latest.pt</span>）始终是最近一次保存的检查点，按{" "}
-          <span className="mono">keep_checkpoint_every</span> 另存的{" "}
-          <span className="mono">iter_N.pt</span> 是不会被下一轮覆盖的完整副本。
-          检查点不保存优化器的状态（含各权重的动量记录）和随机数发生器的状态，是为了文件简单、加载路径统一；按项目方式恢复训练时加载 <span className="mono">latest</span> 与 <span className="mono">buffer.npz</span>，权重能接上，但带着更新惯性的动量记录与随机数序列无法原样续接（pipeline 会新建优化器并重设种子，恢复后头几步没有惯性、方向略颠簸，几步后惯性重建）。
-        </Def>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="检查点保存字典只含权重、网络结构配置、训练配置与元信息"
-          source="alphagomoku/model.py · save_checkpoint"
-        >
-          <div className="codewalk">
-            <pre>{`        {
-            "state_dict": net.state_dict(),
-            "config": {
-                "board_size": net.n,
-                "channels": net.channels,
-                "res_blocks": net.res_blocks,
-            },
-            "train_config": cfg_dict,
-            "meta": meta or {},
-        },`}</pre>
-          </div>
-        </EvidenceCard>
       </div>
 
-      <Ledger title="alphagomoku/train.py · train_step">
+      <ArenaReplay />
+
+      <Ledger title="alphagomoku/arena.py · play_match（受控对战与计分）">
         <EvidenceCard
           fidelity="runtime-exact"
-          title="完整单步训练函数：八重对称增广、前向计算、双损失合成、反向传播与指标返回"
-          source="alphagomoku/train.py · train_step"
+          title="发起受控对战并按胜 1、和 0.5 汇总挑战者得分率"
+          source="alphagomoku/arena.py · play_match"
         >
           <div className="codewalk">
-            <pre>{`def train_step(
-    net: AlphaGomokuNet,
-    optimizer: torch.optim.Optimizer,
-    batch,
-    device: str,
-    rng: np.random.Generator,
-) -> dict:
-    """One SGD update on a batch from ReplayBuffer.sample(). Returns metrics."""
-    inputs, pis, zs = batch
-    B = inputs.shape[0]
-    n = inputs.shape[-1]
-    ks = rng.integers(0, 8, size=B)
-    aug_in = np.empty_like(inputs)
-    aug_pi = np.empty_like(pis)
-    for i in range(B):
-        k = int(ks[i])
-        aug_in[i] = dihedral_transform(inputs[i], k)
-        aug_pi[i] = dihedral_transform_pi(pis[i], n, k)
-
-    x = torch.from_numpy(aug_in).to(device)
-    target_pi = torch.from_numpy(aug_pi).to(device)
-    target_z = torch.from_numpy(zs.astype(np.float32)).to(device)
-
-    net.train()
-    logits, v = net(x)
-    value_loss = F.mse_loss(v, target_z)
-    logp = F.log_softmax(logits, dim=-1)
-    policy_loss = -(target_pi * logp).sum(dim=-1).mean()
-    loss = value_loss + policy_loss
-
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-
-    with torch.no_grad():
-        entropy = -(logp.exp() * logp).sum(dim=-1).mean()
+            <pre>{`    records = play_games(
+        None, cfg, cfg.arena_games, iteration, rng,
+        kind="arena", id_prefix=id_prefix,
+        add_noise=False, simulations=cfg.arena_simulations,
+        sample_temperature=True, temp_threshold=max(2, cfg.temp_threshold // 2),
+        net_assign=net_assign,
+        on_progress=on_progress, on_game_end=on_end,
+    )
+    wins_a = wins_b = draws = 0
+    for rec in records:
+        a_is_black = rec["meta"]["black"] == name_a
+        r = rec["result"]
+        if r == 0:
+            draws += 1
+        elif (r == 1) == a_is_black:
+            wins_a += 1
+        else:
+            wins_b += 1
+    total = max(len(records), 1)
     return {
-        "loss": float(loss.item()),
-        "policy_loss": float(policy_loss.item()),
-        "value_loss": float(value_loss.item()),
-        "policy_entropy": float(entropy.item()),
-        "lr": float(optimizer.param_groups[0]["lr"]),
+        "wins_a": wins_a,
+        "wins_b": wins_b,
+        "draws": draws,
+        "win_rate_a": (wins_a + 0.5 * draws) / total,
+        "games": len(records),
     }`}</pre>
-            <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-              输入 (128,3,9,9) 经前向得到 logits (128,81) 与 v (128,)，分别与 target_pi (128,81)、target_z (128,) 计算交叉熵和均方误差，更新后返回损失、策略熵与学习率。
-            </p>
           </div>
         </EvidenceCard>
         <p className="mt-3">
-          运行 <span className="mono">python -m pytest tests/test_train.py -q</span> 与 <span className="mono">python -m pytest tests/test_game.py -q</span>，
-          可验证八重对称变换下棋盘与 <span className="mono">π</span> 的同步性，以及单步训练的输入输出形状。
+          上面这段 <span className="mono">play_match</span> 串联起受控对战的开关（关闭根噪声、开局前几手按 <span className="mono">π</span> 采样分叉）与得分率汇总，再交由 <span className="mono">alphagomoku/pipeline.py</span> 按 <span className="mono">promote_threshold = 0.55</span> 判断是否更新 <span className="mono">best.pt</span>。
+          可运行 <span className="mono">python -m pytest tests/test_regressions.py -q</span> 验证受控对战计分与同色对局分叉。
         </p>
       </Ledger>
 
       <ChapterEnd
         summary={[
-          "回放池是环形缓冲区，覆盖最旧样本；池中样本累积到 min_buffer 才开始均匀、有放回地抽小批，一次更新因此混合了新旧经历。",
-          "数据增强把棋盘和 π 同步随机做 8 种之一（旋转/镜像），z 不是坐标所以不转。",
-          "train_step 重新前向，用交叉熵比较概率 p 与 π、用均方误差比较 v_net 与 z，再清梯度、反向传播、由优化器更新；动量、Nesterov、权重衰减只改「怎么调」。",
-          "检查点只存网络权重、配置和 meta；恢复时权重能接上，动量记录和随机数序列不能原样接上。",
+          "损失下降，量的是对旧样本的贴合，不是棋力；贴合变好而新局变差的现象叫过拟合。挑战者、best、baseline、latest 4 个身份决定谁和谁比。",
+          "受控对战要交换先后手、让开局按 π 采样适度分叉；否则无噪声加纯取最大会让 6 局变成 2 局的重播。胜 1、和 0.5、负 0，得分率过 55% 的晋升线才换 best。",
         ]}
         next={
           <>
-            下一课回答「损失下降了，能不能换 best」。竞技场让新旧网络在受控对战里相遇，
-            按胜 1、和 0.5、负 0 记分，用得分率门槛决定晋升不晋升。顺带分清 challenger、best、
-            baseline 和 latest 四个名字各指哪一份权重，以及有限场次的证据到底能证明什么。
+            下一课把一轮训练从头到尾走一遍（自我对弈→存回放池→训练→竞技场→写指标→存检查点），
+            并解释为什么必须按这个顺序，以及进程在中途崩溃之后靠什么接着跑。
           </>
         }
       />
@@ -355,34 +250,26 @@ export default function L15() {
         title="习题"
         questions={[
           {
-            q: "棋盘顺时针转 90° 时，π 和 z 应分别怎样处理？",
+            q: "为什么预先设定的晋升线不能被读成「已经统计证明新网络更强」？",
             options: [
-              "π 的 81 个位置跟棋盘一起转，z 保持原值",
-              "π 保持原坐标，只有 z 改正负号",
-              "π 与 z 都乘以 90",
-            ],
-            answer: 0,
-            explain: "π 的每一项对应一个棋盘坐标，所以样本旋转时答案坐标也要旋转。z 是输赢关系，没有空间坐标。",
-          },
-          {
-            q: "把回放池改成「无放回、按入库顺序读完一个 epoch」，训练动态会差在哪？",
-            options: [
-              "抽中的样本会从池里永久删除，池会越训越小",
-              "有放回的均匀小批与池内分布同权，同一条样本一批里可能抽到两次；按序无放回会让样本带上次序，最近入库的局面被系统性排后",
-              "每次只从最新一局棋抽，效果更好",
+              "因为只要有一局输过，就永远不能再比较",
+              "因为晋升线是工程门槛；少量对局仍会受运气、开局和样本量影响，更多受控对战才能提高结论强度",
+              "因为和棋完全没有信息，必须从成绩里删掉",
             ],
             answer: 1,
-            explain: "代码用 rng.integers 为 batch 中每个位置独立产生下标，并没有把已抽中的下标移除，所以每步看到的样本分布与池内分布一致。改成按序无放回，步与步之间就带上了入库次序，近况会攒在末尾才被学到。",
+            explain:
+              "晋升线帮助系统在自动训练时保持稳定，但不是科学证明。少量比赛里，哪怕两者同样强，也可能暂时一方领先；增加对局、控制先后手与开局、说明结果有多不确定，都会让证据更可靠。本课已经用演示模型的 6 局和 55% 规则完整计算过一次。",
           },
           {
-            q: "按项目方式恢复训练后（加载最近保存点 latest 与 buffer.npz，前者是最近一次保存），哪些东西当前不会原样恢复？",
+            q: "比较 2 个网络时，为什么不能只让它们在同一开局、同一先后手下反复下一局？",
             options: [
-              "网络权重和棋盘大小",
-              "优化器的动量记录与随机数状态",
-              "检查点里记录的第几轮等信息",
+              "因为同一局棋重复得越多，计算机就越省电",
+              "因为先后手和开局路线会影响结果；需要控制这些条件并让对局有足够不同的分支，比赛才提供更多独立证据",
+              "因为只要让一方先走，它就一定比较强",
             ],
             answer: 1,
-            explain: "检查点保存网络、配置和 meta；pipeline 会新建优化器并重新设随机种子，所以动量历史与随机过程不是逐位续接。",
+            explain:
+              "受控比较要避免把「先手优势」或「恰好走到同一条路线」误判成实力。交替先后手、让开局适度分叉，都会让每局提供不同的信息。本课展示的开局采样说明：比赛设计会直接影响证据有多可信。排障时可对拍 tests/test_regressions.py 的 test_arena_games_diversify：它断言同色对局不再逐手一模一样。",
           },
         ]}
       />
@@ -390,106 +277,247 @@ export default function L15() {
   )
 }
 
-function BufferRing() {
-  const [writes, setWrites] = useState(7)
-  const capacity = 5
-  const lastSlot = writes > 0 ? (writes - 1) % capacity : -1
-  const nextSlot = writes % capacity
-  const cells = Array.from({ length: capacity }, (_, i) => {
-    const start = Math.max(0, writes - capacity)
-    const values = Array.from({ length: Math.min(writes, capacity) }, (_, j) => start + j + 1)
-    const value = values.find((v) => (v - 1) % capacity === i)
-    return value ?? null
-  })
+/* ============ 四种模型身份：同一轮的模型在竞技场里各站什么位置 ============ */
+
+const ROLES = [
+  { tag: "latest", title: "最近保存点", note: "刚写完，不等于最强", tone: "plain" },
+  { tag: "challenger", title: "挑战者", note: "刚训练完，等待上场", tone: "hot" },
+  { tag: "best", title: "当前最佳", note: "守擂；过 55% 才换主", tone: "best" },
+  { tag: "baseline", title: "冻结基线", note: "随机初始权重，只当尺", tone: "plain" },
+] as const
+
+function ArenaRoles() {
+  return (
+    <div className="arena-roles" aria-label="四种模型身份">
+      {ROLES.map((role, i) => (
+        <div className={`arena-role ${role.tone}`} key={role.tag}>
+          <span className="arena-role-no">{i + 1}</span>
+          <span className="arena-role-tag mono">{role.tag}</span>
+          <strong>{role.title}</strong>
+          <small>{role.note}</small>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ============ 例 15-1 · 晋升计算器：6 局胜负和，亲手配平 55% 线 ============ */
+
+type Slot = 1 | 0.5 | 0 // 胜 / 和 / 负
+const SLOT_LABEL: Record<number, string> = { 1: "胜", 0.5: "和", 0: "负" }
+const NEXT: Record<number, Slot> = { 1: 0.5, 0.5: 0, 0: 1 }
+const PRESETS: { label: string; slots: Slot[] }[] = [
+  { label: "6 胜 0 负（真实第 2 轮）", slots: [1, 1, 1, 1, 1, 1] },
+  { label: "2 胜 2 和 2 负", slots: [1, 1, 0.5, 0.5, 0, 0] },
+  { label: "3 胜 1 和 2 负", slots: [1, 1, 1, 0.5, 0, 0] },
+]
+
+function PromoCalc() {
+  const [slots, setSlots] = useState<Slot[]>([1, 1, 0.5, 0.5, 0, 0])
+  const wins = slots.filter((s) => s === 1).length
+  const draws = slots.filter((s) => s === 0.5).length
+  const score = wins + 0.5 * draws
+  const rate = score / 6
+  const passLine = 0.55
+  const promoted = rate >= passLine
 
   return (
     <figure className="figure mt-8">
-      <div className="px-4 pt-3 sm:px-5"><span className="mini-label">例 14-1 · 容量 5 的环形回放池</span></div>
+      <div className="px-4 pt-3 sm:px-5">
+        <span className="mini-label">例 15-1 · 晋升计算器：点 6 个格子配一场 6 局的对抗</span>
+      </div>
       <div className="p-4 sm:p-5">
-        <div className="flex flex-wrap gap-2" data-qa="replay-ring">
-          {cells.map((value, i) => {
-            const isLatest = i === lastSlot
-            const isNext = i === nextSlot
-            return (
-              <div
-                key={i}
-                className="card px-4 py-3 text-center"
-                style={{
-                  borderColor: isLatest ? "var(--accent)" : isNext ? "var(--hairline-strong)" : undefined,
-                  background: isLatest ? "var(--accent-wash)" : undefined,
-                  transition: "border-color 280ms ease, background 280ms ease",
-                }}
-              >
-                <div className="mini-label">
-                  槽 {i}{isLatest ? " · 刚写" : isNext ? " · 下一格" : ""}
-                </div>
-                <strong className="num" style={{ color: isLatest ? "var(--accent-deep)" : undefined }}>
-                  {value === null ? "空" : `样本 ${value}`}
-                </strong>
-              </div>
-            )
-          })}
+        <div className="flex flex-wrap gap-2" data-qa="calc-slots">
+          {slots.map((s, i) => (
+            <button key={i} type="button"
+              className={`btn calc-slot ${s === 1 ? "active" : ""}`}
+              onClick={() => setSlots((ss) => ss.map((x, j) => (j === i ? NEXT[x] : x)))}
+              data-qa="calc-slot">
+              <span className="num">第{i + 1}局</span>
+              <span className="calc-slot-val" data-val={s}>{SLOT_LABEL[s]}</span>
+            </button>
+          ))}
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button type="button" className="btn" onClick={() => setWrites((n) => Math.max(0, n - 1))}>少写一条</button>
-          <button type="button" className="btn primary" onClick={() => setWrites((n) => n + 1)}>再写一条</button>
-          <span className="num text-sm" style={{ color: "var(--fg-muted)" }}>已写 {writes} 条，下一格 {(writes % capacity)}</span>
-        </div>
-        <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          第 6 条会覆盖第 1 条，第 7 条覆盖第 2 条。真实容量由 config 决定，原理相同。
+        <p className="mt-2 text-xs" style={{ color: "var(--fg-faint)" }}>
+          点格子循环：胜 → 和 → 负。6 局轮流换先后手（哪局执黑是事先固定的，不影响记分）。
         </p>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <span className="num text-lg font-bold" data-qa="calc-rate"
+            style={{ color: "var(--accent-deep)" }}>
+            ({wins} + 0.5×{draws}) / 6 = {score.toFixed(1)} / 6 = {(rate * 100).toFixed(1)}%
+          </span>
+          <span className="banner" style={{
+            borderColor: promoted ? "var(--accent)" : "var(--hairline-strong)",
+            background: promoted ? "var(--accent-wash)" : "var(--card-sunken)",
+            color: promoted ? "var(--accent-deep)" : "var(--fg-muted)",
+          }} data-qa="calc-verdict">
+            {promoted ? "✓ ≥ 55%，晋升！best 易主" : "✗ 不到 55%，现任 best 留任"}
+          </span>
+        </div>
+
+        <div className="l09-ratebar mt-8" data-qa="calc-bar">
+          <i className="l09-ratebar-fill" style={{ width: `${rate * 100}%` }} />
+          <i className="l09-ratebar-line" style={{ left: `${passLine * 100}%` }} />
+          <i className="l09-ratebar-needle" style={{ left: `${rate * 100}%` }} />
+          <span className="num l09-ratebar-tag" style={{ left: `${passLine * 100}%` }}>55% 线</span>
+        </div>
+        <div className="num mt-1 flex justify-between text-xs" style={{ color: "var(--fg-faint)" }}>
+          <span>0%</span><span>50% 五五开</span><span>100%</span>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs" style={{ color: "var(--fg-faint)" }}>快捷：</span>
+          {PRESETS.map((p) => (
+            <button key={p.label} type="button" className="btn" data-qa="calc-preset"
+              onClick={() => setSlots(p.slots)}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="reveal-box mt-4 text-sm leading-relaxed">
+          <strong>无和棋时的运气过线概率 34%：</strong>假设两网络完全同强（每局五五开），6 局全无和棋。
+          至少赢 4 局共有 C(6,4)+C(6,5)+C(6,6)=15+6+1=22 种输赢排法，除以全部 2⁶=64 种，得到
+          <span className="num"> 34.4%</span>。
+        </div>
+        <div className="reveal-box mt-3 text-sm leading-relaxed">
+          <strong>组合数怎么读：</strong>C(6,4)=15 是「6 局里挑 4 局来赢」，C(6,5)=6、C(6,6)=1。
+          三者相加再除以 64 种等可能的输赢序列，就是二项概率；所以两网络同强时，约每 3 场六局赛就有 1 场会纯靠运气过线。
+        </div>
+        <div className="reveal-box mt-3 text-sm leading-relaxed">
+          <strong>和棋也算半分：</strong>3 胜 1 和 2 负 = 58.3%，同样过线。
+          因此 6 局、55% 的规则是略高于五五开的工程折中；它能驱动自动迭代，却不足以单独证明棋力。
+        </div>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">例 14-1</span>
-        教学缩小的容量 5，用来看清「写满绕回、覆盖最旧」这一条；真实回放池的容量大得多。
-        绕回与覆盖的实现见 alphagomoku/replay.py · ReplayBuffer.add_many 的游标行。
+        <span className="cap-no">例 15-1</span>
+        计分公式和 ≥55% 判定分别对应 alphagomoku/arena.py 的 play_match 与 alphagomoku/pipeline.py 的 run；
+        真实记录见第 2 轮：挑战者对 best 组 6 比 0 晋升（同轮另有对 baseline 的 6 局；例 15-2 就是对 best 那 6 局里的一局）。
       </figcaption>
     </figure>
   )
 }
 
-function SymmetryTable() {
-  const [k, setK] = useState(0)
-  const mv = MOVES[SYM_IDX]
-  const boardK = dihedral(STATES[SYM_IDX].board, k).flat()
-  const piK = dihedralPi(mv.pi, k)
-  const original = argmaxPi(mv.pi)
-  const moved = argmaxPi(piK)
+/* ============ 例 15-2 · 真实晋升赛对局：第 2 轮挑战者（黑）的一胜 ============ */
+
+const ALEN = ARENA.moves.length
+
+function ArenaReplay() {
+  const [step, setStep] = useState(0)
+  const [playing, setPlaying] = useState(false)
+
+  const states = useMemo<GameState[]>(() => {
+    const arr: GameState[] = [emptyBoard()]
+    for (const m of ARENA.moves)
+      arr.push(play(arr[arr.length - 1], m.y * 9 + m.x, m.player as 1 | -1))
+    return arr
+  }, [])
+
+  useEffect(() => {
+    if (!playing) return
+    if (step >= ALEN) {
+      setPlaying(false)
+      return
+    }
+    const t = setTimeout(() => setStep((s) => s + 1), 700)
+    return () => clearTimeout(t)
+  }, [playing, step])
+
+  const cur = step < ALEN ? ARENA.moves[step] : null
+  const prev = step > 0 ? ARENA.moves[step - 1] : null
+  const top = cur ? [...cur.top].sort((a, b) => b.visits - a.visits).slice(0, 3) : []
 
   return (
     <figure className="figure mt-8">
-      <div className="px-4 pt-3 sm:px-5"><span className="mini-label">例 14-2 · 棋盘与 π 同步做 8 种变换（演示可逐个查看 8 个视图，训练时每次只取其一）</span></div>
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3 sm:px-5">
+        <span className="mini-label">例 15-2 · 晋升赛实录 · {ARENA.id}（第 2 轮，挑战者执黑）</span>
+        <span className="mini-label num" style={{ color: "var(--accent-deep)" }}>
+          该轮挑战者对 best 6 比 0 全胜（对 baseline 另有 6 局），晋升
+        </span>
+      </div>
       <div className="flex flex-col gap-5 p-4 sm:flex-row sm:p-5">
-        <div className="w-full sm:w-64 sm:flex-none" data-qa="sym-board">
-          <Board
-            board={boardK}
-            heat={piK}
-            marks={[{ x: moved % 9, y: Math.floor(moved / 9), anchor: true }]}
-          />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="mini-label">k=0..3 旋转；k=4..7 旋转后镜像</div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {Array.from({ length: 8 }, (_, i) => (
-              <button key={i} type="button" className={`btn ${k === i ? "active" : ""}`}
-                onClick={() => setK(i)} data-qa="sym-k">{i}</button>
-            ))}
+        <div className="min-w-0 flex-1 sm:max-w-[22rem]">
+          <div data-qa="arena-board">
+            <Board
+              board={states[step].board.flat()}
+              lastMove={prev ? { x: prev.x, y: prev.y } : null}
+              marks={step === ALEN && prev ? [{ x: prev.x, y: prev.y, anchor: true }] : undefined}
+            />
           </div>
-          <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-            π 最热坐标从 <span className="mono">{coord(original)}</span> 搬到
-            <span className="mono" style={{ color: "var(--accent-deep)" }}> {coord(moved)}</span>。
-            棋盘与 π 热力若不用同一个 k，样本与答案就会错位。
-          </p>
-          <div className="reveal-box mt-3 text-sm" data-qa="sym-argmax">
-            z 仍是同一个输赢数；空间旋转不会把赢家变成输家。
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" className="btn" disabled={step === 0}
+              onClick={() => { setPlaying(false); setStep((s) => Math.max(0, s - 1)) }}>
+              ← 上一手
+            </button>
+            <button type="button" className="btn active" onClick={() => setPlaying((p) => !p)}>
+              {playing ? "⏸ 暂停" : "▶ 自动播放"}
+            </button>
+            <button type="button" className="btn" disabled={step >= ALEN}
+              onClick={() => { setPlaying(false); setStep((s) => Math.min(ALEN, s + 1)) }}>
+              下一手 →
+            </button>
+            <span className="num ml-auto text-sm" style={{ color: "var(--fg-faint)" }}>
+              已下 {step} / {ALEN} 手
+            </span>
           </div>
         </div>
+
+        <aside className="w-full sm:w-64 sm:flex-none">
+          {cur ? (
+            <div>
+              <div className="mini-label">
+                第 {step + 1} 手 · 轮到{cur.player === 1 ? "黑（挑战者）" : "白(best)"}下
+              </div>
+              <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+                竞技场每手 30 次模拟（演示配置；比自我对弈的 40 少，开局 5 手按 π 采样）。
+                走到终局时，红色圆环会圈出最后一手。
+              </p>
+              <div className="mini-label mt-4">π：访问数前三名</div>
+              <ol className="mt-2 space-y-1.5" data-qa="arena-top">
+                {top.map((t) => (
+                  <li key={t.action} className="l00-top-row">
+                    <span className="mono text-sm">({t.x},{t.y})</span>
+                    <span className="prob-track">
+                      <span className="prob-fill" style={{ width: `${t.prob * 100}%` }} />
+                    </span>
+                    <span className="num w-10 flex-none text-right text-sm"
+                      style={{ color: "var(--accent-deep)" }}>
+                      {Math.round(t.prob * 100)}%
+                    </span>
+                  </li>
+                ))}
+              </ol>
+              <p className="num mt-4 text-lg font-bold" style={{ color: "var(--accent-deep)" }}>
+                root_value = {cur.rootValue >= 0 ? "+" : "−"}{Math.abs(cur.rootValue).toFixed(2)}
+                <span className="ml-2 text-sm font-normal" style={{ color: "var(--fg-faint)" }}>
+                  （搜索汇总，{cur.player === 1 ? "黑" : "白"}方视角）
+                </span>
+              </p>
+              <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+                这是当前这一步、当前行棋方视角的搜索汇总。沿整局看数值变化可以提出问题，
+                但不同棋盘和不同玩家的数不能把它们连成一条线，然后说它一路在变差。
+              </p>
+            </div>
+          ) : (
+            <div className="reveal-box">
+              <div className="mini-label">终局</div>
+              <p className="mt-2 text-sm font-semibold">
+                挑战者（黑）胜。第 {ALEN} 手黑落 {coord(prev!.x, prev!.y)},
+                终局价值直接给出（z 取 +1/−1/0，不再问网络）。
+              </p>
+              <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+                这只是对 best 的 6 局里的一局；该轮对 best 的汇总为 6 比 0，得分率 100% ≥ 55%（对 baseline 另 6 局），
+                所以 best 易主。单看眼前这一局仍不能得出该结论。
+              </p>
+            </div>
+          )}
+        </aside>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">例 14-2</span>
-        棋盘由真实自我对弈记录重建，π 直接取自记录；换 k 时两者必须用同一个变换。
-        变换实现见 learn/src/engine/game.ts 的 dihedral 与 dihedralPi（镜像 alphagomoku/game.py
-        的 dihedral_transform 与 dihedral_transform_pi）。换 k 前先预测 π 会搬到哪几格，再切过去对拍。
+        <span className="cap-no">例 15-2</span>
+        {ARENA.id}，共 {ALEN} 手，黑胜。局面由引擎逐手重建，π 与 root_value 读取真实竞技场记录；
+        root_value 是搜索汇总的记录值，不是训练时重新计算的 v_net。播放下一手前先预测 top 访问点会落在哪，再推进验证。
       </figcaption>
     </figure>
   )

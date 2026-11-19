@@ -1,363 +1,263 @@
-/** 第 15 课 · 竞技场：谁有资格成为 best。
- *  节拍：思考题（损失降=棋力涨？）→ 角色(best/latest/baseline/challenger，落点码首任 best/基线/晋升线)→
- *  受控对战（换先后手/开局采样/和棋半分，落点码 net_assign/采样开关/计分行）→ 晋升计算器 → 真实对局
- *  → 对证（整链：演示配置、play_match 计分与开关、pipeline 晋升分支）→ 习题。 */
-import { useEffect, useMemo, useState } from "react"
+/** 第 13 课 · 反向传播：两种错误怎样改动所有权重。
+ *  节拍：双头损失 → 双权重链式手推 → 三行更新 → 例 13-1 联动 → 真实 train_step。 */
+import { useEffect, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
 import { EvidenceCard } from "../framework/evidence"
-import Board from "../lib/board"
-import { REAL } from "../data/real"
-import { emptyBoard, play, type GameState } from "../engine/game"
+import { twoLayer, twoLayerStep } from "../lib/foundations"
 
-const SP = REAL.selfplayGame
-const ARENA = REAL.arenaGame!
-
-/* 行棋方相关模式小表：全部由 real.ts 第 3 轮那局自我对局现算，不手抄；只用于提出待验证假设。 */
-interface SideStat {
-  who: string
-  hands: number
-  vMin: number
-  vMax: number
-  piMaxMin: number
-  piMaxMax: number
-  focused: number // π 完全集中(=1)的手数
-}
-const sideStat = (player: number, who: string): SideStat => {
-  const vs = SP.moves.filter((m) => m.player === player)
-  const vmax = (m: (typeof SP.moves)[number]) => Math.max(...m.pi)
-  const vms = vs.map((m) => m.rootValue)
-  const pms = vs.map(vmax)
-  return {
-    who,
-    hands: vs.length,
-    vMin: Math.min(...vms),
-    vMax: Math.max(...vms),
-    piMaxMin: Math.min(...pms),
-    piMaxMax: Math.max(...pms),
-    focused: vs.filter((m) => vmax(m) >= 0.999).length,
-  }
-}
-const BLACK_STAT = sideStat(1, "黑方")
-const WHITE_STAT = sideStat(-1, "白方")
-
-/* π 完全集中的六个记录：同一局棋，六手全是白方，天元与五个单点各拿到 100% */
-const FOCUSED = [1, 5, 7, 9, 13, 21].map((i) => SP.moves[i]) // (1,0)(5,4)(6,1)(4,4)天元(0,7)(2,1)
-const coord = (x: number, y: number) => `(${x},${y})`
+/* 手推例固定：x=2(窗口里己方子数)、z=+1(假设这局训练对局后来由我赢);
+ * w₁、w₂ 可拖，默认正例 0.5 / 1.5。 */
+const X = 2
+const Z = 1
+const W1_0 = 0.5
+const W2_0 = 1.5
 
 export default function L13() {
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
-      <div className="eyebrow mb-3">第 15 课</div>
-      <h1 className="text-2xl font-bold">竞技场：谁有资格成为 best</h1>
+      <div className="eyebrow mb-3">第 13 课</div>
+      <h1 className="text-2xl font-bold">反向传播：两种错误怎样改动所有权重</h1>
 
       <LessonGuide
-        question="训练日志显示「损失变低」时，怎样判断机器是真的更会下棋，而不是只更会背旧样本？"
-        why="训练损失只衡量它对已有训练目标的贴合程度；棋力是实战能力，必须在控制先后手和随机性的对战中验证。"
+        question="第 3 课算过 1 个权重的梯度 2(r−z)·x；现在网络有层层权重和两个输出，梯度怎样回到每一个权重？"
+        why="双头的策略与价值各有一笔错误，却共用同一段主干。只有沿真实计算路径把两笔反馈拆回各层，才知道每个权重该往哪边改。"
         chain={[
-          "新网络作为挑战者，对战当前 best",
-          "交替先后手，避免把颜色优势误判成实力",
-          "比较多局、不同开局，避免把同一条路线重复当证据",
-          "公布局数与结果的不确定度",
-          "用固定参照网衡量长期进步",
+          "先由 π 与 z 算出策略损失和价值损失",
+          "两笔损失相加，沿共享计算图反向",
+          "每层把局部变化率逐环相乘",
+          "zero_grad → backward → step 更新权重",
         ]}
-        takeaway="你能配置一场受控对战（交换先后手、开局按 π 采样），并按得分率执行 55% 晋升判定；并指出损失与访问数集中都不当棋力证据。"
-        boundary="少量对局仍有运气，所以竞技场只能提供有限证据；局数、规则和对手都会影响结论强度。"
+        takeaway="你能写出双头总损失，手算两层权重的链式梯度，并对应到 train_step 的三行更新。"
+        boundary="双权重玩具只演示价值侧的一条链；策略侧形状更多，但反向规则相同。"
       />
 
       <Quiz
         title="思考题 · 先选一个答案"
         questions={[
           {
-            q: "训练日志里的损失曲线降了。损失降了，棋力就涨了吗？",
+            q: "策略目标 π 和终局目标 z 各指出一种错误。两笔损失要怎样改变全部权重？",
             options: [
-                "是，损失降就是变强，曲线是唯一标准",
-                "不一定，可能只是背熟了回放池里的样本，换个局面就露馅",
-                "损失根本不重要，训练白训了",
+              "平摊：每个权重各记一半，听起来最公平",
+              "按影响反向传播：谁对两笔答案影响大，谁收到的更新信号就大",
+              "重置：把所有权重都设回随机数，重新来",
             ],
             answer: 1,
             explain:
-              "选第二项。损失衡量的是「答案离样本多近」，不是「棋下得多好」：把训练用的样本贴合得更好，也能让曲线下降。这种「贴合旧样本却不见得更会下新局」的现象，就是过拟合。受控对战更接近真正要测的实战能力，但少量对局同样会受运气影响；训练离不开损失这个信号，但损失低不等于棋力高。",
+              "选第二项。平摊并不公平：一个权重可能只顺路参与，另一个才大幅改变答案。训练要问的是「我把这个权重调一点，两笔损失会怎样变？」第 3 课已经定义过梯度；本课先在双权重玩具里把这条链走一遍，再看它在真实网络里怎么走。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>损失下降，量的是贴合，不是棋力</h3>
+        <h3>先算两笔损失，再一起反向</h3>
         <p>
-          训练日志里下降的损失，量的是网络对已有样本的贴合程度：把回放池里的旧局面答得更像，
-          曲线就会往下走。棋力量的是另一件事，在没见过的局面上能不能走出好棋。
-          把前者当成后者，是训练曲线上最常见的误读。
+          第 3 课的更新式 <span className="mono">w←w−lr·梯度</span> 没变；
+          难点是网络有很多 <span className="mono">w</span>，而且有两份答案要同时学。
+          训练从回放池抽到样本后，先让当前网络重新前向一次，得到策略 logits 和价值估计
+          <span className="mono">v_net</span>；再用 <span className="mono">π</span> 与
+          <span className="mono">z</span> 计算两笔损失。
         </p>
-        <Def term="过拟合" en="overfitting" see="第 3 课（泛化）">
-          贴合旧样本的能力涨了，面对新局面的判断却没跟上。
-          损失下降可以来自泛化变好，也可以来自过拟合；单看训练曲线分不出是哪一种。
-          要区分二者，需要更贴近实战的检验方式。
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="对当前批次重新执行前向计算，取得策略 logits 与价值估计 v"
+          source="alphagomoku/train.py · train_step"
+        >
+          <div className="codewalk">
+            <pre>{`    logits, v = net(x)`}</pre>
+          </div>
+        </EvidenceCard>
+        <p>
+          为了把「错多少」写成可比较的标量，训练分别用交叉熵比较网络给出的落子概率{" "}
+          <span className="mono">p</span> 与目标 <span className="mono">π</span>，用均方误差比较网络价值估计{" "}
+          <span className="mono">v_net</span> 与终局结果 <span className="mono">z</span>。
+        </p>
+        <Def term="双头损失" en="policy cross-entropy + value mean squared error">
+          策略损失是交叉熵 <span className="mono">−Σπᵢ ln pᵢ</span>：
+          π 看重的落点若 p 很小，惩罚会迅速增大。价值损失是均方误差
+          <span className="mono">(v_net−z)²</span>：猜高猜低都为正。
+          两笔在一批样本上取平均后等权相加，就是总损失。
         </Def>
-
-        <h3>4 个身份决定谁和谁比</h3>
-        <Def term="四种模型身份：latest、challenger、best、baseline" en="model roles">
-          <strong>最近保存点</strong>（<span className="mono">latest</span>，见第 14 课）是最近一次保存的训练状态，只代表「刚写完」，不自动等于当前最佳模型；
-          <strong>挑战者</strong>（<span className="mono">challenger</span>）是刚完成一轮训练、等待评估的新网络，属于待检验对象，检验方式是分别对战当前最佳模型与基线；
-          <strong>当前最佳模型</strong>（<span className="mono">best</span>）是竞技场认可的最强权重，只有挑战者过晋升线才换主，下棋演示上场的就是它；
-          <strong>基线</strong>（<span className="mono">baseline</span>）是训练开始前冻结的随机网络，充当永远不变的对照基准，挑战者与它比较（演示配置 6 局）量的是长期进步，不参与晋升，只当一把不动的尺。
+        <div className="formula">
+          L<sub>策略</sub> = −Σπᵢ ln pᵢ（交叉熵）　　L<sub>价值</sub> = (v_net−z)²（均方误差）
+          <br />L<sub>总</sub> = L<sub>策略</sub> + L<sub>价值</sub>
+        </div>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="分别计算价值均方误差与策略交叉熵，并等权相加为总损失"
+          source="alphagomoku/train.py · train_step"
+        >
+          <div className="codewalk">
+            <pre>{`    value_loss = F.mse_loss(v, target_z)
+    logp = F.log_softmax(logits, dim=-1)
+    policy_loss = -(target_pi * logp).sum(dim=-1).mean()
+    loss = value_loss + policy_loss`}</pre>
+          </div>
+        </EvidenceCard>
+        <p>
+          <span className="mono">p</span> 是 softmax 后的 81 格落子概率；
+          <span className="mono">ln</span> 是以 e 为底的对数。代码用
+          <span className="mono">log_softmax</span> 一步算出 ln p，避免先得到极小的 p 再取对数。
+          两个头共享主干，所以两笔损失的梯度最后会在主干上相加。
+        </p>
+        <h3>从损失倒着走：四段变化率接力</h3>
+        <p>
+          反向传播要解决的不是「有没有错」，而是「该改谁、改哪边」。第 4 课已经看过：
+          一个权重改一点，它所乘的特征会决定分数改多少。现在从总损失倒着走，沿实际计算路径
+          逐段追问「这一处小变化会传多远」。
+        </p>
+        <Def term="反向传播" en="backpropagation">
+          从总损失出发，沿实际计算路径倒着走，按链式法则把各段局部变化率逐环相乘，
+          算出总损失对每个权重的梯度。谁对两笔答案影响大，谁收到的更新信号就大，
+          不是把损失平分给每个权重。
         </Def>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="对战基线只记录成绩，不参与晋升"
-          source="alphagomoku/pipeline.py · run"
-        >
-          <div className="codewalk">
-            <pre>{`                arena_base = {"win_rate_a": res_b["win_rate_a"], "wins_a": res_b["wins_a"],
-                              "wins_b": res_b["wins_b"], "draws": res_b["draws"],
-                              "promoted": False}`}</pre>
-          </div>
-        </EvidenceCard>
         <p>
-          评估前先认清对战双方的来历：自我对弈下棋用的就是当前网络，它训练完一轮后以挑战者身份上场对战当前最佳模型；最近保存点只代表刚写完，不自动等于当前最佳模型；
-          基线提供长期进步的参照。从第二次评估起，才需要挑战现任并过晋升线；
-          若项目还没有 <span className="mono">best.pt</span>，
-          第一次评估会先把当前网络直接保存为首任当前最佳模型。
-        </p>
-        <Def term="受控对战" en="controlled match">
-          在<strong>竞技场</strong>（arena）中比较 2 个网络实战能力的成组对局：固定局数、交换先后手、关闭自我对弈用的根噪声（根噪声见第 11 课，给根节点掺随机），但开局前几手仍按搜索访问分布 <span className="mono">π</span> 采样分叉；
-          每局按胜 1、和 0.5、负 0 记分，一组对局汇总成得分率，用来决定挑战者能否成为新的当前最佳模型。
-        </Def>
-        <Def term="晋升线" en="promote threshold">
-          挑战者得分率的及格线。得分率 =（胜局 + 0.5×和局）/ 总局数，演示配置取 55%（<span className="mono">promote_threshold=0.55</span>）。这条线只看挑战者对当前最佳模型那一组的得分率，对基线的得分率不参与晋升。
-          达到或超过这条线，挑战者才成为新的当前最佳模型。它是让自动训练能继续运转的工程门槛，
-          并不等于「已统计证明更强」：局数越少，运气和开局造成的摇摆越大。
-        </Def>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="得分率达到 55% 晋升线即保存为新 best，尚无 best 时直接任命"
-          source="alphagomoku/pipeline.py · run"
-        >
-          <div className="codewalk">
-            <pre>{`                best_path = storage.checkpoint_path("best")
-                if best_path.exists():
-                    champ_net, _ = load_checkpoint(str(best_path), device)
-                    res = play_match(challenger, Predictor(champ_net, device), cfg,
-                                     iteration, iter_rng, storage=storage, opponent="best",
-                                     on_progress=on_arena_progress)
-                    promoted = res["win_rate_a"] >= cfg.promote_threshold
-                    if promoted:
-                        save_checkpoint(net, cfg.to_dict(), str(best_path),
-                                        meta={"iteration": iteration})
-                        best_iteration = iteration
-                    arena_best = {"win_rate_a": res["win_rate_a"], "wins_a": res["wins_a"],
-                                  "wins_b": res["wins_b"], "draws": res["draws"],
-                                  "promoted": promoted}
-                    storage.append_event("arena_end", {
-                        "iteration": iteration, "opponent": "best",
-                        "win_rate": res["win_rate_a"], "wins": res["wins_a"],
-                        "losses": res["wins_b"], "draws": res["draws"], "promoted": promoted,
-                    })
-                else:
-                    save_checkpoint(net, cfg.to_dict(), str(best_path),
-                                    meta={"iteration": iteration})
-                    best_iteration = iteration`}</pre>
-          </div>
-        </EvidenceCard>
-
-        <h3>受控对战要控制先后手与开局</h3>
-        <p>
-          受控不是把同一局棋重复 6 遍。写程序的人常碰到「确定性陷阱」：
-          若每步都只取访问数最多的动作（取最大，即 <span className="mono">argmax</span>），再加上不加噪声的搜索是完全确定的，同一局面永远走出同样的棋。
-          2 个固定的网络只要先手方相同，
-          就会下出逐手一模一样的棋，「6 局对抗」等于只下了 2 局：挑战者执黑 1 局、执白 1 局（黑方永远先走，换的是谁拿黑），其余 4 局全是重播。
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="按局号奇偶交替分配执黑方"
-          source="alphagomoku/arena.py · play_match"
-        >
-          <div className="codewalk">
-            <pre>{`    def net_assign(gi: int):
-        if gi % 2 == 0:
-            return ({1: pred_a, -1: pred_b}, name_a, name_b)
-        return ({1: pred_b, -1: pred_a}, name_b, name_a)`}</pre>
-          </div>
-        </EvidenceCard>
-        <p className="mt-3">
-          局号 <span className="mono">gi</span> 为偶数时挑战者（<span className="mono">pred_a</span>）执黑、奇数时执白，
-          6 局里挑战者执黑 3 局、执白 3 局。
-        </p>
-        <p>
-          自我对弈同理，它的棋谱局局不同，开局采样正是原因之一。
-          开局适度分叉、双方轮流执黑，才能减少把颜色和单一路线误当成棋力的机会；
-          竞技场不加根噪声（见上方定义框「受控对战」），靠的就是把开局引上不同岔路。
-          解法是开局采样：前几手仍按 π 采样，概率大的多抽、小的也抽得到，把棋盘引上不同的岔路，
-          之后才取最大（argmax）。
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="竞技场关闭根噪声，开局前几手按 π 采样"
-          source="alphagomoku/arena.py · play_match"
-        >
-          <div className="codewalk">
-            <pre>{`        add_noise=False, simulations=cfg.arena_simulations,
-        sample_temperature=True, temp_threshold=max(2, cfg.temp_threshold // 2),`}</pre>
-          </div>
-        </EvidenceCard>
-        <p>
-          采样手数的折半取法写在配置调用处，是配置上的选择，不是算法常量；模拟预算也彼此独立，
-          竞技场与自我对弈各用各的模拟次数配置（演示配置的取值见例 15-2 旁注），
-          混用会让两边用不一样的思考量比棋力。
-        </p>
-
-        <h3>胜 1、和 0.5、负 0 与 55% 晋升线</h3>
-        <p>
-          受控对战比训练损失更直接，但它给出的仍是有限证据。
-          比赛记分规则固定：胜记 1 分，和棋记 0.5 分，负记 0 分；
-          <span className="mono">score = (wins + 0.5×draws) / games</span>，其中 games 为本场局数（例中为 6）。
-          在每局只有胜、负两种结果的独立试验里（暂不计和棋，按二项概率计算），哪怕 2 个网络实力完全一样，6 局里纯靠运气至少赢 4 局（含 4 局，得分率 ≥ 66.7%）的概率也有约 34%。下面先在例 15-1 亲手配几组胜负和，体会 55% 晋升线与有限局数下的运气边界。
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="得分率按胜 1、和 0.5 计算"
-          source="alphagomoku/arena.py · play_match"
-        >
-          <div className="codewalk">
-            <pre>{`    total = max(len(records), 1)
-    return {
-        "wins_a": wins_a,
-        "wins_b": wins_b,
-        "draws": draws,
-        "win_rate_a": (wins_a + 0.5 * draws) / total,
-        "games": len(records),
-    }`}</pre>
-          </div>
-        </EvidenceCard>
-      </div>
-
-      <PromoCalc />
-
-      <div className="prose mt-10">
-        <h3>从 6 局汇总走进单局实录</h3>
-        <p>
-          第 2 轮训练结束后，挑战者对现任 <span className="mono">best</span> 下满 6 局受控对战，以 6 胜 0 负（得分率 100% ≥ 55%）顺利晋升。
-          下面例 15-2 抽出其中挑战者执黑的一局实录（<span className="mono">{ARENA.id}</span>）：每手做 30 次模拟，开局前 5 手按 <span className="mono">π</span> 采样分叉，之后取最大访问落子。你可以逐手推进，观察右侧面板里的访问数前三名与当前行棋方视角的搜索汇总 <span className="mono">root_value</span>。
-        </p>
-      </div>
-
-      <ArenaReplay />
-
-      <div className="prose mt-12">
-        <h3>π 集中是一条待验证的假设</h3>
-        <p>
-          读训练记录时容易只看单个漂亮点位。下面用一个案例走完整流程：先提假设，再想办法验证。
-          第 3 轮（轮号即 iteration 号，自 0 编号）的一局自我对弈
-          （{SP.id}）的完整记录见第 12 课例 12-1，先回想那局，再看下表。
-          下表由内置的真实记录（32 手）现算，各列含义如下：
-          「搜索汇总 root_value」是多次模拟回传到树根后的平均；「π 最热一格」表示最热门落点
-          拿走了全部根访问的多少；「π 完全集中」数一数有几手的 π 几乎全集中在一个格子（≥0.999，下文公式按 100% 记）。
-          待验证的假设是：第 10 手（白落）训练保存的记录中的 π 全部集中在天元 (4,4)，
-          看着像「学会了天元最大」；逐手清单见下方现算区。
-        </p>
-        <table className="l09-table">
-          <thead>
-            <tr><th>行棋方</th><th>搜索汇总 root_value</th><th>π 最热一格</th><th>π 完全集中</th></tr>
-          </thead>
-          <tbody>
-            {[WHITE_STAT, BLACK_STAT].map((s) => (
-              <tr key={s.who}>
-                <td>{s.who} {s.hands} 手</td>
-                <td className="num">{s.vMin >= 0 ? "+" : "−"}{Math.abs(s.vMin).toFixed(2)} ~ {s.vMax >= 0 ? "+" : "−"}{Math.abs(s.vMax).toFixed(2)}</td>
-                <td className="num">{s.piMaxMin.toFixed(2)} ~ {s.piMaxMax.toFixed(2)}</td>
-                <td className="num">{s.focused} 手</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p>
-          白方 16 手的搜索汇总 <span className="mono">root_value</span> 全是正的，
-          黑方 16 手全是负的（正 = 搜索汇总后偏向「当前行棋方占优」，负 = 偏向「当前行棋方不利」）。备择解释也要摆出来：这局正好白胜，若评估全程准确，形状也会差不多；单凭它分不出「颜色偏向」和「评估准确」。
-          它不是价值头（网络直接输出的那个价值估计 v_net）在树根直接给出的
-          <span className="mono">v_net</span>，而是多次叶评估和终局结果
-          回传后的平均。
-        </p>
-        <p>
-          这是一条值得怀疑的模式：它可能表示搜索结果过度依赖行棋方或
-          与颜色相关的特征，而不怎么看棋盘本身；但只看这一局 32 手，
-          不能直接判定「网络已经偏向某种颜色」，也不能说谁导致了谁，只能把它当作需要验证的假设。
+          先用两个权重看清规则。令 <span className="mono">x=2</span> 是一个教学特征，
+          <span className="mono">w₁=0.5、w₂=1.5</span>，并假设终局结果是 <span className="mono">z=+1</span>。
+          这台玩具先不经过 tanh，前向依次算加权和 <span className="mono">s=w₁·x=1</span>、过 ReLU 门得到中间数 <span className="mono">h=1</span>、再乘 <span className="mono">w₂</span> 得到原始分数 <span className="mono">r=1.5</span>（代码形参写作 <span className="mono">v</span>），所以平方损失是
+          <span className="mono">(1.5−1)²=0.25</span>。
         </p>
         <div className="formula">
-          {FOCUSED.map((m, i) => (
-            <span key={i}>
-              第 {m.n + 1} 手 {m.player === -1 ? "白" : "黑"}落 {coord(m.x, m.y)}:
-              π={(m.top[0].prob * 100).toFixed(0)}%
-              {coord(m.x, m.y) === "(4,4)" ? "（天元）" : "（非天元）"}{i < FOCUSED.length - 1 ? "、" : ""}
-            </span>
-          ))}
-          <br />·<span className="hl">本局 32 手里共 6 手的 π 是 100%，且六手全是白方：天元 (4,4) 一手，另有 (1,0)、(5,4)、(6,1)、(0,7)、(2,1) 五手</span>
+          w₁ 的梯度 = <span className="hl">3</span>　　w₂ 的梯度 = <span className="hl">1</span>
         </div>
-        <p className="mt-3">
-          上方逐手清单与表格都出自同一局真实记录 {SP.id}（第 12 课例 12-1 同一局）：
-          π 记成 100% 的 6 手全由白方落下，天元之外的五手都是单点；白方搜索汇总区间落在正侧，黑方落在负侧。
+        <p>
+          这里 <span className="mono">w₁</span> 的梯度更大，因为它的影响会继续穿过
+          <span className="mono">w₂</span> 和输入 <span className="mono">x</span>；两个权重不是各分一半。
+          沿梯度的反方向调，足够小的一步内损失才会减小：梯度为正就减小权重，为负则增大。例 13-1 让你亲手拖动，
+          看前向答案、两个梯度和「一步更新」同时变化。
         </p>
         <p>
-          在这局记录里，天元那手看起来合理，其余五手都落在不寻常的点上，值得怀疑；六手全是白方，又正对上文「可能与颜色相关的特征」那条线索。但这只足以说明
-          「集中≠棋理对」，还不能说明集中从何而来。
-          本课最该带走的一句话是：π 集中不等于棋力，损失降也不等于棋力；
-          受控对战给出更直接、但仍有限的证据。
+          0.25 这笔损失，怎么导出 3 和 1 两个梯度？靠的是沿路径逐段相乘。∂损失/∂w₁ 读作「损失对 w₁ 的变化率」，
+          四段依次回答：平方损失怎样响应 r、r 怎样响应 h、ReLU 门是否让变化通过、s 怎样响应 w₁(∂s/∂w₁ = x)。
         </p>
-      </div>
-
-      <Ledger title="alphagomoku/arena.py · play_match（受控对战与计分）">
+        <Def term="链式法则" en="chain rule">
+          复合函数求导时沿路径逐段相乘的规则。它把同一条路径上的局部变化率乘起来：
+          每一环回答「那边调一点点，这边变多少」。
+        </Def>
+        <div className="formula mt-3">
+          ∂损失/∂w₁ = <span className="hl">2(r−z)</span> × <span className="hl">w₂</span> ×
+          <span className="hl">门</span> × <span className="hl">x</span> = 1 × 1.5 × 1 × 2 =
+          <span className="hl">3</span>
+          <br />∂损失/∂w₂ = 2(r−z) × h = 1 × 1 = <span className="hl">1</span>
+        </div>
         <EvidenceCard
-          fidelity="runtime-exact"
-          title="发起受控对战并按胜 1、和 0.5 汇总挑战者得分率"
-          source="alphagomoku/arena.py · play_match"
+          fidelity="constructed"
+          title="双权重教学模型：前向求损失与反向链式法则求梯度"
+          source="learn/src/lib/foundations.ts · twoLayer"
         >
           <div className="codewalk">
-            <pre>{`    records = play_games(
-        None, cfg, cfg.arena_games, iteration, rng,
-        kind="arena", id_prefix=id_prefix,
-        add_noise=False, simulations=cfg.arena_simulations,
-        sample_temperature=True, temp_threshold=max(2, cfg.temp_threshold // 2),
-        net_assign=net_assign,
-        on_progress=on_progress, on_game_end=on_end,
-    )
-    wins_a = wins_b = draws = 0
-    for rec in records:
-        a_is_black = rec["meta"]["black"] == name_a
-        r = rec["result"]
-        if r == 0:
-            draws += 1
-        elif (r == 1) == a_is_black:
-            wins_a += 1
-        else:
-            wins_b += 1
-    total = max(len(records), 1)
-    return {
-        "wins_a": wins_a,
-        "wins_b": wins_b,
-        "draws": draws,
-        "win_rate_a": (wins_a + 0.5 * draws) / total,
-        "games": len(records),
-    }`}</pre>
+            <pre>{`export function twoLayer(w1: number, w2: number, x: number, z: number): TwoLayer {
+  const s = w1 * x
+  const h = relu(s)
+  const v = w2 * h
+  const loss = quadLoss(v, z)
+  const dv = 2 * (v - z)
+  const gate: 0 | 1 = s > 0 ? 1 : 0
+  return {
+    s,
+    h,
+    v,
+    loss,
+    dv,
+    dW2: dv * h,
+    dW1: dv * w2 * gate * x,
+    gate,
+  }
+}`}</pre>
+          </div>
+        </EvidenceCard>
+        <p>
+          两个梯度算出后，一次权重更新的次序是固定的：先清旧梯度，再沿这次总损失反向传播，
+          最后由优化器把每个权重挪一步。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="清空旧梯度、沿总损失反向传播并执行一步参数更新"
+          source="alphagomoku/train.py · train_step"
+        >
+          <div className="codewalk">
+            <pre>{`    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()`}</pre>
           </div>
         </EvidenceCard>
         <p className="mt-3">
-          上面这段 <span className="mono">play_match</span> 串联起受控对战的开关（关闭根噪声、开局前几手按 <span className="mono">π</span> 采样分叉）与得分率汇总，再交由 <span className="mono">alphagomoku/pipeline.py</span> 按 <span className="mono">promote_threshold = 0.55</span> 判断是否更新 <span className="mono">best.pt</span>。
-          可运行 <span className="mono">python -m pytest tests/test_regressions.py -q</span> 验证受控对战计分与同色对局分叉。
+          在玩具里把 <span className="mono">w₁</span> 调成负数，ReLU 门关上，
+          <span className="mono">h=0、gate=0</span>，这条路径的两个梯度都会变成 0。
+          真实网络还有其他通道，不能据此断言整张网络都收不到信号；它只说明门关上时，这条路径不会更新。
+        </p>
+      </div>
+
+      <TwoLayerBook />
+
+      <Ledger title="alphagomoku/train.py · train_step">
+        <p className="mb-3 text-sm">
+          下面完整展示 <span className="mono">train_step</span> 从增广、重新前向、双损失到反向传播与更新权重的实现：
+        </p>
+        <div className="codewalk">
+          <pre>{`def train_step(
+    net: AlphaGomokuNet,
+    optimizer: torch.optim.Optimizer,
+    batch,
+    device: str,
+    rng: np.random.Generator,
+) -> dict:
+    """One SGD update on a batch from ReplayBuffer.sample(). Returns metrics."""
+    inputs, pis, zs = batch
+    B = inputs.shape[0]
+    n = inputs.shape[-1]
+    ks = rng.integers(0, 8, size=B)
+    aug_in = np.empty_like(inputs)
+    aug_pi = np.empty_like(pis)
+    for i in range(B):
+        k = int(ks[i])
+        aug_in[i] = dihedral_transform(inputs[i], k)
+        aug_pi[i] = dihedral_transform_pi(pis[i], n, k)
+
+    x = torch.from_numpy(aug_in).to(device)
+    target_pi = torch.from_numpy(aug_pi).to(device)
+    target_z = torch.from_numpy(zs.astype(np.float32)).to(device)
+
+    net.train()
+    logits, v = net(x)
+    value_loss = F.mse_loss(v, target_z)
+    logp = F.log_softmax(logits, dim=-1)
+    policy_loss = -(target_pi * logp).sum(dim=-1).mean()
+    loss = value_loss + policy_loss
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    with torch.no_grad():
+        entropy = -(logp.exp() * logp).sum(dim=-1).mean()
+    return {
+        "loss": float(loss.item()),
+        "policy_loss": float(policy_loss.item()),
+        "value_loss": float(value_loss.item()),
+        "policy_entropy": float(entropy.item()),
+        "lr": float(optimizer.param_groups[0]["lr"]),
+    }`}</pre>
+        </div>
+        <p className="mt-3 text-sm">
+          运行 <span className="mono">python -m pytest tests/test_train.py -q</span>{" "}
+          可验证单步训练损失计算、梯度反向传播与参数更新。
         </p>
       </Ledger>
 
       <ChapterEnd
         summary={[
-          "损失下降，量的是对旧样本的贴合，不是棋力；贴合变好而新局变差的现象叫过拟合。挑战者、best、baseline、latest 4 个身份决定谁和谁比。",
-          "受控对战要交换先后手、让开局按 π 采样适度分叉；否则无噪声加纯取最大会让 6 局变成 2 局的重播。胜 1、和 0.5、负 0，得分率过 55% 的晋升线才换 best。",
-          "π 完全集中、root_value 全正全负都只是值得怀疑的模式，要靠对照与更多局面验证；受控对战是更直接的证据。",
+          "两笔损失各有自己的训练目标：策略用交叉熵 −Σπᵢ ln pᵢ 比较 p 与 π，价值用均方误差 (v_net−z)² 比较 v_net 与 z，相加成总损失后一次反向。",
+          "链式法则沿计算路径把局部变化率逐环相乘：手推例里 w₁ 的梯度是 3、w₂ 的梯度是 1、损失是 0.25，按影响分摊，不是平分。",
+          "真实训练最后落到 zero_grad() → backward() → step()；ReLU 门关死时该路径梯度为 0。",
         ]}
         next={
           <>
-            下一课把一轮训练从头到尾走一遍（自我对弈→存回放池→训练→竞技场→写指标→存检查点），
-            并解释为什么必须按这个顺序，以及进程在中途崩溃之后靠什么接着跑。
+            下一课看许多样本怎样形成一次更新：环形回放池怎样覆盖旧样本、
+            为什么要攒够 min_buffer 再随机抽批，以及棋盘与 π 怎样同步做八种旋转镜像。
           </>
         }
       />
@@ -366,37 +266,37 @@ export default function L13() {
         title="习题"
         questions={[
           {
-            q: "为什么预先设定的晋升线不能被读成「已经统计证明新网络更强」？",
+            q: "反向传播（backpropagation）在干什么？",
             options: [
-              "因为只要有一局输过，就永远不能再比较",
-              "因为晋升线是工程门槛；少量对局仍会受运气、开局和样本量影响，更多受控对战才能提高结论强度",
-              "因为和棋完全没有信息，必须从成绩里删掉",
+              "把损失平分给每个权重",
+              "变化率接力：两笔损失对答案的影响，沿网络反向逐环相乘，摊到每个权重。谁影响大，谁的更新信号大",
+              "把算错的局面存起来下次再算",
             ],
             answer: 1,
             explain:
-              "晋升线帮助系统在自动训练时保持稳定，但不是科学证明。少量比赛里，哪怕两者同样强，也可能暂时一方领先；增加对局、控制先后手与开局、说明结果有多不确定，都会让证据更可靠。本课已经用演示模型的 6 局和 55% 规则完整计算过一次。",
+              "核心不是平摊，而是沿实际路径计影响：某个权重调一点会怎样改变输出，输出又会怎样改变总损失。两笔训练目标最后一起形成更新信号；双权重的公式只是把这条规则放大给你看。",
           },
           {
-            q: "比较 2 个网络时，为什么不能只让它们在同一开局、同一先后手下反复下一局？",
+            q: "在双权重玩具里，w₁ 调成负的（s≤0）时，为什么两个梯度都变 0？",
             options: [
-              "因为同一局棋重复得越多，计算机就越省电",
-              "因为先后手和开局路线会影响结果；需要控制这些条件并让对局有足够不同的分支，比赛才提供更多独立证据",
-              "因为只要让一方先走，它就一定比较强",
+              "因为负权重不许训练",
+              "在这个双权重玩具里，ReLU 门关死：h=0，而 w₂ 的梯度恰好乘 h；w₁ 的路径也断在门上，所以两个权重的梯度都为 0",
+              "因为损失太小，四舍五入成 0",
             ],
             answer: 1,
             explain:
-              "受控比较要避免把「先手优势」或「恰好走到同一条路线」误判成实力。交替先后手、让开局适度分叉，都会让每局提供不同的信息。本课展示的开局采样说明：比赛设计会直接影响证据有多可信。排障时可对拍 tests/test_regressions.py 的 test_arena_games_diversify：它断言同色对局不再逐手一模一样。",
+              "在这个玩具中：往 w₂ 的方向，r=w₂·h 里 h=0，调 w₂ 不改变原始分数；往 w₁ 的方向，门的影响是 0，接力断链。真实网络还有其他路径，不能直接推出整张网络都没有信号。这个例子只让你看清「门关上时，这条路径不会更新」。",
           },
           {
-            q: "一次搜索把访问几乎全压在一个落点，为什么仍不能证明网络已经学会了对应棋理？",
+            q: "为什么真实训练会把策略和价值两笔损失加成总损失，再一起反向传播？",
             options: [
-              "因为只要把搜索次数增加十倍，就必然证明棋理正确",
-              "因为集中只说明搜索把预算压在那里；它可能来自正确证据、错误的第一眼判断（先验）或偶然路线，原因需要对照与更多局面验证",
-              "因为访问数高的落点一定是坏点",
+              "因为只要把两个数字相加，训练速度一定翻倍",
+              "同一组权重同时影响「下哪」和「谁优」；把两份反馈合起来，主干才能同时朝两种目标调整",
+              "因为终局结果 z 和搜索 π 本来就是同一个数",
             ],
             answer: 1,
             explain:
-              "访问数是搜索过程留下的记录，不是棋理正确性的证明。一处集中可能有很多原因；要判断原因，需要固定其他条件做对照，并看更多局面。前面的天元案例正是训练这种「先提出假设、再设计验证」的习惯。",
+              "双头各有自己的训练目标：π 指出搜索后更值得尝试的落子，z 指出最终输赢。它们读的是同一份主干理解，因此总损失会把两种反馈一起交给同一批权重；这不是把两个目标混为一谈，而是让共享部分同时收到两种信号。",
           },
         ]}
       />
@@ -404,228 +304,242 @@ export default function L13() {
   )
 }
 
-/* ============ 例 15-1 · 晋升计算器：6 局胜负和，亲手配平 55% 线 ============ */
+/* ============ 例 13-1 · 双权重玩具：前向反向联动 + 走一步 ============ */
 
-type Slot = 1 | 0.5 | 0 // 胜 / 和 / 负
-const SLOT_LABEL: Record<number, string> = { 1: "胜", 0.5: "和", 0: "负" }
-const NEXT: Record<number, Slot> = { 1: 0.5, 0.5: 0, 0: 1 }
-const PRESETS: { label: string; slots: Slot[] }[] = [
-  { label: "6 胜 0 负（真实第 2 轮）", slots: [1, 1, 1, 1, 1, 1] },
-  { label: "2 胜 2 和 2 负", slots: [1, 1, 0.5, 0.5, 0, 0] },
-  { label: "3 胜 1 和 2 负", slots: [1, 1, 1, 0.5, 0, 0] },
-]
-
-function PromoCalc() {
-  const [slots, setSlots] = useState<Slot[]>([1, 1, 0.5, 0.5, 0, 0])
-  const wins = slots.filter((s) => s === 1).length
-  const draws = slots.filter((s) => s === 0.5).length
-  const score = wins + 0.5 * draws
-  const rate = score / 6
-  const passLine = 0.55
-  const promoted = rate >= passLine
-
-  return (
-    <figure className="figure mt-8">
-      <div className="px-4 pt-3 sm:px-5">
-        <span className="mini-label">例 15-1 · 晋升计算器：点 6 个格子配一场 6 局的对抗</span>
-      </div>
-      <div className="p-4 sm:p-5">
-        <div className="flex flex-wrap gap-2" data-qa="calc-slots">
-          {slots.map((s, i) => (
-            <button key={i} type="button"
-              className={`btn calc-slot ${s === 1 ? "active" : ""}`}
-              onClick={() => setSlots((ss) => ss.map((x, j) => (j === i ? NEXT[x] : x)))}
-              data-qa="calc-slot">
-              <span className="num">第{i + 1}局</span>
-              <span className="calc-slot-val" data-val={s}>{SLOT_LABEL[s]}</span>
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-xs" style={{ color: "var(--fg-faint)" }}>
-          点格子循环：胜 → 和 → 负。6 局轮流换先后手（哪局执黑是事先固定的，不影响记分）。
-        </p>
-
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <span className="num text-lg font-bold" data-qa="calc-rate"
-            style={{ color: "var(--accent-deep)" }}>
-            ({wins} + 0.5×{draws}) / 6 = {score.toFixed(1)} / 6 = {(rate * 100).toFixed(1)}%
-          </span>
-          <span className="banner" style={{
-            borderColor: promoted ? "var(--accent)" : "var(--hairline-strong)",
-            background: promoted ? "var(--accent-wash)" : "var(--card-sunken)",
-            color: promoted ? "var(--accent-deep)" : "var(--fg-muted)",
-          }} data-qa="calc-verdict">
-            {promoted ? "✓ ≥ 55%，晋升！best 易主" : "✗ 不到 55%，现任 best 留任"}
-          </span>
-        </div>
-
-        <div className="l09-ratebar mt-3" data-qa="calc-bar">
-          <i className="l09-ratebar-fill" style={{ width: `${rate * 100}%` }} />
-          <i className="l09-ratebar-line" style={{ left: `${passLine * 100}%` }} />
-          <i className="l09-ratebar-needle" style={{ left: `${rate * 100}%` }} />
-          <span className="num l09-ratebar-tag" style={{ left: `${passLine * 100}%` }}>55% 线</span>
-        </div>
-        <div className="num mt-1 flex justify-between text-xs" style={{ color: "var(--fg-faint)" }}>
-          <span>0%</span><span>50% 五五开</span><span>100%</span>
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="text-xs" style={{ color: "var(--fg-faint)" }}>快捷：</span>
-          {PRESETS.map((p) => (
-            <button key={p.label} type="button" className="btn" data-qa="calc-preset"
-              onClick={() => setSlots(p.slots)}>
-              {p.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="reveal-box mt-4 text-sm leading-relaxed">
-          <strong>无和棋时的运气过线概率 34%：</strong>假设 2 个网络棋力完全相同（每局五五开），
-          纯靠运气至少赢 4 局（含 4 局）的概率 = (C(6,4)+C(6,5)+C(6,6)) / 2⁶ =
-          (15+6+1)/64 ≈ <span className="num">34%</span>。
-        </div>
-        <div className="reveal-box mt-3 text-sm leading-relaxed">
-          公式怎么读：C(6,4) 是「6 局里挑 4 局来赢」，有 15 种挑法（其实等于挑 2 局来输：
-          6×5÷2 = 15，先挑谁后挑谁算同一种，所以除以 2）；C(6,5)=6 种，
-          C(6,6)=1 种，赢 4 局、赢 5 局、赢 6 局 3 种都得算进去。
-          2⁶ 就是 2 连乘 6 次 = 64：每局非赢即输，6 局的全部输赢排法共 64 种。
-          把「至少赢 4 局」的各种排法加起来再除以 64，就是二项概率给的 34%。
-          也就是说，2 个网络一样强，大约每 10 回里有 3 回半会纯靠运气赢到 4 局及以上。
-        </div>
-        <div className="reveal-box mt-3 text-sm leading-relaxed">
-          和棋也算半分：3 胜 1 和 2 负 = 58.3%，一样过线。
-          所以 6 局的晋升线 55% 只比五五开高一档，是工程上的折中，不是强证据；真要证明棋力得打几百局。
-          6 局过线只说明改进回路在运转（能自动换 best），并不说明棋力已足够。
-        </div>
-      </div>
-      <figcaption className="figure-cap">
-        <span className="cap-no">例 15-1</span>
-        计分公式和 ≥55% 判定分别对应 alphagomoku/arena.py 的 play_match 与 alphagomoku/pipeline.py 的 run；
-        真实记录见第 2 轮：挑战者对 best 组 6 比 0 晋升（同轮另有对 baseline 的 6 局；例 15-2 就是对 best 那 6 局里的一局）。
-      </figcaption>
-    </figure>
-  )
+const boxStyle = {
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "var(--hairline)",
+  borderRadius: 8,
+  padding: "0.3rem 0.55rem",
+  minWidth: "5.2rem",
+  textAlign: "center" as const,
+  transition: "opacity 280ms ease, border-color 280ms ease, background 280ms ease",
 }
+const arrow = <span style={{ color: "var(--fg-faint)" }}>→</span>
 
-/* ============ 例 15-2 · 真实晋升赛对局：第 2 轮挑战者（黑）的一胜 ============ */
+function TwoLayerBook() {
+  const [w1, setW1] = useState(W1_0)
+  const [w2, setW2] = useState(W2_0)
+  const [pulse, setPulse] = useState<number | null>(null)
+  const [last, setLast] = useState<{
+    b1: number
+    b2: number
+    n1: number
+    n2: number
+    before: ReturnType<typeof twoLayer>
+    after: ReturnType<typeof twoLayer>
+  } | null>(null)
 
-const ALEN = ARENA.moves.length
-
-function ArenaReplay() {
-  const [step, setStep] = useState(0)
-  const [playing, setPlaying] = useState(false)
-
-  const states = useMemo<GameState[]>(() => {
-    const arr: GameState[] = [emptyBoard()]
-    for (const m of ARENA.moves)
-      arr.push(play(arr[arr.length - 1], m.y * 9 + m.x, m.player as 1 | -1))
-    return arr
-  }, [])
+  const g = twoLayer(w1, w2, X, Z)
+  const dead = g.gate === 0
 
   useEffect(() => {
-    if (!playing) return
-    if (step >= ALEN) {
-      setPlaying(false)
+    if (pulse === null) return
+    const maxStep = dead ? 7 : 9
+    if (pulse > maxStep) {
+      setPulse(null)
       return
     }
-    const t = setTimeout(() => setStep((s) => s + 1), 700)
-    return () => clearTimeout(t)
-  }, [playing, step])
+    const id = window.setTimeout(() => setPulse((p) => (p === null ? null : p + 1)), 320)
+    return () => window.clearTimeout(id)
+  }, [pulse, dead])
 
-  const cur = step < ALEN ? ARENA.moves[step] : null
-  const prev = step > 0 ? ARENA.moves[step - 1] : null
-  const top = cur ? [...cur.top].sort((a, b) => b.visits - a.visits).slice(0, 3) : []
+  const hi = (idx: number) =>
+    pulse === idx
+      ? { borderColor: "var(--accent)", background: "var(--accent-wash)" }
+      : undefined
+
+  const stepOnce = () => {
+    const before = twoLayer(w1, w2, X, Z)
+    const n = twoLayerStep(w1, w2, X, Z)
+    const after = twoLayer(n.w1, n.w2, X, Z)
+    setLast({ b1: w1, b2: w2, n1: n.w1, n2: n.w2, before, after })
+    setW1(n.w1)
+    setW2(n.w2)
+  }
+  const reset = () => {
+    setW1(W1_0)
+    setW2(W2_0)
+    setLast(null)
+  }
+
+  const f2 = (v: number) => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2)
+  const f3 = (v: number) => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(3)
+  const dim = dead ? { opacity: 0.45 } : undefined
+  const w1Lo = Math.min(-1, w1)
+  const w1Hi = Math.max(1, w1)
+  const w2Lo = Math.min(0, w2)
+  const w2Hi = Math.max(3, w2)
 
   return (
     <figure className="figure mt-8">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3 sm:px-5">
-        <span className="mini-label">例 15-2 · 晋升赛实录 · {ARENA.id}（第 2 轮，挑战者执黑）</span>
-        <span className="mini-label num" style={{ color: "var(--accent-deep)" }}>
-          该轮挑战者对 best 6 比 0 全胜（对 baseline 另有 6 局），晋升
-        </span>
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">例 13-1 · 双权重玩具：一层看子数，一层看输赢分</span>
       </div>
-      <div className="flex flex-col gap-5 p-4 sm:flex-row sm:p-5">
-        <div className="min-w-0 flex-1 sm:max-w-[22rem]">
-          <div data-qa="arena-board">
-            <Board
-              board={states[step].board.flat()}
-              lastMove={prev ? { x: prev.x, y: prev.y } : null}
-              marks={step === ALEN && prev ? [{ x: prev.x, y: prev.y, anchor: true }] : undefined}
-            />
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button type="button" className="btn" disabled={step === 0}
-              onClick={() => { setPlaying(false); setStep((s) => Math.max(0, s - 1)) }}>
-              ← 上一手
-            </button>
-            <button type="button" className="btn active" onClick={() => setPlaying((p) => !p)}>
-              {playing ? "⏸ 暂停" : "▶ 自动播放"}
-            </button>
-            <button type="button" className="btn" disabled={step >= ALEN}
-              onClick={() => { setPlaying(false); setStep((s) => Math.min(ALEN, s + 1)) }}>
-              下一手 →
-            </button>
-            <span className="num ml-auto text-sm" style={{ color: "var(--fg-faint)" }}>
-              已下 {step} / {ALEN} 手
-            </span>
-          </div>
-        </div>
+      <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
+        <div className="min-w-0 flex-1 md:max-w-[17rem]">
+          <div className="mini-label">第一层 w₁ = {f2(w1)}（把子数变成中间数 h）</div>
+          <input type="range" min={w1Lo} max={w1Hi} step={0.05} value={w1}
+            onChange={(e) => {
+              setW1(Number(e.target.value))
+              setLast(null)
+            }} aria-label="w1 滑杆"
+            style={{ ["--fill" as string]: `${((w1 - w1Lo) / (w1Hi - w1Lo)) * 100}%` }}
+            data-qa="w1-slider" />
+          <div className="mini-label mt-3">第二层 w₂ = {f2(w2)}（把中间数读成输赢分 r）</div>
+          <input type="range" min={w2Lo} max={w2Hi} step={0.05} value={w2}
+            onChange={(e) => {
+              setW2(Number(e.target.value))
+              setLast(null)
+            }} aria-label="w2 滑杆"
+            style={{ ["--fill" as string]: `${((w2 - w2Lo) / (w2Hi - w2Lo)) * 100}%` }}
+            data-qa="w2-slider" />
+          <p className="mt-1 text-[0.68rem] leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+            滑杆范围随当前值扩展，只用于选起点，不是训练约束；更新后的真实数值照实显示。
+          </p>
 
-        <aside className="w-full sm:w-64 sm:flex-none">
-          {cur ? (
-            <div>
-              <div className="mini-label">
-                第 {step + 1} 手 · 轮到{cur.player === 1 ? "黑（挑战者）" : "白(best)"}下
-              </div>
-              <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-                竞技场每手 30 次模拟（演示配置；比自我对弈的 40 少，开局 5 手按 π 采样）。
-                走到终局时，红色圆环会圈出最后一手。
+          <div className="reveal-box mt-4">
+            <p className="text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+              x = 2（这扇窗里有 2 颗己方子）。x 是窗内己方子数，与第 3 课的三连条数数值同为 2。z = +1（假设训练对局后来我赢）。拖 w₁
+              <strong>穿过 0</strong>：看这道<strong>双权重玩具题</strong>的反向梯度列全部变为 0。
+              ReLU 门关上后，这条路径不会更新。
+            </p>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button type="button" className="btn primary" onClick={stepOnce} data-qa="step-btn-two">
+              走一步(lr = 0.1)
+            </button>
+            <button type="button" className={`btn ${pulse !== null ? "active" : ""}`}
+              onClick={() => setPulse((p) => (p === null ? 0 : null))}>
+              {pulse !== null ? "⏸ 停" : "▶ 演示前向与反传"}
+            </button>
+            <button type="button" className="btn" onClick={reset}>↺ 回到手推例</button>
+          </div>
+          {last && (
+            <div className="reveal-box mt-3 text-xs leading-relaxed" data-qa="step-readout">
+              <div className="mini-label">刚走的一步</div>
+              <p className="num mt-1">
+                w₁ {f3(last.b1)} → {f3(last.n1)}、w₂ {f3(last.b2)} → {f3(last.n2)}
               </p>
-              <div className="mini-label mt-4">π：访问数前三名</div>
-              <ol className="mt-2 space-y-1.5" data-qa="arena-top">
-                {top.map((t) => (
-                  <li key={t.action} className="l00-top-row">
-                    <span className="mono text-sm">({t.x},{t.y})</span>
-                    <span className="prob-track">
-                      <span className="prob-fill" style={{ width: `${t.prob * 100}%` }} />
-                    </span>
-                    <span className="num w-10 flex-none text-right text-sm"
-                      style={{ color: "var(--accent-deep)" }}>
-                      {Math.round(t.prob * 100)}%
-                    </span>
-                  </li>
-                ))}
-              </ol>
-              <p className="num mt-4 text-lg font-bold" style={{ color: "var(--accent-deep)" }}>
-                root_value = {cur.rootValue >= 0 ? "+" : "−"}{Math.abs(cur.rootValue).toFixed(2)}
-                <span className="ml-2 text-sm font-normal" style={{ color: "var(--fg-faint)" }}>
-                  （搜索汇总，{cur.player === 1 ? "黑" : "白"}方视角）
-                </span>
+              <p className="num mt-0.5">
+                玩具原始分数 r {f2(last.before.v)} → {f2(last.after.v)}
+                {last.after.v < Z && last.before.v > Z ? "（跨过了 z=1）" : ""}、
+                损失 {last.before.loss.toFixed(3)} → {last.after.loss.toFixed(3)}
               </p>
-              <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                这是当前这一步、当前行棋方视角的搜索汇总。沿整局看数值变化可以提出问题，
-                但不同棋盘和不同玩家的数不能把它们连成一条线，然后说它一路在变差。
-              </p>
-            </div>
-          ) : (
-            <div className="reveal-box">
-              <div className="mini-label">终局</div>
-              <p className="mt-2 text-sm font-semibold">
-                挑战者（黑）胜。第 {ALEN} 手黑落 {coord(prev!.x, prev!.y)},
-                终局价值直接给出（z 取 +1/−1/0，不再问网络）。
-              </p>
-              <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-                这只是对 best 的 6 局里的一局；该轮对 best 的汇总为 6 比 0，得分率 100% ≥ 55%（对 baseline 另 6 局），
-                所以 best 易主。单看眼前这一局仍不能得出该结论。
+              <p className="mt-1 text-xs" style={{ color: "var(--fg-faint)" }}>
+                {last.after.gate === 0 ? (
+                  <>这一步后 w₁ = {f2(last.n1)}，已落在 ReLU 关门区（≤0）；后续单步不会再沿这条路径更新。把 w₁ 拖回 0 以上可继续。</>
+                ) : (
+                  <>这次更新让损失从 {last.before.loss.toFixed(3)} 变到 {last.after.loss.toFixed(3)}。继续走会沿当前梯度更新；最终是靠近、来回摆还是越过，由两个权重共同决定。</>
+                )}
               </p>
             </div>
           )}
-        </aside>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="mini-label">前向：x → s → h → r（玩具原始分数） → 损失</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2" data-qa="fwd-chain">
+            <div style={{ ...boxStyle, ...hi(0) }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>x 子数</div>
+              <div className="num font-bold">{X}</div>
+            </div>
+            {arrow}
+            <div style={{ ...boxStyle, ...hi(1) }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>s = w₁·x</div>
+              <div className="num font-bold">{g.s.toFixed(2)}</div>
+            </div>
+            {arrow}
+            <div style={{ ...boxStyle, borderColor: dead ? "var(--accent)" : "var(--hairline)", ...hi(2) }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>h = ReLU(s)</div>
+              <div className="num font-bold" style={{ color: dead ? "var(--accent-deep)" : undefined }}>
+                {g.h.toFixed(2)}
+              </div>
+            </div>
+            {arrow}
+            <div style={{ ...boxStyle, ...hi(3) }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>r = w₂·h</div>
+              <div className="num font-bold">{g.v.toFixed(2)}</div>
+            </div>
+            {arrow}
+            <div style={{ ...boxStyle, borderColor: "var(--accent)", ...hi(4) }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>损失 (r−z)²</div>
+              <div className="num font-bold" style={{ color: "var(--accent-deep)" }}>
+                {g.loss.toFixed(3)}
+              </div>
+            </div>
+          </div>
+
+          <div className="mini-label mt-5">反向：损失 → 接力四环 → w₁ 的梯度</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2" data-qa="bwd-chain">
+            <div style={{ ...boxStyle, ...dim, ...hi(5) }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>① 损失对 r</div>
+              <div className="num font-bold">2(r−z) = {g.dv.toFixed(2)}</div>
+            </div>
+            <span style={{ color: "var(--fg-faint)", ...dim }}>×</span>
+            <div style={{ ...boxStyle, ...dim, ...hi(6) }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>② r 对 h</div>
+              <div className="num font-bold">w₂ = {w2.toFixed(2)}</div>
+            </div>
+            <span style={{ color: "var(--fg-faint)", ...dim }}>×</span>
+            <div style={{ ...boxStyle, borderColor: "var(--accent)", ...hi(7) }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>③ 门(s&gt;0 才开)</div>
+              <div className="num font-bold" style={{ color: dead ? "var(--accent-deep)" : undefined }}>
+                {g.gate}
+              </div>
+            </div>
+            <span style={{ color: "var(--fg-faint)", ...dim }}>×</span>
+            <div style={{ ...boxStyle, ...dim, ...hi(8) }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>④ s 对 w₁</div>
+              <div className="num font-bold">x = {X}</div>
+            </div>
+            <span style={{ color: "var(--fg-faint)", ...dim }}>=</span>
+            <div style={{ ...boxStyle, borderColor: "var(--accent)", ...dim, ...hi(9) }}>
+              <div className="text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>w₁ 的梯度</div>
+              <div className="num font-bold" style={{ color: "var(--accent-deep)" }}>
+                {g.dW1.toFixed(2)}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2" data-qa="bwd-w2">
+            <span className="text-xs" style={{ color: "var(--fg-faint)" }}>
+              w₂ 的梯度（只两环：① × h） =
+            </span>
+            <div style={{ ...boxStyle, borderColor: "var(--accent)", ...dim }}>
+              <div className="num font-bold" style={{ color: "var(--accent-deep)" }}>
+                {g.dW2.toFixed(2)}
+              </div>
+            </div>
+          </div>
+
+          {dead ? (
+            <div className="reveal-box mt-4 text-sm leading-relaxed" data-qa="dead-banner"
+              style={{ borderColor: "var(--accent)", color: "var(--accent-deep)" }}>
+              <strong>门关死：梯度全灭。</strong>s 掉到 0 或 0 以下（记号写作
+              s ≤ 0），h=0。w₂ 的梯度恰好乘它前面的 h(0),w₁ 的接力断在
+              第③环（门=0）。在这道<strong>双权重玩具题</strong>里，两个权重都
+              <strong>收不到梯度</strong>：损失明明是 {g.loss.toFixed(2)}，却没有一个权重知道该动。
+              演示里的「拖回」是你在拖滑杆。
+            </div>
+          ) : (
+            <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+              接力链四环相乘：{g.dv.toFixed(2)} × {w2.toFixed(2)} × 1 ×{" "}
+              {X} = {g.dW1.toFixed(2)}(w₁ 的梯度)。每一环都是「那边调一点点，
+              这边变多少」。反向传播就是把第 3、4 课的变化率沿网络
+              反向乘了一遍。
+            </p>
+          )}
+        </div>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">例 15-2</span>
-        {ARENA.id}，共 {ALEN} 手，黑胜。局面由引擎逐手重建，π 与 root_value 读取真实竞技场记录；
-        root_value 是搜索汇总的记录值，不是训练时重新计算的 v_net。播放下一手前先预测 top 访问点会落在哪，再推进验证。
+        <span className="cap-no">例 13-1</span>
+        前向与反向同一套数(learn/src/lib/foundations.ts 的{" "}
+        <span className="mono">twoLayer</span>)：拖任何一个权重，两个梯度同时更新。
+        「走一步」走的是真训练的同一条主线 w ← w − lr×梯度（真训练还带动量与权重衰减），玩具把 lr 取 0.1
+        （真实配置是 0.01）；滑杆只选起点，不是权重约束。手推例的数字(3、1、0.25)和正文里的算式一个数都不差。
       </figcaption>
     </figure>
   )

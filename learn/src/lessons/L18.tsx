@@ -23,7 +23,7 @@ const ROUTES: RouteCard[] = [
     question: "训练到哪一轮、损失怎样变化？",
     channel: "先 GET /api/status、/api/config、/api/metrics，再接收 WebSocket 增量交付的 status 与 events 帧",
     source: "status.json、config.json、metrics.jsonl、events.jsonl",
-    result: "网页先拿完整快照，再用实时消息补上变化。",
+    result: "网页先拿首屏快照，再用实时消息补上变化。",
   },
   {
     view: "直播 Live",
@@ -68,7 +68,7 @@ export default function L18() {
         chain={[
           "训练器把事实写进 run 目录",
           "server 读取文件并管理训练器与对战会话",
-          "REST（一次取全量快照）交付完整快照，WebSocket（同一条连接逐帧推送）负责增量交付",
+          "REST 交付可重读的快照（列表可分页），WebSocket（同一条连接逐帧推送）负责增量交付",
           "React 各页面按用途组合这些数据，但不参与训练更新",
         ]}
         takeaway="你能接线一条 REST 与 WebSocket 的数据通路，验收网页上每个数字的来源，并指出 run 目录是唯一事实来源、浏览器不直接碰训练器。"
@@ -92,65 +92,33 @@ export default function L18() {
         ]}
       />
 
+      <ServiceMap />
+
       <div className="prose mt-10">
-        <h3>一个 server 承担的几种工作</h3>
+        <h3>server 只做转手，不替训练器训练</h3>
         <p>
-          浏览器和训练器之间没有直接通道，中间隔着一个 server。它不替训练器训练，
-          只做三件事：转达控制命令、交出可重复读取的快照、推送刚发生的变化。
-          数据的起点始终是 run 目录，server 的职责是把这些文件变成网页取得到的形式。
+          浏览器和训练器之间没有直接通道，中间隔着一个 server。训练数据的通道上，它不替训练器训练，
+          只做三件事：转达控制命令、交出可重复读取的快照、推送刚发生的变化。数据的起点始终是 run 目录；
+          人机对战则另走一条独立会话支线。
         </p>
         <p>
-          第一种是控制训练器。网页向 <span className="mono">POST /api/control</span>
-          发送 start、pause、resume 或 stop。四个动作都先把命令写进
-          <span className="mono">control.json</span>（文件里只有 run、pause、stop 三个值：start 与 resume 都写 run）；start 写完 run 命令才启动训练器，
-          pause 和 resume 只写命令。训练器读命令的时机分两种：pause 和 run（继续）只在轮边界这类稳定点生效，
-          stop 在自我对弈的下棋途中也会每隔一会儿查看一次。判断训练器是否真的活着也不能只看一个旧文件，
-          server 会结合它启动的那个进程的状态与新鲜心跳。stop 写完命令后，server 等训练器自己收尾，最多等 10 秒；等不到收尾完成才代为结束进程。
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="写入控制命令，并在 stop 时最多等待 10 秒让训练器收尾"
-          source="server/app.py · post_control"
-        >
-          <div className="codewalk">
-            <pre>{`                storage.write_control("run")
-                cmd = [sys.executable, "-m", "alphagomoku.trainer", "--run", str(storage.root)]
-                state["trainer_proc"] = spawn_fn(cmd, cwd=str(REPO_ROOT))
-        elif body.action == "pause":
-            storage.write_control("pause")
-        elif body.action == "resume":
-            storage.write_control("run")
-        else:  # stop
-            storage.write_control("stop")
-            proc = state["trainer_proc"]
-            if proc is not None and proc.poll() is None:
-                deadline = time.monotonic() + STOP_TIMEOUT
-                while time.monotonic() < deadline and proc.poll() is None:
-                    time.sleep(0.1)
-                if proc.poll() is None:
-                    proc.terminate()
-        return build_status()`}</pre>
-          </div>
-        </EvidenceCard>
-        <p className="mt-3">
-          模块顶部的 <span className="mono">STOP_TIMEOUT = 10.0</span> 定义了最多 10 秒的收尾等待时间，
-          循环每 0.1 秒检查一次 <span className="mono">proc.poll()</span>，超时仍未退出才调用{" "}
-          <span className="mono">proc.terminate()</span>。
-        </p>
-        <p>
-          这套接线的代码骨架：<span className="mono">server/</span> 目录下
-          <span className="mono">app.py</span> 定义路由与静态托管，
-          <span className="mono">play.py</span> 管理人机对战会话，
-          <span className="mono">tail.py</span> 尾读历史文件；网页端读 REST 快照、订 WebSocket 增量，
-          按 hash（地址栏井号后面的那一段）选页。启动有两种：<span className="mono">scripts/dev.sh</span>
-          （server、trainer、vite 一起起，开发用）和 <span className="mono">scripts/start.sh</span>
-          （先构建 web，单进程在 :8000 同时供 API 与页面，验收用）。
+          控制走反方向：网页把 start、pause、resume 或 stop 发给
+          <span className="mono">POST /api/control</span>，server 先写
+          <span className="mono">control.json</span>，训练器在稳定点读取。文件的三个值只有
+          <span className="mono">run / pause / stop</span>，其中 start 与 resume 都写成 run。
+          判断训练器是否活着，可以看进程状态，也可以看 run 目录里新鲜的心跳。
         </p>
         <Def term="REST" en="Representational State Transfer">
-          网页按固定地址向 server 问一份完整数据的取用方式。每次请求拿到的是当前完整答案，
-          刷新页面可以重新取一遍。本项目的 <span className="mono">/api/status</span>、
+          网页按固定地址向 server 取数据的接口风格。每次请求拿到一份可重读的当前结果，
+          列表端点可以分页；刷新页面能重新取一遍。本项目的 <span className="mono">/api/status</span>、
           <span className="mono">/api/metrics</span>、<span className="mono">/api/games</span> 等都走这条路。
         </Def>
+        <p>
+          代码分工也很直接：<span className="mono">server/app.py</span> 定义路由与静态托管，
+          <span className="mono">server/play.py</span> 管理人机对战会话，
+          <span className="mono">server/tail.py</span> 追读历史文件。React 端按 hash 选页，
+          只消费 REST 快照与 WebSocket 增量。
+        </p>
       </div>
 
       <div className="prose mt-10">
@@ -177,20 +145,8 @@ export default function L18() {
           <span className="mono">history</span>，再补一份当前 <span className="mono">status</span>；
           这条连接此后主要用来发现断开，新增消息由后台追读循环广播。
         </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="WebSocket 连接建立时先发送最近 50 条历史事件与当前状态"
-          source="server/app.py · ws"
-        >
-          <div className="codewalk">
-            <pre>{`            await hub.send(websocket, {"type": "history", "events": storage.read_events(tail=50)})
-            await hub.send(websocket, {"type": "status", "status": build_status()})
-            while True:
-                await websocket.receive_text()  # client never talks; detects disconnect`}</pre>
-          </div>
-        </EvidenceCard>
         <p>
-          REST 回答「现在完整是什么样」，WebSocket 回答「刚刚多了什么」，两件事分开做。
+          REST 回答「现在是什么样」，WebSocket 回答「刚刚多了什么」，两件事分开做。
           为什么不用单一方案：纯轮询 REST 最简单，但空转多、延迟不可控；纯 WebSocket 一刷新就丢历史，
           还得自己造快照协议；快照加增量让刷新可重建、增量低开销。status 既可 GET 也可推送，
           是刻意冗余：GET 喂首屏，推送喂直播；指标走 REST，是因为曲线页不需要逐秒更新。
@@ -257,27 +213,7 @@ export default function L18() {
           不训练、不更新；同一份权重按文件修改时间缓存复用。
         </Def>
         <p>
-          模型文件很大，server 加载一次就先放着备用：它记住文件上次修改的时间，时间没变就接着用，
-          变了才重新加载。
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="按检查点文件修改时间缓存并复用预测器"
-          source="server/play.py · PlayManager.get_predictor"
-        >
-          <div className="codewalk">
-            <pre>{`        mtime = path.stat().st_mtime
-        with self._lock:
-            cached = self._cache.get(name)
-            if cached is not None and cached[0] == mtime:
-                self._cache.move_to_end(name)
-                return cached[1]
-        net, _meta = load_checkpoint(str(path), self.device)
-        pred = Predictor(net, self.device)`}</pre>
-          </div>
-        </EvidenceCard>
-        <p>
-          每次 AI 落子创建一棵不加根噪声的搜索树（见第 11 课），取访问数最多的动作。
+          每次 AI 落子创建一棵不加根噪声的搜索树，取访问数最多的动作。
           会话保存在 server 内存的 <span className="mono">self._sessions</span> 与{" "}
           <span className="mono">session.moves</span> 内，既不写入回放池，也不会借用或暂停训练器正在进行的搜索。
         </p>
@@ -322,62 +258,38 @@ export default function L18() {
       <div className="prose mt-10">
         <h3>两种「浏览器里下棋」：做法对齐，结果不逐位相同</h3>
         <p>
-          生产 Web 的 Play 页把请求交给 server，由 Python 加载的检查点与 Python 写的
-          蒙特卡洛树搜索应手。两边遵守同一套棋盘、网络和搜索约定，但小数位数、随机数、一次算几局和预算都不同，
-          所以只能说约定一致、做法对齐，不能保证每次搜索路径和每个小数完全相同。
-          本教学站的浏览器沙盒则为了离线和速度，在浏览器里运行一份用 TypeScript 重写的镜像实现（与 Python 端逐层对拍过），
-          只保留五位小数的权重和较小的搜索预算。
+          生产 Web 的 Play 页把请求交给 server，由 Python 加载检查点、运行 Python 写的蒙特卡洛树搜索。
+          两边遵守同一套棋盘、网络和搜索约定，但权重精度、随机数、预算都不同，所以只能保证约定一致、做法对齐，
+          不能保证搜索路径与每个小数逐位相同。本教学站为离线和速度，在浏览器里运行一份 TypeScript 镜像实现
+          （与 Python 端逐层对拍过），加载五位小数权重并使用较小的搜索预算。
         </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="导出教学站权重时将浮点数四舍五入到五位小数"
-          source="learn/scripts/export_weights.py · export"
-        >
-          <div className="codewalk">
-            <pre>{`        "tensors": {
-            k: [round(float(x), 5) for x in v.reshape(-1)]
-            for k, v in ckpt["state_dict"].items()
-        },`}</pre>
-          </div>
-        </EvidenceCard>
       </div>
 
-      <Ledger title="server/app.py、server/play.py 与 web/src/App.tsx · 三层服务边界">
-        <EvidenceCard
-          fidelity="constructed"
-          title="三层边界总览：服务端 REST 与 WebSocket 路由、独立人机对战会话、前端哈希路由"
-          source="server/app.py · create_app、server/play.py · PlayManager 与 web/src/App.tsx · useHashRoute"
-        >
-          <div className="codewalk">
-            <pre>{`# server/app.py · create_app · REST 快照、控制命令与 WebSocket 增量
-GET  /api/status, /api/metrics, /api/games, /api/games/{game_id},
-     /api/checkpoints, /api/config, /api/play/{sid}
-POST /api/control, /api/play/new, /api/play/{sid}/move, /api/play/{sid}/step
-PUT  /api/config
-WS   /ws  → history + events + status
-
-# server/play.py · PlayManager · 按修改时间缓存预测器，每手建无噪声搜索树
-pred = self.get_predictor(session.checkpoint)
-tree = SearchTree(game, cfg, add_noise=False, rng=self._rng)
-action = tree.best_action()
-
-# web/src/App.tsx · useHashRoute · 五个页面按用途消费快照与增量
-#/       → Dashboard(events, status, connected)
-#/live   → Live(events, status)
-#/games  → Games()     #/games/:id → Replay(id)
-#/play   → Play()`}</pre>
-          </div>
-        </EvidenceCard>
-        <p className="mt-3">
-          运行 <span className="mono">python -m pytest tests/test_server.py -q</span> 可验证控制命令落盘与心跳判定；
-          运行 <span className="mono">scripts/dev.sh</span> 即可启动本地服务与前端页面。
-        </p>
+      <Ledger title="server/app.py · create_app 与服务启动验证">
+        <ul className="ml-5 list-disc space-y-1.5">
+          <li>
+            <span className="mono">server/app.py · create_app</span>：以 run 目录为根组装 FastAPI，
+            提供状态、配置、指标和对局 REST 端点，承接控制命令与 WebSocket 推送，并挂载前端静态文件。
+          </li>
+          <li>
+            <span className="mono">server/tail.py · EventTail</span>：按字节偏移追读{" "}
+            <span className="mono">events.jsonl</span>，只广播完整行，并周期推送状态快照。
+          </li>
+          <li>
+            <span className="mono">server/play.py · PlayManager</span>：按检查点建立独立对战会话，
+            用无根噪声的搜索树应手，不写回放池或训练器状态。
+          </li>
+          <li>
+            验证：<span className="mono">python -m pytest tests/test_server.py -q</span>；
+            启动：<span className="mono">scripts/dev.sh</span>。
+          </li>
+        </ul>
       </Ledger>
 
 
       <ChapterEnd
         summary={[
-          "浏览器与训练器不共享内存：训练器写 run 目录，server 读文件再转手，REST 交完整快照、WebSocket 推新增消息。",
+          "浏览器与训练器不共享内存：训练器写 run 目录，server 读文件再转手，REST 交可重读快照、WebSocket 推新增消息。",
           "控制命令反向走同一个边界：网页发 start/pause/resume/stop，server 写 control.json，训练器在安全位置读取；人机对战另开预测器会话，不写入回放池。",
           "页面名字不是事实来源；每个真实结论都要沿 API 或 WebSocket 帧追到 run 产物。教学站沙盒与生产 Web 约定一致、做法对齐，但不保证逐位相同。",
         ]}
@@ -395,7 +307,7 @@ action = tree.best_action()
           {
             q: "总览页为什么同时使用 REST 和 WebSocket？",
             options: [
-              "REST 拿可重读的完整快照，WebSocket 补刚发生的事件和状态变化",
+              "REST 拿可重读的快照（列表可分页），WebSocket 补刚发生的事件和状态变化",
               "REST 只管浅色主题，WebSocket 只管深色主题",
               "两者内容永远完全重复，任意删一个都没有区别",
             ],
@@ -428,6 +340,66 @@ action = tree.best_action()
         ]}
       />
     </section>
+  )
+}
+
+/* ============ 服务边界总览：训练事实和网页之间隔着什么 ============ */
+
+function ServiceMap() {
+  return (
+    <figure className="figure mt-8" data-qa="service-map">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">结构图 · 训练事实走到网页的整条路</span>
+      </div>
+      <div className="p-4 sm:p-5">
+        <div className="service-map" aria-label="训练器、run 目录、FastAPI 与 React 的数据通路">
+          <div className="service-node trainer">
+            <span className="service-kicker">写入者</span>
+            <strong>训练器</strong>
+            <small>自我对弈 · 训练 · 竞技场</small>
+          </div>
+          <div className="service-link"><span>写</span><i>→</i></div>
+          <div className="service-node rundir">
+            <span className="service-kicker">唯一事实源</span>
+            <strong>run/</strong>
+            <div className="service-files mono">
+              <span>status.json</span>
+              <span>events.jsonl</span>
+              <span>metrics.jsonl</span>
+              <span>games/</span>
+              <span>checkpoints/</span>
+              <span>control.json</span>
+            </div>
+          </div>
+          <div className="service-link"><span>读</span><i>→</i></div>
+          <div className="service-node server">
+            <span className="service-kicker">服务边界</span>
+            <strong>FastAPI</strong>
+            <div className="service-channels">
+              <span><b>REST</b> 快照 / 分页</span>
+              <span><b>WS</b> 增量事件</span>
+              <span><b>Play</b> 独立会话</span>
+            </div>
+          </div>
+          <div className="service-link"><span>HTTP / WS</span><i>→</i></div>
+          <div className="service-node react">
+            <span className="service-kicker">读取者</span>
+            <strong>React</strong>
+            <small>Dashboard · Live<br />Games · Replay · Play</small>
+          </div>
+        </div>
+        <div className="service-backflow">
+          <span>控制回程</span>
+          网页 → <span className="mono">POST /api/control</span> → FastAPI 写 <span className="mono">control.json</span>
+          → 训练器在轮边界读取
+        </div>
+      </div>
+      <figcaption className="figure-cap">
+        <span className="cap-no">结构图</span>
+        所有训练事实先经过 run 目录，再由 server 转成 HTTP 或 WebSocket 消息；React 只组合这些数据。
+        图中的 Play 会话读取检查点，但不会把棋局写回训练器。
+      </figcaption>
+    </figure>
   )
 }
 

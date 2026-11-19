@@ -9,6 +9,7 @@ import { SearchTree, type MctsConfig } from "../engine/mcts"
 import { Quiz } from "../framework/quiz"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd } from "../framework/def"
+import { CAPSTONE } from "../framework/study-system"
 import { loadWeights } from "../lib/weights"
 
 const SIMS = 20 // 每手 20 次模拟（比训练时的 40 少一半，网页上 <1 秒）
@@ -25,7 +26,7 @@ const GRADUATION_DIAGNOSTIC = [
       "两者一定相同，因为网络权重没有变",
     ],
     answer: 1,
-    explain: "搜索预算像多给一点思考时间：它会带来更多访问分布 π，常能纠正第一印象，却不能把错误的先验（网络第一眼给出的判断 P，参见：第 10 课）或漏看的变化变成必然正确。比较棋力仍要看受控对战的累积证据。",
+    explain: "搜索预算像多给一点思考时间：它会带来更多访问分布 π，常能纠正第一印象，却不能把错误的先验（网络第一眼给出的判断 P）或漏看的变化变成必然正确。比较棋力仍要看受控对战的累积证据。",
   },
   {
     q: "把一条训练样本的棋盘顺时针转 90°，却把策略目标 π 原封不动。最先出了什么问题？",
@@ -80,10 +81,10 @@ export default function Graduation() {
           "和一台机器下一局：权重是真实导出的，搜索也真实跑在浏览器里，记录它的决策痕迹",
           "沿系统图逐环说明每个数从哪里来、经过了谁",
           "分清 v_net、root_value、z 各自回答什么问题",
-          "在四道换了情境的诊断题里，定位断链并指认该改哪处代码",
+          "让导师用四个毕业诊断逐个追问：在换了情境的局面里定位断链，并指认该改哪处代码",
         ]}
-        takeaway="你能独立开发并修通一条完整的 alpha-棋类：写出核心模块、配置一次训练、按验收标准判断它是否真的变强，并把一处断链修通。"
-        boundary="本章不再引入新机制，只做四件事：下完一局、查清一条链、定位四个断点、以出师任务三件收官。"
+        takeaway="你能独立开发并修通一套完整的五子棋 AI：写出核心模块、配置一次训练、按验收标准判断它是否真的变强，并把一处断链修通。"
+        boundary="本章不再引入新机制，只做四件事：下完一局、查清一条链、定位四个断点、用一次规则迁移项目收官。"
       />
 
       <Quiz
@@ -127,7 +128,7 @@ export default function Graduation() {
             <li>
               <strong>训练目标要带来新增、尽量可靠的信息；价值目标还要是真值。</strong>
               搜索后的 π 记下了推演过程，那是「不搜索、只看一眼」的网络看不见的。它通常是更丰富的目标；
-              但预算有限、先验（见上方定义框）会错，它不是永远更准的答案。
+              但预算有限、网络先验 P（第一眼判断）会错，它不是永远更准的答案。
               价值标签更挑剔：z 是终局事实，root_value 和 v_net 都只是估计，拿估计当标签等于自己教自己，
               估计里的偏差会被原样写进权重
               (<a href="#/l12">自我对弈样本课</a>)。
@@ -163,7 +164,7 @@ export default function Graduation() {
             <li>指出网络直接给出的 <span className="mono">v_net</span>、搜索汇总的
               <span className="mono">root_value</span> 与终局结果 <span className="mono">z</span> 为什么不能混用。</li>
             <li>沿系统图说明这局实时浏览器对局与训练器的差别：这里预算更小、权重只留五位小数、没有根噪声、单局顺序搜索、没有训练写盘。</li>
-            <li>完成下方四个诊断，并用「因为……所以……」说出断链位置。</li>
+            <li>让导师逐个追问四个毕业诊断，并用「因为……所以……」说出断链位置。</li>
           </ol>
         </div>
       </section>
@@ -171,7 +172,7 @@ export default function Graduation() {
       <div className="prose mt-10">
         <h3>带走一张开发地图</h3>
         <p>
-          alpha-棋类 的每个模块，你都已经在某一课对证过它的入口。合起来就是这张图：
+          这套五子棋 AI 的每个模块，你都已经在某一课对证过它的入口。合起来就是这张图：
         </p>
         <table className="l09-table">
           <thead><tr><th>模块</th><th>职责</th><th>你在哪课写过</th></tr></thead>
@@ -188,13 +189,15 @@ export default function Graduation() {
             <tr><td className="mono">server/ / web/</td><td>REST 与 WebSocket、人机对战会话、页面消费</td><td>第 18 课</td></tr>
           </tbody>
         </table>
+        <h3>出师项目：{CAPSTONE.title}</h3>
+        <p>{CAPSTONE.goal}</p>
+        <p><strong>交付：</strong>{CAPSTONE.deliverable}</p>
+        <ul>
+          {CAPSTONE.acceptance.map((item) => <li key={item}>{item}</li>)}
+        </ul>
         <p>
-          出师任务三件，不再给选项：①用 <span className="mono">configs/fast.json</span> 跑满 4 轮，
-          把每轮的样本数、两笔损失、得分率填成一张自己的表；②改一个配置
-          （每手模拟数、每轮更新步数 <span className="mono">train_steps</span> 或根噪声掺入比例 ε 任选），
-          预测它会先动哪个指标，再跑一轮对拍；
-          ③故意弄坏一处不变量（比如让 π 的分母取本轮预算），从指标或棋谱里找出破绽并修好。
-          三件都能独立完成，你就具备了开发下一个棋类人工智能项目的全部环节。
+          前面四个毕业诊断只检查你能不能在新局面里定位断链；它们不替代这次迁移项目。
+          做完规则改动后，把测试、一轮 pipeline 的对拍结果和至少一局受控对战的证据交给导师追问。
         </p>
         <h3>毕业词</h3>
         <p>
@@ -215,13 +218,13 @@ export default function Graduation() {
         summary={[
           "一局沙盒棋可以把 action、v_net、root_value、π、z 全部现场对上：网络给第一眼判断，搜索给汇总，终局给答案。",
           "全系统图上半是局面到搜索结果，下半是样本到证据；每个节点都能回到教它的那一课。",
-          "六个结论随身带走：归纳偏置、视角约定、训练目标的信息量、损失与对战的分工、对称性、反向传播。",
-        ]}
+              "六个结论随身带走：归纳偏置、视角约定、训练目标的信息量、损失与对战的分工、对称性、反向传播。",
+            ]}
         next={
           <>
-            全书正文到此结束。带着这套模块认知，下一步就是用仓库骨架开发你自己的 alpha-棋类。
-            仓库中的介绍站（explainer/）与 learn/archive/ 下的讲义是同一套事实的长文版
-            （讲义按主题命名，与十八课不一一对应），不再补新知识，只方便日后按主题查找。
+            全书正文到此结束。带着这套模块认知，下一步就是用仓库骨架开发你自己的 AlphaZero 式棋类 AI。
+            仓库中的介绍站（explainer/）与 learn/archive/ 下的讲义可按主题深读；archive/
+            是冻结的旧版长文，课号与交互参数可能早于主线，冲突时以当前课程和源码为准。
           </>
         }
       />

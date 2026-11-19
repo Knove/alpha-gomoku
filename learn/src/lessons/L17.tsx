@@ -68,112 +68,35 @@ export default function L17() {
         <h3>文件里的证据说了算</h3>
         <p>
           训练器 <span className="mono">trainer</span> 产生棋局、样本、指标和网络权重，
-          因此它是主要写入者。服务器不训练另一份网络；它读取同一个工作目录，再把结果交给浏览器。
-          这个装着一次训练全部运行文件的文件夹叫 run 目录，它是训练器与 server 之间唯一的事实来源。
+          是主要写入者；服务器不训练另一份网络，只读取同一个工作目录，再把结果交给浏览器。
         </p>
-        <Def term="训练器" en="trainer">
-          负责跑训练循环的那个程序，代码里叫 <span className="mono">trainer</span>：
-          产生棋局、样本、指标和网络权重，往 run 目录里写。它与 server 分工明确：
-         训练器写、server 读。本课起统一称「训练器」；代码标识与文件名里的 trainer 原样保留。
-        </Def>
-        <Def term="run 目录" en="run directory">
-          一次训练运行的工作文件夹，装下配置、状态、事件、指标、对局、回放池和检查点。
-         训练器往里写，server 从里读；网页上的每个真实结论都应能沿这条链回到其中某个文件。
+        <Def term="训练器与 run 目录" en="trainer & run directory">
+          训练器是跑训练循环、产生对局、样本、指标和权重的程序；run 目录是一次训练的全部运行文件所在的文件夹。
+          训练器把这些事实写进 run 目录，它既是训练器与 server 的唯一交接面，也是网页上每个真实结论最终要追到的证据。
         </Def>
         <p>
-          控制按钮走的是反方向：平时是训练器写、server 读；这里是 server 把
-          <span className="mono">run / pause / stop</span> 写进 <span className="mono">control.json</span>。config.json 也由 server 写（首次 start 且尚无 config.json 时，拷入启动配置或默认值）。训练器只在缺 config.json 时自行播种一次（用 --config 或默认值），其余时候不再改它。网页改配置（PUT）要求训练器不在运行，改完对随后启动的训练器生效。
-          <span className="mono">run</span> 在这里是「继续训练」这条命令，不是 run 目录。
-          训练器启动时会先把 run 写进 <span className="mono">control.json</span>，作为默认命令。
-          训练器读命令的时机分两种。pause 和 run 只在轮边界这类稳定点生效（run 就是继续训练；网页按钮叫 resume，写进 control.json 的值是 run）。
-          stop 在自我对弈的下棋途中也会每隔一会儿查看一次（竞技场不查：固定局数的评估中途不打断）。
+          控制命令走反方向：server 把 <span className="mono">run / pause / stop</span> 写进
+          <span className="mono">control.json</span>，训练器在轮边界读取；只有 stop 会在自我对弈途中也检查，
+          让它不必等完整个对局批次。这里的 <span className="mono">run</span> 是「继续训练」，不是 run 目录。
         </p>
         <p>
-          为什么不用一个超级大文件？当前状态只要最新一份，历史事件要保留每一条，
-          棋谱要能按编号单独打开，回放池和网络权重又是很大的数据文件（不是文字，直接打开看不懂）。
-          分开保存后，每类事实使用适合自己的写法，server 也不必为了读一个状态而加载全部历史。
+          为什么不用一个超级大文件？当前状态只要最新一份，历史要逐条保留，棋谱要能按编号单独打开，
+          回放池和权重又很大。拆开后，每类事实可以选择自己的写法，读取一个状态也不必加载全部历史。
         </p>
         <ArtifactTable />
 
-        <h3>两个整份保存的文件各带一张键表</h3>
-        <p>
-          两个整份保存的文件，照着写时要知道里面有哪些键。
-          <span className="mono">buffer.npz</span> 是回放池快照，装四个数组：
-          <span className="mono">boards</span>（int8，容量×9×9 的规范视角棋盘）、
-          <span className="mono">pis</span>（float32，容量×81）、
-          <span className="mono">players</span> 与 <span className="mono">zs</span>（int8，各容量长），
-          连同棋盘边长 <span className="mono">n</span> 与环形游标{" "}
-          <span className="mono">size / pos</span> 一共七个键，一次写进{" "}
-          <span className="mono">buffer.npz</span>。
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="回放池快照一次性保存七个键"
-          source="alphagomoku/replay.py · ReplayBuffer.save"
-        >
-          <div className="codewalk">
-            <pre>{`    def save(self, path: str | Path) -> None:
-        np.savez_compressed(
-            path,
-            n=np.int64(self.n),
-            size=np.int64(self.size),
-            pos=np.int64(self.pos),
-            boards=self.boards,
-            pis=self.pis,
-            players=self.players,
-            zs=self.zs,
-        )`}</pre>
-          </div>
-        </EvidenceCard>
-        <p>
-          检查点（<span className="mono">checkpoint</span>）是 torch 字典四个键：
-          <span className="mono">state_dict</span>（权重）、<span className="mono">config</span>
-          （棋盘、通道、块数）、<span className="mono">train_config</span>（整份训练配置）与
-          <span className="mono">meta</span>（轮号等说明）。检查点保存时先写入{" "}
-          <span className="mono">.tmp</span> 临时文件，再调用 <span className="mono">os.replace</span>{" "}
-          一次替换，而 <span className="mono">buffer.npz</span> 直接写入目标路径（第 16 课的崩溃边界）。
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="检查点包含四个顶层键，先写临时文件再原子替换"
-          source="alphagomoku/model.py · save_checkpoint"
-        >
-          <div className="codewalk">
-            <pre>{`def save_checkpoint(net: AlphaGomokuNet, cfg_dict: dict, path: str, meta: dict | None = None) -> None:
-    """Atomic checkpoint write (tmp file + rename): the server process may read
-    the same path at any moment, and a torn torch.save would corrupt it."""
-    import os
-
-    tmp = f"{path}.tmp"
-    torch.save(
-        {
-            "state_dict": net.state_dict(),
-            "config": {
-                "board_size": net.n,
-                "channels": net.channels,
-                "res_blocks": net.res_blocks,
-            },
-            "train_config": cfg_dict,
-            "meta": meta or {},
-        },
-        tmp,
-    )
-    os.replace(tmp, path)`}</pre>
-          </div>
-        </EvidenceCard>
-
         <h3>快照整份替换，历史末尾追加</h3>
         <p>
-          只存最新状态的文件需要整份替换。假如训练器直接覆盖
-          <span className="mono">status.json</span>，server 可能恰好读到只写了一半的 JSON，看到的就是半份。
-          项目先把完整内容写到带进程号和线程号的独立临时文件，再调用 <span className="mono">os.replace</span> 一次换上。
+          当前状态只保留最新一份，所以整个文件换新。假如直接覆盖 <span className="mono">status.json</span>，
+          server 可能正好读到写了一半的 JSON。项目先把完整内容写进独立的临时文件，再用
+          <span className="mono">os.replace</span> 一次换上；读到的不是旧完整版本，就是新完整版本。
         </p>
         <div className="formula">
           快照：写完 <span className="hl">file.tmp</span> → 一次 replace → 正式文件
         </div>
         <p>
-          历史类文件需要末尾追加。<span className="mono">events.jsonl</span> 和
-          <span className="mono">metrics.jsonl</span> 是一种叫 JSONL 的文件，新事实只加在末尾，旧历史不会被覆盖。
+          历史恰好相反：<span className="mono">events.jsonl</span> 与 <span className="mono">metrics.jsonl</span>
+          只把新事实接到末尾，旧行不动。每次追加一行，是在已有历史后面接一条，而不是重写整份历史。
         </p>
         <EvidenceCard
           fidelity="runtime-exact"
@@ -222,15 +145,12 @@ export default function L17() {
           </div>
         </EvidenceCard>
         <Def term="JSONL" en="JSON Lines">
-          每一行都是一个完整 JSON 对象的文本文件格式。行与行彼此独立，追加一行就多一行 JSONL 记录；
-          读取器按行解析，单行损坏只影响那一行。适合事件、指标这类「只增不改」的历史。
-          一份打包里有几个字段照写：以本项目的指标记录为例，一行含 17 个字段：轮号、总损失、
-          策略与价值两笔分损失、策略熵、学习率、本轮与累计局数、本轮与累计样本数、回放池量、
-          自我对弈与训练两段用时、对当前最佳与对基线两组竞技场汇总、当前最佳轮号、时间戳。
+          每一行都是一个完整 JSON 对象的文本格式。行与行彼此独立，适合事件、指标这类只增不改的历史；
+          读取器按行解析，单行损坏只影响那一行。
         </Def>
         <p>
-          如果进程恰好在最后一行写到一半就中断，读取器跳过无法解析的破损尾行，前面的
-          完整行仍然可信；它跳过坏行，不去猜补缺失内容。
+          进程若在最后一行写到一半就中断，读取器跳过无法解析的破损尾行，前面的完整行仍然可信。
+          破损内容不会被猜补成一条「差不多」的记录。
         </p>
         <EvidenceCard
           fidelity="runtime-exact"
@@ -256,9 +176,8 @@ export default function L17() {
         <h3>文件名自带身份：sp、ar、ab</h3>
         <p>
           <span className="mono">sp_</span> 表示 self-play；<span className="mono">ar_</span> 表示挑战者
-          （当前轮训出的网络）对 best（现任最强网络）；<span className="mono">ab_</span> 表示挑战者对
-          冻结基线（对照用的固定网络）。三类前缀还能防止不同对手的对局互相覆盖。
-          前缀后面的六位数是训练轮次，三位数是该轮中的对局编号。因此{" "}
+          对 best；<span className="mono">ab_</span> 表示挑战者对 baseline。
+          前缀后面的六位数是训练轮次，三位数是该轮中的对局编号，因此{" "}
           <span className="mono">sp_000003_000</span> 不打开也能先读作
           「第 3 轮第 0 局自我对弈」。
         </p>
@@ -285,18 +204,14 @@ export default function L17() {
 
         <h3>心跳报告存活，锁防住双写</h3>
         <p>
-          训练器每写一次 <span className="mono">status.json</span> 就盖上当时的时间（心跳间隔约 2 秒，见上方{" "}
-          <span className="mono">write_status</span> 中的 <span className="mono">status["heartbeat"] = time.time()</span>），
-          隔一会儿报告一次。
+          训练器每次写 <span className="mono">status.json</span>，都会盖上一个当时的时间戳。
         </p>
         <Def term="心跳" en="heartbeat">
-          状态文件里每次写入都更新的时间戳。它够新，说明写入者最近还活着；
-          服务器把「心跳是否新鲜」和「状态字段是否仍在运行」合起来判断，避免被过期状态骗过。
+          状态文件里每次写入都更新的时间戳。时间够新，说明写入者最近还活着。
         </Def>
         <p>
-          server 判断存活看两样：心跳时间是否够新，以及 state 是否仍为 running 或 paused，
-          避免把刚停止却留下新心跳的训练器误判成运行中。server 认 10 秒内的心跳为新鲜
-          「我还活着」。
+          server 同时看两件事：心跳是否在 10 秒内，以及 state 是否仍为 running 或 paused。
+          只看其中一个，会漏掉「刚写完心跳就退出」或「旧状态还写着运行」。
         </p>
         <EvidenceCard
           fidelity="runtime-exact"
@@ -314,13 +229,11 @@ export default function L17() {
           </div>
         </EvidenceCard>
         <p className="mt-3">
-          模块顶部的 <span className="mono">HEARTBEAT_MAX_AGE = 10.0</span> 定义了 10 秒新鲜度窗口，
-          心跳未超时且 <span className="mono">state</span> 为 <span className="mono">running</span> 或{" "}
-          <span className="mono">paused</span> 才算存活。
+          <span className="mono">HEARTBEAT_MAX_AGE = 10.0</span> 就是这 10 秒窗口。
         </p>
         <Def term="锁" en="lock, trainer.lock">
-          锁是同一 run 目录只允许一个训练器持有的独占权。进程一退出（包括崩溃），操作系统自动释放这把锁，新训练器起得来。第二个训练器会立即退出，
-          而不是两个进程交叉改写同一批文件。
+          同一 run 目录只允许一个训练器持有的独占权。第二个训练器会立即退出；
+          进程退出或崩溃时，操作系统自动释放锁，新训练器仍能启动。
         </Def>
       </div>
 
@@ -365,7 +278,7 @@ export default function L17() {
         ]}
         next={
           <>
-            下一课把这些文件变成网页上的画面：server 怎样用 REST 交出完整快照、
+            下一课把这些文件变成网页上的画面：server 怎样用 REST 交出可重读快照、
             用 WebSocket 推送刚发生的变化，以及人机对战为什么另开一条独立的会话。
           </>
         }

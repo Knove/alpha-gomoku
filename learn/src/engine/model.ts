@@ -26,7 +26,7 @@ export interface NetOutput {
 /** Per-layer intermediate outputs (same keys as tests/fixtures/expected.json). */
 export interface LayerTrace {
   stemOut: Tensor; // [C, N, N] after stem (conv+bn+relu)
-  blockOuts: Tensor[]; // [C, N, N] after each residual block (L05 feature wall)
+  blockOuts: Tensor[]; // [C, N, N] after each residual block (第 8 课特征图叠层)
   trunkOut: Tensor; // [C, N, N] after all residual blocks
   pRelu: Tensor; // [2, N, N] after policy head conv+bn+relu
   logits: number[];

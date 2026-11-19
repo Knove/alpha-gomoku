@@ -91,12 +91,12 @@ export default function L12() {
         </Def>
         <Def term="训练样本" en="training sample">
           一条样本就是一手棋的记录，由 <span className="mono">(s, π, z)</span> 3 个要素组成。
-          <span className="mono">s</span> 是局面（state），与第 4 课的加权和 s 不同：记录里存下的是 81 格标准棋盘（每格空、己、敌三态，共 81 个数）
-          加当时的行棋方（1 个数，代码里写作 <span className="mono">player</span>）；训练抽样时才由它们重建网络要的 3 个输入平面（第 6 课的编码）；
+          <span className="mono">s</span> 是局面（state），与基础课里作为标量特征的 s 不是同一个对象：记录里存下的是 81 格标准棋盘（每格空、己、敌三态，共 81 个数）
+          加当时的行棋方（1 个数，代码里写作 <span className="mono">player</span>）；训练抽样时才由它们重建网络要的 3 个输入平面；
           <span className="mono">π</span>
           是策略目标（policy target），81 个概率的一份分布，告诉网络「搜索认为该下哪」；
           <span className="mono">z</span> 是终局结果（outcome），告诉网络「最后谁赢了」。
-          三者都站在记录该手时的行棋方视角，这是第 2 课「始终站在当前行棋方视角」这条约定贯穿到训练数据的地方。
+          三者都站在记录该手时的行棋方视角，也就是全书「始终站在当前行棋方视角」这条约定在训练数据里的落点。
         </Def>
         <Def term="训练目标" en="training target">
           训练时网络被要求逼近的答案。本系统的每条样本带 2 个训练目标：策略目标
@@ -105,24 +105,18 @@ export default function L12() {
           网络在训练时分别对着它们调策略头与价值头（网络分出的 2 个输出端）：策略侧看重搜索分布的高信息密度，价值侧看重终局事实的高可靠性。
         </Def>
         <p>
-          为什么策略目标学搜索的 <span className="mono">π</span>，而价值目标只认终局结果{" "}
-          <span className="mono">z</span>（不拿 <span className="mono">root_value</span> 或{" "}
-          <span className="mono">v_net</span> 当训练目标）？因为两个头面对的判据不同。
-          策略侧要的是「同一问题的更好答案」：<span className="mono">π</span>{" "}
-          汇聚了几十次模拟的推演，每手都能给出 81 个格子的完整分布，信息密度（一局棋留下的互不相同信息条数）远高于单一落子动作，适合用来改进网络的先验{" "}
-          <span className="mono">P</span>。
-          价值侧要的则是<strong>真值</strong>：<span className="mono">z</span>{" "}
-          是对局事实，与网络当前水平无关，尽管一局只定一个输赢事实（按各行棋方立场记为胜方 +1、负方 −1），独立信息只有一条，却离事实最近、可靠性最高；<span className="mono">root_value</span>（每手一个搜索估计）与{" "}
-          <span className="mono">v_net</span>（一次前向估计）虽然每局能留下几十条不同数值，却都是可再生的估计，拿估计当价值目标会把搜索与网络的系统性偏差固化回权重。
-          就可靠性而言 <span className="mono">z</span> 优于{" "}
-          <span className="mono">root_value</span>、<span className="mono">root_value</span> 优于{" "}
-          <span className="mono">v_net</span>；就信息密度而言恰好相反。因此策略侧取搜索分布的高信息密度，价值侧取终局事实的高可靠性。
+          策略目标学 <span className="mono">π</span>：它把几十次模拟汇成 81 个落点的完整分布，
+          比单个落子信息更丰富。价值目标只认 <span className="mono">z</span>：
+          那是终局事实。<span className="mono">root_value</span> 与
+          <span className="mono">v_net</span> 都是估计，拿它们当目标会把旧偏差固化回权重。
         </p>
+
+        <SampleClock />
 
         <h3>落子前记下 s 与 π</h3>
         <p>
           <span className="mono">s</span> 是落子前的局面：搜索和真实落子都从这张棋盘出发。
-          这份记录让存放旧训练样本的回放池（第 14 课详解）既能还原「己方 / 对方」，
+          这份记录让存放旧训练样本的回放池既能还原「己方 / 对方」，
           也能还原标「现在轮到哪边」的颜色平面（网络输入里专门标轮到谁的那一层）。
           生产代码保存前，先调用 <span className="mono">canonical_board()</span>（定义于{" "}
           <span className="mono">alphagomoku/game.py</span>）把 9×9=81 格棋盘统一转成当前行棋方视角，
@@ -174,20 +168,10 @@ export default function L12() {
           <span className="mono">P</span> 就会更像今天的 <span className="mono">π</span>,
           搜索再把它推得更远。
         </p>
-        <p>
-          把这种「靠行动结果改进策略」的框架一般化，就是强化学习：智能体（agent，行动的一方，本课指下棋程序）在环境中行动、
-          由行动结果的反馈调整策略、以争取更好结果。
-        </p>
-        <Def term="强化学习" en="reinforcement learning">
-          智能体在环境中行动、由行动结果的反馈调整策略、以争取更好结果的学习范式。
-          本课的「环境」是棋盘与对手，「反馈」是搜索改进的
-          <span className="mono">π</span> 与终局 <span className="mono">z</span>。
-        </Def>
-
         <h3>终局后补上 z</h3>
         <p>
           各条样本的 z 按记录当时的行棋方分别记，黑胜时黑方样本才记 +1。<span className="mono">s</span>、<span className="mono">π</span>、
-          <span className="mono">z</span> 三者都必须守第 2 课的视角约定。
+          <span className="mono">z</span> 三者都必须守同一条当前行棋方视角约定。
           z 的规则只有一句：和棋记 0，否则看这条样本记录时的行棋方
           是不是最终胜者，是就记 +1，不是就记 −1。若某条样本记录时轮到白，而终局是黑胜，
           对那条样本来说「我」输了，所以 z 是 −1。
@@ -253,12 +237,6 @@ export default function L12() {
                     t.expand_and_backup(prob, float(val))`}</pre>
           </div>
         </EvidenceCard>
-        <Def term="虚拟损失" en="virtual loss">
-          同一棵树并行搜索时才需要的技巧：给正在评估的路径临时虚增访问计数、虚记一笔负分拉低该路的成绩，
-          让并行线程先走他处，避免各线程挤进同一条路；等网络评完、真实结果回传时就撤销这份虚增计数，
-          恢复真实计数。本系统不同树之间合批、树内顺序执行，
-          所以用不到它。
-        </Def>
       </div>
 
       <figure className="card mt-8 p-5" data-qa="batch-trace">
@@ -275,7 +253,7 @@ export default function L12() {
           <span className="chip">各自回传</span>
         </div>
         <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          先自问「再加一棵树 D，前向次数会加一还是不变」，再看上面的合批箭头对答案。这样利用了网络擅长批量计算的特点，同时保留每棵搜索树「选择后立刻拿到结果、下一次再选择」的顺序。
+          三棵树各等一个叶子时，叠成一批只调用一次前向；再加一棵树 D，只要仍用同一网络，这一轮仍是一批。这样利用了网络擅长批量计算的特点，同时保留每棵搜索树「选择后立刻拿到结果、下一次再选择」的顺序。
           这里的「一批」是合批（一次前向喂多个叶局面），与训练时每批 128 条样本的小批不是同一件事。
           浏览器里的单局 <span className="mono">SearchTree.run()</span> 是顺序复现；生产训练才会跨棋局合批。
         </p>
@@ -393,6 +371,56 @@ export default function L12() {
   )
 }
 
+function SampleClock() {
+  return (
+    <figure className="figure sample-clock mt-8" data-qa="sample-clock">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">一条样本，两次写入</span>
+      </div>
+      <div className="sample-clock-grid p-4 sm:p-5">
+        <div className="sample-phase now">
+          <div className="sample-phase-head">
+            <strong>落子那一刻</strong>
+            <span>立即写入</span>
+          </div>
+          <div className="sample-field">
+            <b className="mono">s</b>
+            <div><strong>局面快照</strong><small>标准视角棋盘 + 行棋方</small></div>
+          </div>
+          <div className="sample-field">
+            <b className="mono">π</b>
+            <div><strong>搜索访问分布</strong><small>81 格比例，分母是全部根访问 ΣN</small></div>
+          </div>
+        </div>
+        <div className="sample-arrow" aria-hidden="true">
+          <span>棋局继续</span>
+          <i>→</i>
+          <small>z 还不知道</small>
+        </div>
+        <div className="sample-phase later">
+          <div className="sample-phase-head">
+            <strong>整局结束之后</strong>
+            <span>回填</span>
+          </div>
+          <div className="sample-field z">
+            <b className="mono">z</b>
+            <div><strong>终局结果</strong><small>按记录该手时的行棋方记分</small></div>
+          </div>
+          <div className="sample-z-rules">
+            <span><b>+1</b> 我赢</span>
+            <span><b>−1</b> 我输</span>
+            <span><b>0</b> 和棋</span>
+          </div>
+        </div>
+      </div>
+      <figcaption className="figure-cap">
+        <span className="cap-no">时间差</span>
+        s 与 π 是落子前的记录，z 是终局事实；三者都站在记录该手时的行棋方视角。
+      </figcaption>
+    </figure>
+  )
+}
+
 const CHIPS: { i: number; label: string }[] = [
   { i: REAL.heroIndex, label: "课程主案例" },
   { i: 1, label: "第 2 手·高度集中" },
@@ -444,7 +472,7 @@ function SPZ() {
 
           <div className="mini-label mt-4">π · 全部根访问数形成的分布（这里只列 top3）</div>
           <p className="mt-1 text-[0.68rem] leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            与第 9 课热度（策略头概率 p）不同，这里是搜索访问分布 π。
+            与策略头直接给出的概率 p 不同，这里是搜索访问分布 π。
           </p>
           <ol className="mt-2 space-y-1.5" data-qa="spz-top">
             {top.map((t) => (

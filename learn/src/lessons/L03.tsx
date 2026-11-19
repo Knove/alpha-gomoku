@@ -1,4 +1,4 @@
-/** 第 3 课 · 权重：自己变准的机器(地基篇 1/4)。
+/** 第 3 课 · 权重：自己变准的机器(地基篇 1/3)。
  *  节拍：思考题 → 正文(配对/损失/梯度/学习率，定义框命名，落点码 linGrad/quadLoss/linStep/train.py)→
  *  例 3-1(单权重演示)→ 例 3-2(梯度下降步进器)→ 交付物与验证 → 小结与预告 → 习题。 */
 import { useEffect, useState } from "react"
@@ -16,7 +16,6 @@ import { linGrad, linStep } from "../lib/foundations"
 const X = 2
 const Z = 1
 const W0 = 0 // 教学玩具的固定起点；真实训练只在开始时随机初始化一次
-const STOPS = [-1, -0.4, 0.2, 0.8, 1.4, 2] // 开关版的六个档位(故意躲开最低点 0.5)
 
 const DUAL: number[] = (() => {
   const b = new Array<number>(81).fill(0)
@@ -46,7 +45,7 @@ export default function L03() {
           "迈一步：按学习率 lr 控制步幅，走一步 w ← w − lr × 梯度",
         ]}
         takeaway="你能分清 x、w、r、z 四个量的职责，手算一次单权重的损失、梯度与更新步，并看清学习率过大或过小会发生什么。"
-        boundary="真实网络有 145,050 个权重，本课先聚焦到 1 个权重上把「打分 → 算损失 → 求梯度 → 迈一步」的四步循环拆透。第 4 课再从 1 个权重扩到 3×3 窗口的 9 个权重。"
+        boundary="真实网络有 145,050 个权重，本课先聚焦到 1 个权重上，把「打分 → 算损失 → 求梯度 → 迈一步」的四步循环拆透。"
       />
 
       <Quiz
@@ -216,7 +215,7 @@ export const linStep = (w: number, x: number, z: number, lr: number): number =>
           </div>
         </EvidenceCard>
         <p className="mt-3">
-          上面这 3 行函数就是下方例 3-2 的全部计算引擎。现在去例 3-2 切换 <span className="mono">0.05</span>（稳步下山）、<span className="mono">0.2</span>（步子偏大来回震荡）、<span className="mono">0.35</span>（步子太大直接飞出画面），亲眼看看步幅大小如何决定训练成败：
+          上面这 3 行函数就是下方例 3-2 的全部计算引擎。先选一个起点，再分别试 <span className="mono">0.05</span>、<span className="mono">0.18</span> 和 <span className="mono">0.30</span>，看同一个方向为什么会走出稳步、震荡、发散三种轨迹：
         </p>
       </div>
 
@@ -277,18 +276,18 @@ export const linStep = (w: number, x: number, z: number, lr: number): number =>
               "存不下是空间问题，没有泛化是机制问题：查表法里每条记录都是孤立的，记录之间不会举一反三。用「特征 × 权重」计算分数，才能把旧对局里学到的权重用在新局面上。",
           },
           {
-            q: "为什么权重 w 要设计成可微调的连续小数，而不是几个固定的开关档位？",
+            q: "为什么权重 w 要设计成可微调的连续小数，而不是几个固定档位？",
             options: [
               "连续小数在计算机里占内存更少",
               "连续值可以轻轻挪一小步算出坡度（梯度），直接知道往哪边调损失会降；离散档位无法求梯度，面对 14.5 万个权重时更无法穷举组合",
-              "开关档位写代码更难",
+              "固定档位写代码更难",
             ],
             answer: 1,
             explain:
-              "只有 1 个权重时，6 个档位还能挨个试一遍；但真实网络有 145,050 个权重，档位组合数会彻底爆炸。连续权重让曲线处处有坡度（梯度），机器只需算一次梯度就知道每个权重该往哪边微调。",
+              "只有 1 个权重时，几个固定档位还能挨个试一遍；但真实网络有 145,050 个权重，档位组合数会彻底爆炸。连续权重让曲线处处有坡度（梯度），机器只需算一次梯度就知道每个权重该往哪边微调。",
           },
           {
-            q: "在例 3-2 里把学习率 lr 从 0.05 拉大到 0.35 甚至 0.4，连走几步会看到什么？",
+            q: "在例 3-2 里把学习率 lr 从 0.05 拉到 0.30，连走几步会看到什么？",
             options: [
               "只会更快到达最低点，学习率越大越好",
               "步子迈得太大，直接跨过碗底 0.5 跳到对面更高处，越弹越远直至发散飞出画面",
@@ -296,7 +295,7 @@ export const linStep = (w: number, x: number, z: number, lr: number): number =>
             ],
             answer: 1,
             explain:
-              "梯度只给方向，步子迈多大由学习率 lr 控制：太小（如 0.01）走得稳但慢；适中能稳步滑向碗底；太大（本例中超过 0.125 开始来回越过碗底震荡，超过 0.25 则每步误差翻倍放大）就会越弹越远直至发散。",
+              "梯度只给方向，步子迈多大由学习率 lr 控制：lr=0.125 恰好一步到碗底；略大于它会越过碗底后折返，但误差仍在缩小；lr=0.25 会永久等幅振荡；只有大于 0.25，误差才越乘越大并发散。",
           },
         ]}
       />
@@ -304,7 +303,7 @@ export const linStep = (w: number, x: number, z: number, lr: number): number =>
   )
 }
 
-/* ============ 例 3-1 · 单权重演示：连续权重 vs 开关档位 ============ */
+/* ============ 例 3-1 · 单权重演示：预测靠近靶心，损失滑向碗底 ============ */
 
 /** 抛物线图几何(L 上限 9.5,最低点 w*=Z/X=0.5) */
 const CW = 300, CH = 176, CPL = 38, CPR = 12, CPT = 12, CPB = 30
@@ -317,53 +316,23 @@ const CURVE = Array.from({ length: 61 }, (_, i) => {
 }).join(" ")
 
 function TargetRange() {
-  const [mode, setMode] = useState<"knob" | "switch">("knob")
-  const [w, setW] = useState(0) // 连续权重位置
-  const [stop, setStop] = useState(2) // 开关档位下标(默认 0.2)
+  const [w, setW] = useState(0)
 
   const r = w * X
   const l = loss(w)
   const g = linGrad(w, X, Z) // 脚下的梯度(坡)
-  const sw = STOPS[stop]
-  const swLoss = loss(sw)
+  const rPct = ((r + 2) / 6) * 100
+  const zPct = ((Z + 2) / 6) * 100
+  const tangentA = Math.max(WMIN, w - 0.18)
+  const tangentB = Math.min(WMAX, w + 0.18)
 
   return (
     <figure className="figure mt-8">
       <div className="px-4 pt-4 sm:px-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="mini-label">例 3-1 · 一个权重的最小例子：为什么调 w，怎样才算调得更好</span>
-          <span className="seg" data-qa="range-mode">
-            <button type="button" className={`seg-btn ${mode === "knob" ? "active" : ""}`}
-              onClick={() => setMode("knob")}>
-              连续权重
-            </button>
-            <button type="button" className={`seg-btn ${mode === "switch" ? "active" : ""}`}
-              onClick={() => setMode("switch")}>
-              开关档位
-            </button>
-          </span>
-        </div>
-        <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          先固定 x 与 z，再调整 w。这局棋提供两样不会随滑杆改变的东西：机器看到的特征
-          <span className="mono">x = 2</span>，以及对局结束后得到的终局结果
-          <span className="mono">z = +1</span>（这里假设这局棋后来由「我」赢了）。
-          z 是假设标签，与盘面上有双三无关。机器要回答的是：「两条三连说明这局对我方是好是坏？」
-        </p>
+        <span className="mini-label">例 3-1 · 拖 w，让预测分 r 靠近答案 z</span>
         <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          权重 <span className="mono">w</span> 表示机器目前认为<strong>每单位计数值多少分</strong>。
-          它用 <span className="mono">r = w × x</span> 算出自己的判断。比如
-          <span className="mono">w = 0</span> 时，机器完全不看三连，得到
-          <span className="mono">r = 0</span>；可是答案是 <span className="mono">z = 1</span>，
-          所以这个判断还差 1 分。
-        </p>
-        <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          <strong>训练不是随便调 w，而是要让 r 更接近 z。</strong>每试一个
-          <span className="mono">w</span>，都把差距平方，得到损失
-          <span className="mono">(r−z)²</span>。右图把各种设置画成一条曲线：横向是
-          <span className="mono">w</span>，高度是损失。向更低处移动，就表示判断正在变好。
-          从起点 <span className="mono">w=0</span> 看，向右轻挪会让
-          <span className="mono">r</span> 靠近答案，所以方向是右；如果越过
-          <span className="mono">w=0.5</span>，向左轻挪才会变好。现在拖动滑杆，观察方向怎样改变。
+          <span className="mono">x=2、z=+1</span> 固定不变，只有 <span className="mono">w</span> 可调。
+          上方看 r 与 z 的距离，下方看损失碗里的坡度；小球滑到碗底时，两者正好重合。
         </p>
       </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
@@ -371,24 +340,47 @@ function TargetRange() {
           <div data-qa="dual-board">
             <Board board={DUAL} lastMove={{ x: 4, y: 6 }} />
           </div>
-          <div className="reveal-box mt-3 text-sm leading-relaxed">
-            <div className="mini-label">本页规定的特征 x 与终局结果 z</div>
-            <p className="num mt-1.5">
-              x = <strong>2</strong>（本页规定：横一条 + 竖一条）
-              <br />z = <strong>+1</strong>（这里<strong>假设</strong>这局训练对局后来由「我」赢了）
-            </p>
-            <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-              <span className="mono">x</span> 是机器这次拿到的特征，
-              <span className="mono">z</span> 是下完棋才得到的答案；训练不能改它们。
-              训练能改的只有 <span className="mono">w</span>，也就是机器下次该多看重这个特征。
-              这只是单特征的小题，不是完整棋力。
-            </p>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+            <div className="reveal-box">
+              <div className="mini-label">盘面事实 · 固定</div>
+              <p className="num mt-1">x = 2</p>
+            </div>
+            <div className="reveal-box">
+              <div className="mini-label">终局答案 · 固定</div>
+              <p className="num mt-1">z = +1</p>
+            </div>
           </div>
         </div>
 
         <div className="min-w-0 flex-1">
+          <div className="mb-4 rounded-lg border p-3" style={{ borderColor: "var(--hairline)", background: "var(--card-sunken)" }}>
+            <div className="flex items-baseline justify-between gap-3 text-xs">
+              <span className="num" style={{ color: "var(--accent-deep)" }}>预测 r = {r.toFixed(2)}</span>
+              <span className="num" style={{ color: "var(--fg-muted)" }}>答案 z = +1.00</span>
+            </div>
+            <div className="relative mt-3 h-2 rounded-full" style={{ background: "var(--hairline)" }}>
+              <span className="absolute inset-y-0 w-px" style={{ left: `${zPct}%`, background: "var(--fg-muted)" }} />
+              <span className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full motion-pos"
+                style={{ left: `${Math.max(0, Math.min(100, rPct))}%`, background: "var(--accent)" }} />
+            </div>
+            <div className="num relative mt-1 h-4 text-[0.65rem]" style={{ color: "var(--fg-faint)" }}>
+              <span className="absolute left-0">−2</span>
+              <span className="absolute -translate-x-1/2" style={{ left: "33.333%" }}>0</span>
+              <span className="absolute -translate-x-1/2" style={{ left: `${zPct}%`, color: "var(--accent-deep)" }}>
+                答案 z
+              </span>
+              <span className="absolute right-0">+4</span>
+            </div>
+          </div>
+
           <svg viewBox={`0 0 ${CW} ${CH}`} data-qa="target-curve"
             style={{ width: "100%", height: "auto", display: "block", maxWidth: 340 }}>
+            <defs>
+              <marker id="l03-slope-arrow" viewBox="0 0 8 8" refX="7" refY="4"
+                markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                <path d="M0,0 L8,4 L0,8 z" style={{ fill: "var(--accent-deep)" }} />
+              </marker>
+            </defs>
             <line x1={CPL} y1={CH - CPB} x2={CW - CPR} y2={CH - CPB}
               style={{ stroke: "var(--hairline-strong)" }} strokeWidth={1} />
             {[1, 4, 9].map((p) => (
@@ -408,99 +400,47 @@ function TargetRange() {
             {/* 最低点标线：w* = z/x = 0.5 */}
             <line x1={xOf(0.5)} y1={yOf(0)} x2={xOf(0.5)} y2={yOf(9)}
               strokeDasharray="4 4" style={{ stroke: "var(--fg-faint)" }} strokeWidth={1} />
-            <text x={xOf(0.5)} y={CPT + 8} fontSize={9.5} textAnchor="middle" className="num"
+            <text x={xOf(0.5)} y={CPT + 10} fontSize={9.5} textAnchor="middle" className="num"
               style={{ fill: "var(--fg-faint)" }}>
-              损失是平方、永远 ≥0；r 恰好等于 z 时取到 0，就是最小值
-            </text>
-            <text x={xOf(0.5)} y={CPT + 20} fontSize={9.5} textAnchor="middle" className="num"
-              style={{ fill: "var(--fg-faint)" }}>
-              w×2=1 即 w=0.5 时 r=z，所以最好取 w=0.5
+              碗底 w* = 0.5（r = z，损失 = 0）
             </text>
             <polyline points={CURVE} fill="none" style={{ stroke: "var(--accent)" }} strokeWidth={2} />
 
-            {mode === "knob" ? (
-              <g data-qa="knob-dot">
-                <circle className="motion-pos" cx={xOf(w)} cy={yOf(l)} r={6} style={{ fill: "var(--accent-deep)" }} />
-                <text x={xOf(w)} y={yOf(l) - 10} fontSize={10} textAnchor="middle" className="num"
-                  style={{ fill: "var(--accent-deep)" }}>
-                  {l.toFixed(2)}
-                </text>
-              </g>
-            ) : (
-              <g data-qa="switch-dots">
-                {STOPS.map((s, i) => (
-                  <circle key={s} cx={xOf(s)} cy={yOf(loss(s))} r={i === stop ? 6 : 4}
-                    style={{
-                      fill: i === stop ? "var(--accent-deep)" : "var(--fg-faint)",
-                    }} />
-                ))}
-                <text x={xOf(sw)} y={yOf(swLoss) - 10} fontSize={10} textAnchor="middle"
-                  className="num" style={{ fill: "var(--accent-deep)" }}>
-                  {swLoss.toFixed(2)}
-                </text>
-              </g>
-            )}
+            <line x1={xOf(tangentA)} y1={yOf(loss(tangentA))}
+              x2={xOf(tangentB)} y2={yOf(loss(tangentB))}
+              markerEnd={Math.abs(g) > 0.01 ? "url(#l03-slope-arrow)" : undefined}
+              style={{ stroke: "var(--accent-deep)" }} strokeWidth={1.6} opacity={0.8} />
+            <g data-qa="knob-dot">
+              <circle className="motion-pos" cx={xOf(w)} cy={yOf(l)} r={6} style={{ fill: "var(--accent-deep)" }} />
+              <text x={xOf(w)} y={yOf(l) - 10} fontSize={10} textAnchor="middle" className="num"
+                style={{ fill: "var(--accent-deep)" }}>
+                {l.toFixed(2)}
+              </text>
+            </g>
           </svg>
 
-          {mode === "knob" ? (
-            <div data-qa="knob-panel">
-              <div className="mini-label mt-2">试着改变「每单位计数值多少分」w（−1 → 2）</div>
-              <input type="range" min={-1} max={2} step={0.01} value={w}
-                onChange={(e) => setW(Number(e.target.value))} aria-label="w 滑杆"
-                style={{ ["--fill" as string]: `${((w + 1) / 3) * 100}%` }}
-                data-qa="knob-slider" />
-              <div className="reveal-box mt-3">
-                <p className="num">
-                  r = w·x = {(w).toFixed(2)}×2 ={" "}
-                  <strong style={{ color: "var(--accent-deep)" }}>{r.toFixed(2)}</strong>
-                  {"   "}损失 = (r−z)² ={" "}
-                  <strong style={{ color: "var(--accent-deep)" }}>{l.toFixed(3)}</strong>
-                </p>
-                <p className="num mt-1.5">
-                  梯度（损失对 w 的变化率） ={" "}
-                  <strong>{g >= 0 ? "+" : ""}{g.toFixed(1)}</strong>
-                  <span className="ml-2 font-normal" style={{ color: "var(--fg-muted)" }}>
-                    {g < 0 ? "是负的 → 往右调一点，损失会降" : g > 0 ? "是正的 → 往左调一点，损失会降" : "是 0 → 这道小题已到最好位置"}
-                  </span>
-                </p>
-              </div>
-              <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                判断好不好，只看损失有没有下降。在这道平滑的小题里，除最低点外每个位置都有下降方向。
-                连续权重让「小调一点」真的会留下可测的变化；这就是训练能利用的局部信息。
+          <div data-qa="knob-panel">
+            <div className="mini-label mt-2">权重 w（−1 → 2）</div>
+            <input type="range" min={-1} max={2} step={0.01} value={w}
+              onChange={(e) => setW(Number(e.target.value))} aria-label="w 滑杆"
+              style={{ ["--fill" as string]: `${((w + 1) / 3) * 100}%` }}
+              data-qa="knob-slider" />
+            <div className="reveal-box mt-3">
+              <p className="num">
+                r = {r.toFixed(2)}　损失 = <strong style={{ color: "var(--accent-deep)" }}>{l.toFixed(3)}</strong>
+              </p>
+              <p className="mt-1.5" style={{ color: "var(--fg-muted)" }}>
+                梯度 = <strong>{g >= 0 ? "+" : ""}{g.toFixed(1)}</strong>
+                {" → "}
+                {g < 0 ? "负坡，往右调" : g > 0 ? "正坡，往左调" : "碗底，停下"}
               </p>
             </div>
-          ) : (
-            <div data-qa="switch-panel">
-              <div className="mini-label mt-2">档位：只能整档跳，没有中间；本演示的档位表故意不含 0.5，以显示离散档够不到最低点</div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {STOPS.map((s, i) => (
-                  <button key={s} type="button"
-                    className={`btn ${i === stop ? "active" : ""}`}
-                    onClick={() => setStop(i)} data-qa="stop-btn">
-                    {s > 0 ? "+" + s : s}
-                  </button>
-                ))}
-              </div>
-              <div className="reveal-box mt-3">
-                <p className="num">
-                  站在 {sw} 档：r = {(sw * X).toFixed(2)}、损失 ={" "}
-                  <strong style={{ color: "var(--accent-deep)" }}>{swLoss.toFixed(3)}</strong>
-                </p>
-                <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                  最好的两档（0.2 档和 0.8 档）并列，损失都是 0.36；连续权重能调到
-                  0.5，损失为 0。六个档位还能逐个试，但真实机器有约 14.5 万个
-                  可学数字，所有档位组合无法穷举。离散档位之间没有「调 0.01 格」这条
-                  路，也就没有可用的局部梯度。
-                </p>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 3-1</span>
-        同一题的两种设定：连续权重可以沿曲线小步调整；六个档位只能挨个比较。
-        这个玩具说明的是为什么<strong>可学习的数字</strong>通常设为连续值，不是在说程序里不能有条件判断。
+        r 越靠右越接近答案 z；损失越低，坡度越平。梯度给方向，学习率决定一步走多远。
       </figcaption>
     </figure>
   )
@@ -555,26 +495,21 @@ function Descender() {
   const n = hist.length - 1
   const wNow = hist[hist.length - 1]
   const flew = Math.abs(wNow) > WMAX + 0.5 || wNow < WMIN - 0.5
+  const stepHint =
+    Math.abs(lr) < 1e-9 ? "步幅为 0，权重原地不动"
+      : Math.abs(lr - 0.125) < 1e-9 ? (n === 0 ? "恰好一步落到最低点；下一步梯度为 0，会停住" : "已在最低点；梯度为 0，权重停住")
+        : lr < 0.125 ? "小步靠近，走得稳但慢"
+          : lr < 0.25 ? "跨过最低点后折返，误差仍逐次缩小"
+            : Math.abs(lr - 0.25) < 1e-9 ? "永久等幅来回，既不收敛也不发散"
+              : "每步越弹越远，误差开始放大"
 
   return (
     <figure className="figure mt-12">
       <div className="px-4 pt-4 sm:px-5">
         <span className="mini-label">例 3-2 · 梯度下降步进器：方向有了，步子该迈多大</span>
         <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          图的高度代表损失：点越低，机器错得越少；高度最低的位置就是最低点。
-          这道玩具题是一条开口向上的曲线，只有一个最低点，在那里损失正好是 0，
-          所以它一定是本题最好的权重位置。
-        </p>
-        <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          本项目从一个随机起点持续训练，每步随机抽取一批训练样本，
-          并随机旋转或镜像棋盘（数据增强 data augmentation，参见：第 14 课）。
-          优化器使用 SGD、动量和权重衰减，本项目的实际配置带有小批次随机性与动量。
-        </p>
-        <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          这张图研究的是另一个问题：方向已经知道以后，一步该走多远。
-          先选学习率 <span className="mono">lr</span>，再点「走一步」或「自动」：0.05 是小步，
-          0.2 会跨过最低点后折返，0.35 则大到越走越远。观察的重点是看清
-          <strong>太小走得慢、合适才能靠近、太大会冲过头</strong>。
+          小球每走一步都按 <span className="mono">w ← w − lr × 梯度</span> 更新。
+          先选预设，再点「走一步」或「自动」，只观察一件事：同一道下坡题，步幅怎样改变轨迹。
         </p>
       </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
@@ -621,34 +556,37 @@ function Descender() {
             还是那道题（x=2、z=+1，教学起点 w=0）：每按一次「走一步」，
             <span className="mono">w ← w − lr×梯度</span>（← 念「变成」）。以 lr=0.05 为例，第 1 步：
             0 − 0.05×(−4) = 0.2：梯度是负的，权重向右调。小圆点是走过的位置，
-            线是相邻两步的连线；lr=0.2 时来回跨过最低点，说明步子虽能前进，却开始摆动。
+            线是相邻两步的连线；lr=0.18 时来回跨过最低点，说明步子虽能前进，却开始摆动。
           </p>
         </div>
 
         <div className="min-w-0 flex-1 md:max-w-[19rem]">
-          <div className="mini-label">学习率 lr（0 → 0.5）</div>
-          <input type="range" min={0} max={0.5} step={0.005} value={lr}
+          <div className="mini-label">学习率 lr（0 → 0.35）</div>
+          <input type="range" min={0} max={0.35} step={0.005} value={Math.min(lr, 0.35)}
             onChange={(e) => setLrReset(Number(e.target.value))} aria-label="lr 滑杆"
-            style={{ ["--fill" as string]: `${(lr / 0.5) * 100}%` }}
+            style={{ ["--fill" as string]: `${(Math.min(lr, 0.35) / 0.35) * 100}%` }}
             data-qa="lr-slider" />
-          {/* 双刻度线：0.125(一步到最低点)与 0.25(临界) */}
-          <div className="num relative mt-1 h-7 text-xs" style={{ color: "var(--fg-faint)" }}>
-            <span className="absolute" style={{ left: `${(0.125 / 0.5) * 100}%`, top: 0, transform: "translateX(-50%)" }}>
-              |<br />0.125
-            </span>
+          <div className="num relative mt-1 h-9 text-[0.63rem]" style={{ color: "var(--fg-faint)" }}>
             <span className="absolute" style={{ left: "0.5%" }}>0</span>
-            <span className="absolute" style={{ left: `${(0.25 / 0.5) * 100}%`, top: 0, transform: "translateX(-50%)", color: "var(--accent-deep)" }}>
-              |<br />0.25
+            <span className="absolute whitespace-nowrap" style={{ left: `${(0.125 / 0.35) * 100}%`, top: 0, transform: "translateX(-50%)", color: "var(--accent-deep)" }}>
+              |<br />0.125 一步到碗底
             </span>
-            <span className="absolute" style={{ right: 0 }}>0.5</span>
+            <span className="absolute whitespace-nowrap" style={{ left: `${(0.25 / 0.35) * 100}%`, top: 0, transform: "translateX(-50%)", color: "var(--accent-deep)" }}>
+              |<br />0.25 等幅振荡
+            </span>
+            <span className="absolute" style={{ right: 0 }}>0.35</span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <span className="text-xs" style={{ color: "var(--fg-faint)" }}>预设</span>
-            {[0.05, 0.2, 0.35].map((p) => (
-              <button key={p} type="button"
-                className={`btn ${Math.abs(lr - p) < 1e-9 ? "active" : ""}`}
-                onClick={() => setLrReset(p)} data-qa="lr-preset">
-                {p}
+            {[
+              { v: 0.05, label: "0.05 稳步" },
+              { v: 0.18, label: "0.18 震荡" },
+              { v: 0.30, label: "0.30 发散" },
+            ].map((p) => (
+              <button key={p.v} type="button"
+                className={`btn ${Math.abs(lr - p.v) < 1e-9 ? "active" : ""}`}
+                onClick={() => setLrReset(p.v)} data-qa="lr-preset">
+                {p.label}
               </button>
             ))}
             <span className="ml-auto" />
@@ -669,26 +607,18 @@ function Descender() {
               {"   "}损失 = <strong>{fmtW(loss(wNow))}</strong>
             </p>
             <p className="num mt-1.5">
-              起点 <span className="mono">w = 0</span> 距最优位置 <span className="mono">w* = 0.5</span> 相差 <span className="mono">0.5</span>，此时梯度为 <span className="mono">−4</span>，因此 <span className="mono">lr = 0.125</span> 一步走 <span className="mono">0.125 × 4 = 0.5</span> 刚好到位。
-              若取 <span className="mono">lr = 0.25</span>，一步走 <span className="mono">1.0</span> 会跨到最低点对称侧来回等幅弹跳；超过 <span className="mono">0.25</span> 则每步越弹越远。
+              {stepHint}。
             </p>
             <p className="mt-1.5 text-xs leading-relaxed" data-qa="zone"
               style={{ color: "var(--fg-muted)" }}>
               {zoneOf(lr)}
             </p>
           </div>
-          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            这两条刻度线只属于当前玩具（x=2、单个权重）：真实网络有许多权重和复杂
-            的地形，不能直接套这两个阈值；代码里的 lr=0.01 是配置里预先设定的步幅。
-          </p>
         </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 3-2</span>
-        本图只有一个最低点，是为了单独看清学习率怎样控制步幅；现实训练可能有许多局部最低点。
-        每一步按 <span className="mono">w ← w − lr·2x(wx−z)</span> 更新：
-        0 到 0.125 稳步靠近；0.125 恰好一步到位；0.125 到 0.25 来回跨过最低点但仍在收敛；0.25 永久等幅来回；更大则越弹越远。
-        这些具体数值取决于本例的 <span className="mono">x=2</span>，不是现实网络的通用安全线。
+        小步靠近、越过碗底折返、等幅振荡，再大才发散。
       </figcaption>
     </figure>
   )

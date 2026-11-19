@@ -30,7 +30,7 @@ export default function L01() {
           "判胜只从刚落的子向四个方向数连子，含刚落那颗、每个方向数出 5 即胜",
         ]}
         takeaway="你能把坐标和动作编号来回换算，写出合法动作判定与判胜检查：以新落的子为锚数四向，为什么不会漏。"
-        boundary="本课的 0/+1/−1 是游戏引擎保存棋盘的记法。三个输入平面（平面是一张 9×9 的数表，定义见第 2 课，编码见第 6 课）会把同一事实改写成网络更容易处理的形式，两者用途不同，并不矛盾。"
+        boundary="本课的 0/+1/−1 是游戏引擎保存棋盘的记法；后续输入平面会把同一事实改写成网络更容易处理的形式，两者用途不同，并不矛盾。"
       />
 
       <Quiz
@@ -45,7 +45,7 @@ export default function L01() {
             ],
             answer: 1,
             explain:
-              "选第二项。数是唯一不用翻译的材料：计算机只搬得动数，照片和文字都得先拆成数才搬得动。81 个交叉点，一个交叉点对应一个数，整局棋就是一个 9×9 的数组，即排成 9 行 9 列的一组数。既然绕不开数，一开始就用数，还省掉翻译这道工序。",
+              "选第二项。数字是最直接的原材料：计算机只搬得动数，照片和文字最终也得先拆成数。81 个交叉点，一个交叉点对应一个数，整局棋就是一个 9×9 的数组，即排成 9 行 9 列的一组数。既然绕不开数，一开始就用数，还省掉翻译这道工序。",
           },
         ]}
       />
@@ -75,7 +75,7 @@ export default function L01() {
           </div>
         </EvidenceCard>
         <p className="mt-3">
-          代 <span className="mono">self.n = 9</span>，<span className="mono">self.board</span> 就初始化成 9×9 = 81 个全 0 整数，开局全空。
+          代入 <span className="mono">self.n = 9</span>，<span className="mono">self.board</span> 就初始化成 9×9 = 81 个全 0 整数，开局全空。
         </p>
         <p>
           落子这个动作也要写成数。x 是列号（向右，0 到 8），y 是行号（向下，0 到 8），
@@ -198,7 +198,7 @@ export default function L01() {
       <Ledger title="alphagomoku/game.py · Game.play 与判胜检查">
         <p className="mb-3">
           本课的核心实现位于 <span className="mono">alphagomoku/game.py</span>：文件开头定义棋盘常量与四个扫描方向，
-          <span className="mono">Game</span> 类内的 <span className="mono">play</span>、<span className="mono">_count_dir</span> 与 <span className="mono">_is_win_at</span> 三个方法串联起动作校验、落子赋值、锚点四向判胜与换手，后续第 10 课的搜索模拟和第 12 课的自我对弈均直接调用它们：
+          <span className="mono">Game</span> 类内的 <span className="mono">play</span>、<span className="mono">_count_dir</span> 与 <span className="mono">_is_win_at</span> 三个方法串联起动作校验、落子赋值、锚点四向判胜与换手，搜索模拟与自我对弈都会直接调用它们：
         </p>
         <div className="codewalk">
           <pre>{`    def play(self, action: int) -> None:

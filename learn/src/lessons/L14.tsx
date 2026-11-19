@@ -1,305 +1,285 @@
-/** 第 11 课 · 搜索：下一次该查哪条路。
- *  节拍：选择分数(Q+U)→ 例 11-1 三行手算 → π/根噪声/温度 → 例 11-2 真权重预算 →
- *  源码与验证 → 本章小结 → 习题。 */
-import { useEffect, useRef, useState } from "react"
+/** 第 14 课 · 训练：许多样本怎样形成一次更新。
+ *  两个工程机制：环形回放池（min_buffer、随机抽批）与八重对称增广。
+ *  最后用 train_step 把一批样本接回双损失与一次更新。 */
+import { useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
 import { EvidenceCard } from "../framework/evidence"
 import Board from "../lib/board"
-import { type GameState } from "../engine/game"
-import { loadNet, type WeightsJson } from "../engine/model"
-import { SearchTree, type MctsConfig } from "../engine/mcts"
-import { loadWeights } from "../lib/weights"
+import { REAL } from "../data/real"
+import { dihedral, dihedralPi, emptyBoard, play, type GameState } from "../engine/game"
 
-const F5 = 41
-const POS: GameState = (() => {
-  const board = Array.from({ length: 9 }, () => new Array<number>(9).fill(0))
-  for (const x of [1, 2, 3, 4]) board[4][x] = 1
-  board[4][0] = -1
-  for (const x of [2, 3, 4]) board[1][x] = -1
-  board[2][6] = 1
-  board[7][7] = -1
-  return { board, current: 1, winner: 0, moveCount: 10, lastMove: null }
+const GAME = REAL.selfplayGame
+const MOVES = GAME.moves
+const SYM_IDX = Math.min(17, MOVES.length - 1)
+
+const STATES: GameState[] = (() => {
+  const arr: GameState[] = [emptyBoard()]
+  for (const m of MOVES) arr.push(play(arr[arr.length - 1], m.y * 9 + m.x, m.player as 1 | -1))
+  return arr
 })()
 
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0
-  return () => {
-    a |= 0
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
+const coord = (a: number) => `(${a % 9},${Math.floor(a / 9)})`
+const argmaxPi = (pi: number[]) => {
+  let a = 0
+  for (let i = 1; i < pi.length; i++) if (pi[i] > pi[a]) a = i
+  return a
 }
 
-const coord = (a: number) => `(${a % 9},${Math.floor(a / 9)})`
-
 export default function L14() {
+
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
-      <div className="eyebrow mb-3">第 11 课</div>
-      <h1 className="text-2xl font-bold">搜索：下一次该查哪条路</h1>
+      <div className="eyebrow mb-3">第 14 课</div>
+      <h1 className="text-2xl font-bold">训练：许多样本怎样形成一次更新</h1>
 
       <LessonGuide
-        question="一棵树有很多候选路，搜索怎样决定下一次把思考机会花在哪里，并把访问次数变成落子？"
-        why="第 10 课已经会让一次模拟向前走、再把结果向后回传；现在必须解决预算分配，否则搜索会只盯热门路，或把时间平均浪费在所有路上。"
+        question="前后相邻的棋局彼此很像，机器怎样把它们整理成更可靠的一次权重更新？"
+        why="直接按产生顺序学习容易被最近几局带着摇摆；而且棋盘方向不同、棋理却相同，可以等价改写，不增加样本条数。回放池、随机批次和数据增强先把样本整理好，真实 train_step 才开始算损失和更新。"
         chain={[
-          "PUCT 把历史成绩（第 10 课的平均成绩 Q）和探索奖励放在一起",
-          "多次模拟把每条根边的访问次数记成 N",
-          "把全部根访问数换算成比例（加起来等于 1），得到策略目标 π",
-          "根噪声改的是搜索期的根先验，温度管的是搜索完之后的落子",
+          "样本写进回放池",
+          "累积到 min_buffer 才随机抽一批",
+          "每张棋盘与 π 同步做一种旋转或镜像",
+          "重新前向、算 2 笔损失、反向传播并更新权重",
         ]}
-        takeaway="你能按 PUCT 手算下一次选边，把根访问数归一成 π；配置噪声与温度的开关组合，指出各自落在自我对弈的哪一段。"
-        boundary="F5 是刻意构造的失败诊断局面，不是训练记录。演示使用浏览器复现、真正导出的权重和固定随机序列；它和真正训练用的是同一套规则，但预算、精度和执行方式经过浏览器适配。"
+        takeaway="你能写出回放池抽批与棋盘、π 的同步增广，并复现一次 train_step 的重新前向、两笔损失与更新。"
+        boundary="一条真实记录只贡献一批损失里的一小份梯度，不能说某份检查点或 best 更换全是它的功劳。"
       />
 
       <Quiz
         title="思考题 · 先选一个答案"
         questions={[
           {
-            q: "一棵树有 3 条候选路：一条 Q 最高但只看过 1 次，一条成绩略低却已看过 20 次。若只按「谁的 Q 最大」来选下一次模拟，长期会出什么问题？",
+            q: "为什么训练不只拿刚结束的最后一局棋，按顺序从头学到尾？",
             options: [
-              "没有问题，Q 最大的那条永远最优",
-              "早期一次好运就能把 Q 抬高，之后每次模拟都投给它，别的路再也没机会被查证",
-              "Q 会自己越用越准，不需要记录访问次数",
+              "因为最后一局没有 z，不能训练",
+              "相邻局面高度相关；随机混合新旧样本能减少被一小段经历带偏，也减轻遗忘",
+              "因为回放池会自动把输棋改成赢棋",
             ],
             answer: 1,
-            explain:
-              "Q 是平均成绩，不带证据量信息：一条只看过一次的路赢一局就能拿 Q=+1，压过看过 20 次、平均 +0.6 的路。只认 Q 最大，模拟会全押给它，没有机制回头验证。下一次选择必须同时看已有成绩、先验和访问次数，这正是正文要逐项拼出的 PUCT。",
+            explain: "随机批次不会改变样本答案，但会把不同时间、不同棋局的样本混在一起，让一次更新不只代表刚刚那一小段经历。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>选择分数把已有成绩和探索奖励相加</h3>
+        <h3>回放池用环形缓冲区装下新旧样本</h3>
         <p>
-          一次模拟每走一条边，边上的数就变一次。
-          Q 的每个记分都来自叶处 v_net 或终局结果 z 的回传<span className="def-see">参见：第 10 课</span>。
-          只选 Q 最大的路，会让早期一次好运把后面的次数全占掉；只追求没见过的路（比如永远选 N 最小），
-          又会忽略已经发现的好路。
-          下一次选择必须同时顾及已有成绩 Q 和访问次数 N，才能把有限的模拟预算分得合理。
-          每条边扩展时写入先验 <span className="mono">P</span>（根节点若开启噪声还会由{" "}
-          <span className="mono">_mix_noise</span> 混合扰动）；此后每次模拟沿路径记一笔：
-          <span className="mono">N</span> 加 1、<span className="mono">W</span> 加这次换视角后的值，
-          <span className="mono">Q=W/N</span> 在选边时现算。
-        </p>
-        <Def term="利用与探索" en="exploitation and exploration">
-          利用（exploit）指沿已知成绩好的路继续走；探索（explore）指把次数分给没看够的路。
-          这一对权衡是搜索预算分配的核心：只利用会锁死在早期偶然的好成绩上，只探索会把时间浪费在已经证明平庸的路上。
-        </Def>
-        <p>
-          把两者写成一条可计算的规则，先看它对 3 条候选边算出什么，再看公式。
-          例 11-1 的 A、B、C 3 条边在同一个岔口上，已知数据是
-          A：<span className="mono">P=0.40、N=10、Q=0.55</span>，
-          B：<span className="mono">P=0.40、N=5、Q=0.45</span>，
-          C：<span className="mono">P=0.20、N=1、Q=0.10</span>。
-          A 的成绩最好但已经看了 10 次，B 成绩不差、看得少，C 又少又差。
-          打分时把已有成绩和一份补偿相加：
-        </p>
-        <div className="formula">
-          score(a) = <span className="hl">Q(a)</span> +
-          c · P(a) · √ΣN / (1 + N(a))
-        </div>
-        <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
-          两项直接相加是 PUCT 的约定：Q 是 −1…+1 的价值刻度，U 是同一刻度上的探索加成，
-          靠 c（代码名 c_puct）调探索所占的分量。
-        </p>
-        <p>
-          公式右边第一项是已有成绩，第二项就是探索奖励。<span className="mono">ΣN</span>{" "}
-          是这个岔口全部候选被走过的总次数。探索分怎么读，分三段：先验 P 给各边打底，√ΣN 让探索奖励随总预算缓慢增加，分母{" "}
-          <span className="mono">1+N(a)</span> 让走过的边慢慢失去这份奖励。比较都发生在同一个 ΣN 之下，所以已经常走的路逐渐失去奖励。不同边还各乘自己的 P，P 很小的未访问边未必压过 P 大的已访问边。打分之后，非法动作的分数置为负无穷，永远不进比较。
-          没走过的边（N=0）分母从 1 起步，探索分取自身最大值；自己的 N 增加时递减，别的边被访问反而让 √ΣN 变大。<span className="mono">c</span>{" "}
-          是探索强度权重，越大越偏爱少走的路，本项目配置（<span className="mono">alphagomoku/config.py</span> 的{" "}
-          <span className="mono">c_puct</span>）固定为 1.5。
+          训练样本不是用完即弃。每局自我对弈产生的记录都写进回放池，由它决定更新权重时能抽到哪些旧样本。
+          覆盖最旧样本正是设计意图。最旧样本通常来自训练早期、棋力较弱的网络；z 是真值、不会过时，变旧的是 π 那份搜索答案
+          （预算和先验都来自旧网），参考价值相对最低。回放池按样本条数计容量，只保留最近若干样本；
+          写到末尾会绕回开头，覆盖最旧的一条。
         </p>
         <EvidenceCard
           fidelity="runtime-exact"
-          title="按 PUCT 公式计算各候选边的 Q + U 并选出最高分合法动作"
-          source="alphagomoku/mcts.py · SearchTree._puct_select"
+          title="把四项数据写入当前槽位，游标对容量取模绕回"
+          source="alphagomoku/replay.py · ReplayBuffer.add_many"
         >
           <div className="codewalk">
-            <pre>{`    def _puct_select(self, node: _Node, game: Game) -> int:
-        legal = game.legal_moves()
-        N, W, P = node.N, node.W, node.prior
-        assert P is not None
-        sqrt_total = math.sqrt(float(N.sum()) + 1e-8)
-        Q = np.divide(W, N, out=np.zeros_like(W), where=N > 0)
-        U = self.cfg.c_puct * P * sqrt_total / (1.0 + N)
-        score = Q + U
-        score[legal == 0] = -np.inf
-        return int(np.argmax(score))`}</pre>
+            <pre>{`            self.boards[self.pos] = canon
+            self.pis[self.pos] = pi
+            self.players[self.pos] = player
+            self.zs[self.pos] = z
+            self.pos = (self.pos + 1) % self.capacity`}</pre>
           </div>
         </EvidenceCard>
-        <Def term="PUCT 与探索奖励" en="Predictor + UCT, exploration bonus">
-          本项目的节点选择公式（Predictor + Upper Confidence bounds applied to Trees）：把已有平均成绩 <span className="mono">Q(a)</span> 与探索奖励 <span className="mono">U(a) = c · P(a) · √ΣN / (1 + N(a))</span> 相加。
-          探索奖励专门补偿「还没看够的路」，网络先验 <span className="mono">P(a)</span> 决定各边的初始权重，随该边访问次数 <span className="mono">N(a)</span> 增加而递减；走过足够多次后补偿自然消失，分数回到只看成绩。
+        <Def term="回放池" en="replay buffer">
+          用固定容量、写满就绕回开头的<strong>环形缓冲区</strong>（ring buffer）装旧对局样本的存储区（例 14-1 把真实容量缩到 5 个槽来演示这个绕回）。每条样本保存转成当前行棋方视角的标准棋盘、
+          当时的 player、π 和 z。重启时还能从 <span className="mono">buffer.npz</span> 恢复；
+          若新配置容量变小，只保留放得下的最新样本。
         </Def>
-        <p>
-          这套打分先在例 11-1 的三条边上过一遍手算。例 11-1 的三行使用同一个{" "}
-          <span className="mono">c=1.5、ΣN=16</span>，逐行计算后选择总分最高的一条。
-        </p>
       </div>
 
-      <PuctTable />
+      <BufferRing />
 
       <div className="prose mt-10">
-        <h3>访问次数归一化成 π，温度决定实际落子</h3>
+        <h3>均匀有放回抽批，累积到 min_buffer 才开始更新</h3>
         <p>
-          搜索跑完后，策略目标使用<strong>全部根动作</strong>的累计访问数，写成式子是：
-        </p>
-        <div className="formula">π(a) = N(a) / Σ<sub>全部根动作</sub>N</div>
-        <p>
-          用 3 条边的访问 10、5、1 举例，分母是全部根访问 16，不是候选动作个数 3，
-          得到的比例加起来等于 1。与先验 P 不同：P 是网络一眼给出的把握，π 是搜索访问分布 N/ΣN。
-          树还没跑过模拟时 ΣN=0，这个比值没有定义，此时按合法着均匀给出 π；
-          温度极低（<span className="mono">temperature &lt;= 1e-3</span>）时直接给出最大访问动作的独热分布；
-          常规温度下则对访问计数取 <span className="mono">1.0 / temperature</span> 次幂后再除以总和归一。
+          抽样是均匀、有放回的。每条样本的先后顺序被打散了，一次更新不再只代表刚刚那一小段经历。
+          另一种打散顺序的做法是洗牌后无放回发牌；有放回抽样连洗牌都省了，不必每次给整个回放池洗牌。
+          池子容量 5 万、每批 128 条，单批内出现的重复样本很少，批次仍近似池内分布；有放回与无放回的训练效果因此很接近。
         </p>
         <EvidenceCard
           fidelity="runtime-exact"
-          title="将根访问计数归一为分布 π，含零访问兜底与低温取最大分支"
-          source="alphagomoku/mcts.py · SearchTree.root_pi"
+          title="有放回均匀抽样并重建三个输入平面"
+          source="alphagomoku/replay.py · ReplayBuffer.sample"
         >
           <div className="codewalk">
-            <pre>{`    def root_pi(self, temperature: float = 1.0) -> np.ndarray:
-        """Visit-count distribution at the root (the training target)."""
-        counts = self.root.N
-        total = counts.sum()
-        if total <= 0:
-            legal = self.root_game.legal_moves()
-            s = legal.sum()
-            return legal / s if s > 0 else legal
-        if temperature <= 1e-3:
-            pi = np.zeros_like(counts)
-            pi[self.best_action()] = 1.0
-            return pi
-        c = counts.astype(np.float64) ** (1.0 / temperature)
-        return (c / c.sum()).astype(np.float32)`}</pre>
-          </div>
-        </EvidenceCard>
-        <Def term="访问分布" en="visit distribution">
-          搜索跑完后，按各根动作的累计访问数算出的比例分布：
-          <span className="mono">π(a) = N(a) / ΣN</span>，分母是全部根动作访问数之和，
-          不是预算次数，也不是候选动作个数。它与先验 P 回答同一个问题（「哪里该下」），
-          区别只在答案来源：P 来自网络一眼，π 来自搜索推演。
-        </Def>
-        <p>
-          不能用 top 5 的访问数当总数，也不能把「预算 40 次」直接写成分母。
-          新树第一次模拟只展开根，可能还没有任何根边访问；落子后若复用已经搜索过的子树，
-          新根还可能带着旧访问。因此「新跑了多少次」「根上累计多少次」和「top 5 展示多少次」是
-          3 件不同的事。例 11-2 会同时显示预算和真实 <span className="mono">ΣN</span>。
-        </p>
-        <p>
-          最终落子看 N 不看 Q。Q 会被早期一次好运抬高，而 N 大说明 PUCT 在知道成绩后
-          仍反复把预算投给它：访问最多，就是搜索最信任的结论。从访问分布到实际动作还有一道控制，
-          决定前期多试、后期果断。
-        </p>
-        <Def term="温度" en="temperature">
-          决定实际落子是按分布抽样，还是近似取最大。按 π^(1/τ) 取幂、重新归一后再采样（幂次之和一般不等于 1，必须归一），τ=1 时按 π 本身抽样，
-          τ 越低越偏向大访问，τ→0⁺ 退化为取最大（τ=0 处公式无定义，取的是极限）。自我对弈只用两档：前 12 手（演示配置为前 10 手）取 τ=1、按 π 抽样，之后取最大；两个数都是配置值，目的是让开局分叉，
-          让高访问候选更常出现、冷门候选也有机会；残局每手都可能直接定胜负，
-          抽样等于把胜势随手送掉，所以后期温度低，改为直接选访问最多的动作。
-        </Def>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="自我对弈前 temp_moves 手按 π 抽样，之后直接取最大访问动作"
-          source="alphagomoku/selfplay.py · play_games"
-        >
-          <div className="codewalk">
-            <pre>{`            pi = s.tree.root_pi(temperature=1.0)
-            if sample_temperature and s.game.move_count < temp_moves:
-                a = int(rng.choice(n * n, p=pi / pi.sum()))
-            else:
-                a = s.tree.best_action()`}</pre>
+            <pre>{`    def sample(self, batch_size: int, rng: np.random.Generator):
+        """Uniform with replacement -> (inputs (B,3,n,n), pis (B,n*n), zs (B,))."""
+        assert self.size > 0, "cannot sample from an empty buffer"
+        idx = rng.integers(0, self.size, size=batch_size)
+        b = self.boards[idx].astype(np.float32)
+        cur = b == 1.0
+        opp = b == -1.0
+        color = np.where(self.players[idx] == 1, 1.0, 0.0).astype(np.float32)
+        color = np.broadcast_to(color[:, None, None], cur.shape)
+        inputs = np.stack([cur, opp, color], axis=1).astype(np.float32)
+        return inputs, self.pis[idx].copy(), self.zs[idx].copy()`}</pre>
           </div>
         </EvidenceCard>
         <p className="mt-3">
-          门槛 <span className="mono">temp_moves</span> 读取配置项{" "}
-          <span className="mono">temp_threshold</span>：默认配置（<span className="mono">alphagomoku/config.py</span>）为 12，演示配置（<span className="mono">configs/fast.json</span>）为 10。
+          随机抽出的下标 <span className="mono">idx</span> 同时取出棋盘、行棋方、策略目标 π 与终局结果 z，
+          当场把规范视角棋盘拆回己方、对方、行棋方颜色三个输入平面，输出形状为{" "}
+          <span className="mono">(B, 3, n, n)</span>。
         </p>
-        <p>
-          为了让自我对弈走出更多样的开局路线，根节点还会把网络先验 P 和一份从狄利克雷分布（Dirichlet distribution，在「非负且和为 1 的配比」上抽样的分布，浓度参数 <span className="mono">α=0.3</span>）抽出的随机配比 <span className="mono">η</span> 混在一起：
-        </p>
-        <Def term="根噪声" en="root Dirichlet noise">
-          只在根节点把网络先验 P 和狄利克雷随机配比 η 按比例混合的做法（每次落子换了新根，若新根已展开就重新混一次噪声），新先验为
-          <span className="mono">(1−ε)·P + ε·η</span>。自我对弈取 <span className="mono">ε=0.25</span>（掺入 25% 噪声）与 <span className="mono">α=0.3</span>；竞技场与人机对弈关闭根噪声。
+        <Def term="小批与最小样本门槛" en="mini-batch & min_buffer">
+          <strong>小批</strong>（mini-batch）是一次权重更新用到的一小组样本，本项目每批 128 条。
+          <strong>最小样本门槛</strong>（<span className="mono">min_buffer</span>）是开始权重更新所需的最小样本数：回放池中样本数还小于它时，本轮只继续自我对弈积累样本，
+          不更新网络。回放池太浅时「随机抽一批」抽到的样本重叠很多，
+          一次更新仍被一小段经历带着摇摆；累积到门槛后才开始更新，随机混合才真正成立。演示配置：池容量 5 万条、门槛 256 条；默认配置是 10 万与 512。
         </Def>
         <EvidenceCard
           fidelity="runtime-exact"
-          title="在根节点按比例混合网络先验与狄利克雷噪声"
-          source="alphagomoku/mcts.py · SearchTree._mix_noise"
+          title="回放池容量与最小样本门槛的默认配置"
+          source="alphagomoku/config.py · Config"
         >
           <div className="codewalk">
-            <pre>{`    def _mix_noise(self, node: _Node, legal: np.ndarray) -> None:
-        eps = self.cfg.dirichlet_epsilon
-        if eps <= 0:
-            return
-        idx = np.flatnonzero(legal)
-        noise = self.rng.dirichlet(np.full(len(idx), self.cfg.dirichlet_alpha))
-        mixed = (1.0 - eps) * node.prior
-        mixed[idx] += eps * noise.astype(np.float32)
-        node.prior = mixed`}</pre>
+            <pre>{`    buffer_size: int = 100_000
+    min_buffer: int = 512`}</pre>
           </div>
         </EvidenceCard>
         <p className="mt-3">
-          噪声比例 <span className="mono">ε=0.25</span> 与浓度参数{" "}
-          <span className="mono">α=0.3</span> 分别对应{" "}
-          <span className="mono">alphagomoku/config.py</span> 中的{" "}
-          <span className="mono">dirichlet_epsilon</span> 与{" "}
-          <span className="mono">dirichlet_alpha</span>。
-          只在根掺，一处扰动会贯穿这手棋的整次搜索，把整局棋引向不同路线；
-          若每个节点都掺，统计里到处是没有意义的随机偏差，反而冲淡真实成绩。
-          开局按 π 抽样属于温度的安排，是另一道独立的控制；竞技场和人机对战关闭根噪声，两处的采样开关见例 11-2。
+          演示配置的 5 万与 256 写在 <span className="mono">configs/fast.json</span> 的同名字段上，站里真实记录就出自那份配置。
         </p>
+
+        <h3>棋盘和 π 同步变换，z 不跟着转</h3>
+        <p>
+          同一棋形旋转或镜像后棋理完全等价。同一份经历有 8 种等价读法，每次训练随机借其中一种；
+          不增加样本条数。每条抽中的样本随机选 8 种旋转/镜像之一。
+        </p>
+        <Def term="数据增强" en="data augmentation，简称增广">
+          从 8 个等价视图中随机取 1 个来改写当前样本；一条样本仍是一条，批次仍是 128，
+          只是换了坐标系呈现。空间变换必须让样本与策略答案同步：
+          棋盘上的棋形转到新坐标，π 对应格的概率也必须搬到相同位置。
+          z 只表示输赢，不是坐标，所以不转。例 14-2 用真实记录演示同一种变换下
+          棋盘与 π 怎样一起搬家。
+        </Def>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="对棋盘与策略目标 π 同步做八重对称变换"
+          source="alphagomoku/train.py · train_step"
+        >
+          <div className="codewalk">
+            <pre>{`    ks = rng.integers(0, 8, size=B)
+    aug_in = np.empty_like(inputs)
+    aug_pi = np.empty_like(pis)
+    for i in range(B):
+        k = int(ks[i])
+        aug_in[i] = dihedral_transform(inputs[i], k)
+        aug_pi[i] = dihedral_transform_pi(pis[i], n, k)
+
+    x = torch.from_numpy(aug_in).to(device)
+    target_pi = torch.from_numpy(aug_pi).to(device)
+    target_z = torch.from_numpy(zs.astype(np.float32)).to(device)`}</pre>
+          </div>
+        </EvidenceCard>
       </div>
 
-      <BudgetLab />
+      <SymmetryTable />
 
-      <Ledger title="alphagomoku/mcts.py · best_action 与 alphagomoku/config.py">
-        <p className="mb-3 text-sm">
-          正文中已经完整展示了选边函数 <span className="mono">_puct_select</span>、访问分布函数{" "}
-          <span className="mono">root_pi</span> 与根噪声函数 <span className="mono">_mix_noise</span>。
-          下面补充展示低温或后期落子调用的 <span className="mono">best_action</span>，以及{" "}
-          <span className="mono">Config</span> 中集中定义的五项搜索超参数：
+      <div className="prose mt-10">
+        <h3>train_step 重新作答，2 笔损失合成一次更新</h3>
+        <p>
+          回放池没有保存训练时的 v_net。网络用当前权重重新前向，然后算第 13 课定义过的 2 笔损失：
+          用<strong>交叉熵</strong>衡量落子概率 p 离目标 π 有多远，用<strong>均方误差</strong>衡量 v_net 离终局 z 有多远，
+          其中 p=softmax(logits)（训练侧写小写 p，与搜索侧的先验 P 区分开）。
+          再依次清旧梯度、反向传播、由优化器更新。
         </p>
-        <div className="codewalk">
-          <pre>{`    def best_action(self) -> int:
-        """Argmax visit count among LEGAL actions (all-zero counts fall back to
-        the first legal move, mirroring root_pi's uniform-legal fallback)."""
-        legal = self.root_game.legal_moves()
-        if legal.sum() == 0:
-            return 0
-        masked = np.where(legal > 0, self.root.N, -np.inf)
-        return int(np.argmax(masked))`}</pre>
-        </div>
-        <div className="codewalk mt-3">
-          <pre>{`    # MCTS
-    mcts_simulations: int = 100
-    c_puct: float = 1.5
-    dirichlet_alpha: float = 0.3
-    dirichlet_epsilon: float = 0.25
-    temp_threshold: int = 12`}</pre>
-        </div>
-        <p className="mt-3 text-sm">
-          运行 <span className="mono">python -m pytest tests/test_mcts.py -q</span>{" "}
-          可验证 PUCT 选边、根访问分布 <span className="mono">π</span> 归一与狄利克雷根噪声混合。
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="重新前向计算双头损失，清梯度、反向传播并更新权重"
+          source="alphagomoku/train.py · train_step"
+        >
+          <div className="codewalk">
+            <pre>{`    net.train()
+    logits, v = net(x)
+    value_loss = F.mse_loss(v, target_z)
+    logp = F.log_softmax(logits, dim=-1)
+    policy_loss = -(target_pi * logp).sum(dim=-1).mean()
+    loss = value_loss + policy_loss
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()`}</pre>
+          </div>
+        </EvidenceCard>
+      </div>
+
+      <Ledger title="alphagomoku/train.py · train_step">
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="完整单步训练函数：八重对称增广、前向计算、双损失合成、反向传播与指标返回"
+          source="alphagomoku/train.py · train_step"
+        >
+          <div className="codewalk">
+            <pre>{`def train_step(
+    net: AlphaGomokuNet,
+    optimizer: torch.optim.Optimizer,
+    batch,
+    device: str,
+    rng: np.random.Generator,
+) -> dict:
+    """One SGD update on a batch from ReplayBuffer.sample(). Returns metrics."""
+    inputs, pis, zs = batch
+    B = inputs.shape[0]
+    n = inputs.shape[-1]
+    ks = rng.integers(0, 8, size=B)
+    aug_in = np.empty_like(inputs)
+    aug_pi = np.empty_like(pis)
+    for i in range(B):
+        k = int(ks[i])
+        aug_in[i] = dihedral_transform(inputs[i], k)
+        aug_pi[i] = dihedral_transform_pi(pis[i], n, k)
+
+    x = torch.from_numpy(aug_in).to(device)
+    target_pi = torch.from_numpy(aug_pi).to(device)
+    target_z = torch.from_numpy(zs.astype(np.float32)).to(device)
+
+    net.train()
+    logits, v = net(x)
+    value_loss = F.mse_loss(v, target_z)
+    logp = F.log_softmax(logits, dim=-1)
+    policy_loss = -(target_pi * logp).sum(dim=-1).mean()
+    loss = value_loss + policy_loss
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    with torch.no_grad():
+        entropy = -(logp.exp() * logp).sum(dim=-1).mean()
+    return {
+        "loss": float(loss.item()),
+        "policy_loss": float(policy_loss.item()),
+        "value_loss": float(value_loss.item()),
+        "policy_entropy": float(entropy.item()),
+        "lr": float(optimizer.param_groups[0]["lr"]),
+    }`}</pre>
+            <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+              输入 (128,3,9,9) 经前向得到 logits (128,81) 与 v (128,)，分别与 target_pi (128,81)、target_z (128,) 计算交叉熵和均方误差，更新后返回损失、策略熵与学习率。
+            </p>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          运行 <span className="mono">python -m pytest tests/test_train.py -q</span> 与 <span className="mono">python -m pytest tests/test_game.py -q</span>，
+          可验证八重对称变换下棋盘与 <span className="mono">π</span> 的同步性，以及单步训练的输入输出形状。
         </p>
       </Ledger>
 
       <ChapterEnd
         summary={[
-          "PUCT 用 Q 加探索奖励决定下一次查哪条边：已有成绩好、访问不太满的候选容易胜出，c=1.5 控制探索强度。",
-          "π 由全部根动作的访问数归一化得到，分母是当前根的真实 ΣN，既不是本轮预算，也不是 top 5 的合计。",
-          "根噪声只在根掺随机以增加路线多样性，温度决定按 π 抽样还是取最大访问；两者帮助探索，不构成必然正确的保证。",
+          "回放池是环形缓冲区，覆盖最旧样本；池中样本累积到 min_buffer 才开始均匀、有放回地抽小批，一次更新因此混合了新旧经历。",
+          "数据增强把棋盘和 π 同步随机做 8 种之一（旋转/镜像），z 不是坐标所以不转。",
+          "train_step 重新前向，用交叉熵比较 p 与 π、用均方误差比较 v_net 与 z，再清梯度、反向传播、更新权重。",
         ]}
         next={
           <>
-            下一课把一局棋变成一批训练样本。落子当时还不知道输赢，终局才把 z 补进每条记录；
-            顺带分清搜索用过的 v_net、记下的 root_value 和终局结果 z 各自的角色，以及真训练怎样跨多棵树
-            批量评估、逐树顺序搜索。样本积累好之后，才轮到网络从这些样本里学。
+            下一课回答「损失下降了，能不能换 best」。竞技场让新旧网络在受控对战里相遇，
+            按胜 1、和 0.5、负 0 记分，用得分率门槛决定晋升不晋升。顺带分清 challenger、best、
+            baseline 和 latest 四个名字各指哪一份权重，以及有限场次的证据到底能证明什么。
           </>
         }
       />
@@ -308,34 +288,24 @@ export default function L14() {
         title="习题"
         questions={[
           {
-            q: "一条边 Q 很高，但只访问过 1 次；另一条边 Q 稍低，却已访问 20 次。为什么 PUCT 不直接永远选择第一条？",
+            q: "棋盘顺时针转 90° 时，π 和 z 应分别怎样处理？",
             options: [
-              "Q 只能显示正数，无法比较 2 条边",
-              "一次高 Q 可能只是好运；PUCT 同时利用 Q、先验 P 和访问次数，让已有成绩与尚未充分检查的候选共同决定下一次选择",
-              "搜索规定每条边必须轮流走，不能使用历史成绩",
+              "π 的 81 个位置跟棋盘一起转，z 保持原值",
+              "π 保持原坐标，只有 z 改正负号",
+              "π 与 z 都乘以 90",
             ],
-            answer: 1,
-            explain: "Q 是平均成绩，却不单独表达证据量。PUCT 让好成绩有吸引力，同时给访问较少、先验不低的候选补偿；补偿会随着该边 N 增大而下降。",
+            answer: 0,
+            explain: "π 的每一项对应一个棋盘坐标，所以样本旋转时答案坐标也要旋转。z 是输赢关系，没有空间坐标。",
           },
           {
-            q: "某次搜索预算是 40，但根边访问总数 ΣN 显示 47。哪个解释正确？",
+            q: "把回放池改成「无放回、按入库顺序读完一个 epoch」，训练动态会差在哪？",
             options: [
-              "一定是程序把七次访问重复相加了",
-              "根可能复用了上一手留下的已搜索子树；预算表示本轮新增模拟数，π 的分母使用当前根全部累计访问数",
-              "π 的分母应该强制改回 40，才能和配置一致",
+              "抽中的样本会从池里永久删除，池会越训越小",
+              "有放回的均匀小批与池内分布同权，同一条样本一批里可能抽到两次；按序无放回会让样本带上次序，最近入库的局面被系统性排后",
+              "每次只从最新一局棋抽，效果更好",
             ],
             answer: 1,
-            explain: "子树复用会保留子节点已有的 N。相反，一棵全新的树第一次模拟可能只展开根，让根边总数比预算少 1。π 永远按当前根真实 N 总和归一化。",
-          },
-          {
-            q: "根噪声、温度和 π 分别做什么？",
-            options: [
-              "三者都是同一个随机数，只是名字不同",
-              "根噪声改变自我对弈根先验以增加路线多样性；π 总结访问分布；温度决定实际动作是按分布抽样还是接近取最大",
-              "根噪声证明冷门动作更好，π 证明访问最多的动作一定正确",
-            ],
-            answer: 1,
-            explain: "三者位于不同环节：噪声先影响根 P，搜索后 N 归一化成 π，最后温度控制如何从访问分布选实际动作。它们帮助探索，不提供必然正确的保证。",
+            explain: "代码用 rng.integers 为 batch 中每个位置独立产生下标，并没有把已抽中的下标移除，所以每步看到的样本分布与池内分布一致。改成按序无放回，步与步之间就带上了入库次序，近况会攒在末尾才被学到。",
           },
         ]}
       />
@@ -343,188 +313,106 @@ export default function L14() {
   )
 }
 
-function PuctTable() {
-  const initRows = [
-    { name: "A", p: 0.40, n: 10, q: 0.55 },
-    { name: "B", p: 0.40, n: 5, q: 0.45 },
-    { name: "C", p: 0.20, n: 1, q: 0.10 },
-  ]
-  const [rows, setRows] = useState(initRows)
-  const total = rows.reduce((s, r) => s + r.n, 0)
-  const scored = rows.map((r) => {
-    const u = (1.5 * r.p * Math.sqrt(total)) / (1 + r.n)
-    return { ...r, u, score: r.q + u }
+function BufferRing() {
+  const [writes, setWrites] = useState(7)
+  const capacity = 5
+  const lastSlot = writes > 0 ? (writes - 1) % capacity : -1
+  const nextSlot = writes % capacity
+  const cells = Array.from({ length: capacity }, (_, i) => {
+    const start = Math.max(0, writes - capacity)
+    const values = Array.from({ length: Math.min(writes, capacity) }, (_, j) => start + j + 1)
+    const value = values.find((v) => (v - 1) % capacity === i)
+    return value ?? null
   })
-  const best = scored.reduce((a, b) => (b.score > a.score ? b : a))
-
-  const stepVisit = () => {
-    setRows((prev) =>
-      prev.map((r) => (r.name === best.name ? { ...r, n: r.n + 1 } : r)),
-    )
-  }
 
   return (
-    <figure className="figure mt-8" data-qa="fig-budget">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
-        <span className="mini-label">例 11-1 · 3 条边下一次选谁</span>
-        <div className="flex gap-2">
-          <button type="button" className="btn" onClick={stepVisit}>
-            试走一步（胜出边 {best.name} 的 N+1）
-          </button>
-          {total > 16 && (
-            <button type="button" className="btn" onClick={() => setRows(initRows)}>
-              ↺ 回到 ΣN=16
-            </button>
-          )}
-        </div>
-      </div>
+    <figure className="figure mt-8">
+      <div className="px-4 pt-3 sm:px-5"><span className="mini-label">例 14-1 · 容量 5 的环形回放池</span></div>
       <div className="p-4 sm:p-5">
-        <div className="overflow-x-auto">
-          <table className="l09-table">
-            <thead><tr><th>边</th><th>P</th><th>N</th><th>Q</th><th>U=1.5·P·√{total}/(1+N)</th><th>Q+U</th><th>Q + U 构成</th></tr></thead>
-            <tbody>
-              {scored.map((r) => (
-                <tr key={r.name}>
-                  <td><strong>{r.name}</strong>{r.name === best.name ? " ← 下一次" : ""}</td>
-                  <td className="num">{r.p.toFixed(2)}</td>
-                  <td className="num">{r.n}</td>
-                  <td className="num">{r.q.toFixed(2)}</td>
-                  <td className="num">{r.u.toFixed(2)}</td>
-                  <td className="num">{r.score.toFixed(2)}</td>
-                  <td style={{ minWidth: "7.5rem" }}>
-                    <div className="prob-track" style={{ display: "flex" }}>
-                      <span className="motion-bar" style={{ width: `${Math.min(100, r.q * 65)}%`, background: "var(--fg-muted)" }} title={`Q=${r.q.toFixed(2)}`} />
-                      <span className="motion-bar" style={{ width: `${Math.min(100, r.u * 65)}%`, background: "var(--accent)" }} title={`U=${r.u.toFixed(2)}`} />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="flex flex-wrap gap-2" data-qa="replay-ring">
+          {cells.map((value, i) => {
+            const isLatest = i === lastSlot
+            const isNext = i === nextSlot
+            return (
+              <div
+                key={i}
+                className="card px-4 py-3 text-center"
+                style={{
+                  borderColor: isLatest ? "var(--accent)" : isNext ? "var(--hairline-strong)" : undefined,
+                  background: isLatest ? "var(--accent-wash)" : undefined,
+                  transition: "border-color 280ms ease, background 280ms ease",
+                }}
+              >
+                <div className="mini-label">
+                  槽 {i}{isLatest ? " · 刚写" : isNext ? " · 下一格" : ""}
+                </div>
+                <strong className="num" style={{ color: isLatest ? "var(--accent-deep)" : undefined }}>
+                  {value === null ? "空" : `样本 ${value}`}
+                </strong>
+              </div>
+            )
+          })}
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <button type="button" className="btn" onClick={() => setWrites((n) => Math.max(0, n - 1))}>少写一条</button>
+          <button type="button" className="btn primary" onClick={() => setWrites((n) => n + 1)}>再写一条</button>
+          <span className="num text-sm" style={{ color: "var(--fg-muted)" }}>已写 {writes} 条，下一格 {(writes % capacity)}</span>
         </div>
         <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          三行共用同一个 c=1.5 与 ΣN={total}，逐行算出 U（朱砂段）再加 Q（深灰段），总分最高的一行标着「← 下一次」。
-          初始 ΣN=16 时 A 的 Q 最高，但已看了 10 次，探索奖励很小；B 成绩不差、访问较少，因此胜出。
-          点「试走一步」让胜出边的 N 加 1，观察它的探索奖励 U 怎样被分母摊薄、把下一次机会让回给 A。
+          第 6 条会覆盖第 1 条，第 7 条覆盖第 2 条。真实容量由 config 决定，原理相同。
         </p>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">例 11-1</span>
-        数字专门用于逐项手算 PUCT，不是训练记录。
+        <span className="cap-no">例 14-1</span>
+        教学缩小的容量 5，用来看清「写满绕回、覆盖最旧」这一条；真实回放池的容量大得多。
+        绕回与覆盖的实现见 alphagomoku/replay.py · ReplayBuffer.add_many 的游标行。
       </figcaption>
     </figure>
   )
 }
 
-type NetFn = (planes: number[][][]) => { logits: number[]; value: number }
-
-function BudgetLab() {
-  const [net, setNet] = useState<NetFn | null>(null)
-  const [noise, setNoise] = useState<0 | 0.25>(0)
-  const [seed, setSeed] = useState(42)
-  const [sims, setSims] = useState(0)
-  const [version, setVersion] = useState(0)
-  const treeRef = useRef<SearchTree | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    loadWeights().then((w: WeightsJson) => {
-      if (alive) setNet(() => loadNet(w))
-    })
-    return () => { alive = false }
-  }, [])
-
-  useEffect(() => {
-    if (!net) return
-    const cfg: MctsConfig = { cPuct: 1.5, dirichletEps: noise, dirichletAlpha: 0.3 }
-    treeRef.current = new SearchTree(POS, cfg, net, mulberry32(seed))
-    setSims(0)
-    setVersion((v) => v + 1)
-  }, [net, noise, seed])
-
-  const runTo = (target: number) => {
-    const tree = treeRef.current
-    if (!tree || target <= sims) return
-    tree.run(target - sims)
-    setSims(target)
-    setVersion((v) => v + 1)
-  }
-
-  const tree = treeRef.current
-  const counts = tree ? Array.from(tree.root.N) : []
-  const total = counts.reduce((a, b) => a + b, 0)
-  const rows = counts
-    .map((n, a) => ({ a, n, q: n > 0 ? tree!.root.W[a] / n : 0, p: tree?.root.prior?.[a] ?? 0 }))
-    .filter((r) => r.n > 0)
-    .sort((a, b) => b.n - a.n)
-    .slice(0, 5)
-  const f5n = counts[F5] ?? 0
-  const best = tree && total > 0 ? tree.bestAction() : null
-  void version
+function SymmetryTable() {
+  const [k, setK] = useState(0)
+  const mv = MOVES[SYM_IDX]
+  const boardK = dihedral(STATES[SYM_IDX].board, k).flat()
+  const piK = dihedralPi(mv.pi, k)
+  const original = argmaxPi(mv.pi)
+  const moved = argmaxPi(piK)
 
   return (
-    <figure className="figure mt-8" data-qa="fig-temp">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
-        <span className="mini-label">例 11-2 · 真权重预算实验</span>
-        <span className="num text-sm" style={{ color: "var(--fg-faint)" }}>新增模拟 {sims} · 根 ΣN={total}</span>
-      </div>
-      <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
-        <div className="min-w-0 flex-1 md:max-w-[20rem]">
-          <Board board={POS.board.flat()} marks={[{ x: 5, y: 4, anchor: true }]} />
-          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            轮黑，红圈 F5=(5,4) 是立即成五的胜着，用来检验弱先验与有限预算下搜索能否找到它。
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" className="btn" disabled={!net || sims >= 1} onClick={() => runTo(1)}>跑 1 次</button>
-            <button type="button" className="btn" disabled={!net || sims >= 40} onClick={() => runTo(40)}>跑到 40</button>
-            <button type="button" className="btn" disabled={!net || sims >= 100} onClick={() => runTo(100)}>跑到 100</button>
-            <button type="button" className="btn" disabled={!net} onClick={() => setSeed((s) => s + 1)}>↺ 换种子重置</button>
-          </div>
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-xs" style={{ color: "var(--fg-faint)" }}>自我对弈根噪声</span>
-            <span className="seg">
-              <button type="button" className={`seg-btn ${noise === 0 ? "active" : ""}`} onClick={() => setNoise(0)}>关</button>
-              <button type="button" className={`seg-btn ${noise === 0.25 ? "active" : ""}`} onClick={() => setNoise(0.25)}>开 25%</button>
-            </span>
-          </div>
+    <figure className="figure mt-8">
+      <div className="px-4 pt-3 sm:px-5"><span className="mini-label">例 14-2 · 棋盘与 π 同步做 8 种变换（演示可逐个查看 8 个视图，训练时每次只取其一）</span></div>
+      <div className="flex flex-col gap-5 p-4 sm:flex-row sm:p-5">
+        <div className="w-full sm:w-64 sm:flex-none" data-qa="sym-board">
+          <Board
+            board={boardK}
+            heat={piK}
+            marks={[{ x: moved % 9, y: Math.floor(moved / 9), anchor: true }]}
+          />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="mini-label">根访问 top5 · π 使用全部 ΣN</div>
-          {rows.length === 0 ? (
-            <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
-              真权重加载后先跑 1 次：第一次只展开根，会看到预算 1、ΣN=0。
-            </p>
-          ) : (
-            <div className="mt-3 space-y-2">
-              {rows.map((r) => (
-                <div key={r.a} className="l00-top-row">
-                  <span className="mono text-sm">{coord(r.a)}</span>
-                  <span className="num text-xs" style={{ color: "var(--fg-faint)" }}>P {(r.p * 100).toFixed(1)}%</span>
-                  <span className="num text-xs" style={{ color: "var(--fg-faint)" }}>N {r.n}</span>
-                  <span className="num text-xs" style={{ color: "var(--fg-faint)" }}>Q {r.q >= 0 ? "+" : ""}{r.q.toFixed(2)}</span>
-                  <span className="prob-track"><span className="prob-fill" style={{ width: `${total ? (r.n / total) * 100 : 0}%` }} /></span>
-                  <span className="num w-12 text-right text-xs">{total ? ((r.n / total) * 100).toFixed(1) : "0.0"}%</span>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="reveal-box mt-4 text-sm leading-relaxed">
-            <p>当前最多访问：<span className="mono">{best === null ? "—" : coord(best)}</span></p>
-            <p className="mt-1">F5：<span className="mono">N={f5n} / ΣN={total}</span></p>
-            <p className="mt-2" style={{ color: "var(--fg-muted)" }}>
-              若 40 次后 F5 仍未访问，原因是弱网络先验和有限预算先把机会花在别处。
-              增加预算只是提高补上漏点的机会，并不保证一定找到。切换噪声后 P 会变化，N 仍由后续 PUCT 和真实回传共同决定。
-              「开 25%」就是自我对弈的用法；「关」就是竞技场和人机对战的用法，两处建树都把 add_noise 设为 False
-              （alphagomoku/arena.py 与 server/play.py）；同样是这两处，竞技场开局按 π 抽样，人机对战则恒取访问最多、不抽样。
-            </p>
+          <div className="mini-label">k=0..3 旋转；k=4..7 旋转后镜像</div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {Array.from({ length: 8 }, (_, i) => (
+              <button key={i} type="button" className={`btn ${k === i ? "active" : ""}`}
+                onClick={() => setK(i)} data-qa="sym-k">{i}</button>
+            ))}
+          </div>
+          <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+            π 最热坐标从 <span className="mono">{coord(original)}</span> 搬到
+            <span className="mono" style={{ color: "var(--accent-deep)" }}> {coord(moved)}</span>。
+            棋盘与 π 热力若不用同一个 k，样本与答案就会错位。
+          </p>
+          <div className="reveal-box mt-3 text-sm" data-qa="sym-argmax">
+            z 仍是同一个输赢数；空间旋转不会把赢家变成输家。
           </div>
         </div>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">例 11-2</span>
-        棋盘是教学构造；叶子的评价来自演示用的检查点（checkpoint，训练保存的权重文件；教学站导出的这份只保留五位小数），
-        搜索由浏览器 SearchTree 复现。浏览器 SearchTree 使用 Float64、舍入后的导出权重和 JavaScript 随机数，
-        规则和 Python 版一致，小数结果不会一模一样。
+        <span className="cap-no">例 14-2</span>
+        棋盘由真实自我对弈记录重建，π 直接取自记录；换 k 时两者必须用同一个变换。
+        变换实现见 learn/src/engine/game.ts 的 dihedral 与 dihedralPi（镜像 alphagomoku/game.py
+        的 dihedral_transform 与 dihedral_transform_pi）。换 k 前先预测 π 会搬到哪几格，再切过去对拍。
       </figcaption>
     </figure>
   )

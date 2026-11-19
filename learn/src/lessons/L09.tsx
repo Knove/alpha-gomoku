@@ -1,271 +1,264 @@
-/** 第 8 课 · 叠层：看见全盘。
- *  节拍：思考题(单层 3×3 怎么看全盘)→ 正文(感受野每层 +2 与深度、
- *  残差 x+h 捷径与批标准化)→
- *  例 8-1(层深滑杆：感受野框 3×3 → 15×15)→
- *  例 8-2(真特征图墙：traceNet + weights-best,stem 与三个残差块各取前 6 通道)→
- *  源码索引与验证 → 习题。 */
+/** 第 9 课 · 双头：一次前向两个答案。
+ *  节拍：思考题（两个问题两个网络？）→ 正文（共用主干 / 两种读法 / softmax+tanh）
+ *  → 例 9-1（自由摆子真前向：问网络 → 81 分数热力图 + top5 + 价值估计条，
+ *  对照开关换 weights-untrained 未训练网：baseline，训练前冻结的随机初始化）
+ *  → 源码索引与验证 → 习题。 */
 import { useEffect, useMemo, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
+import { NetPipeline } from "../framework/net-pipeline"
 import { ChapterEnd, Def } from "../framework/def"
 import { EvidenceCard } from "../framework/evidence"
-import { encode, type GameState } from "../engine/game"
-import { traceNet, type WeightsJson } from "../engine/model"
-import { loadWeights } from "../lib/weights"
+import Board from "../lib/board"
+import { encode, legalMoves, type GameState } from "../engine/game"
+import { loadNet, type WeightsJson } from "../engine/model"
+import { softmax } from "../engine/nn"
+import { loadWeights, loadWeightsUntrained } from "../lib/weights"
 
-/* 与第 7 课同一局面：己方三连 (2,4)(3,4)(4,4),轮己方走。
- * encode 只读 board + current,直接构造状态(教学局面：只摆三连，演示用)。 */
-const THREE: [number, number][] = [
-  [2, 4],
-  [3, 4],
-  [4, 4],
-]
-const STATE: GameState = (() => {
-  const board = Array.from({ length: 9 }, () => new Array<number>(9).fill(0))
-  for (const [x, y] of THREE) board[y][x] = 1
-  return { board, current: 1, winner: 0, moveCount: 3, lastMove: null }
+/* 初始局面沿用第 6/7 课的三连(己方 (2,4)(3,4)(4,4)，轮黑)，换你随手摆。 */
+const INIT: number[] = (() => {
+  const b = new Array<number>(81).fill(0)
+  for (const x of [2, 3, 4]) b[4 * 9 + x] = 1
+  return b
 })()
+
+interface AskResult {
+  probs: number[] // 空格上重新归一的 81 概率
+  top: { a: number; p: number }[] // top5
+  vNet: number // 网络直接前向的价值头输出，当前行棋方视角
+  ms: number
+}
+
+/** 一次真前向：encode → loadNet 的函数（与本站引擎同一形状）。 */
+function askNet(
+  net: (input: number[][][]) => { logits: number[]; value: number },
+  st: GameState,
+): AskResult {
+  const t0 = performance.now()
+  const { logits, value } = net(encode(st))
+  const ms = performance.now() - t0
+  const legal = legalMoves(st)
+  const raw = softmax(logits)
+  let sum = 0
+  const probs = raw.map((p, a) => p * legal[a])
+  for (const p of probs) sum += p
+  if (sum > 1e-9) for (let a = 0; a < 81; a++) probs[a] /= sum
+  const top = probs
+    .map((p, a) => ({ a, p }))
+    .filter((t) => t.p > 0)
+    .sort((x, y) => y.p - x.p)
+    .slice(0, 5)
+  return { probs, top, vNet: value, ms }
+}
 
 export default function L09() {
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
-      <div className="eyebrow mb-3">第 8 课</div>
-      <h1 className="text-2xl font-bold">叠层：看见全盘</h1>
+      <div className="eyebrow mb-3">第 9 课</div>
+      <h1 className="text-2xl font-bold">双头：一次前向两个答案</h1>
+
+      <NetPipeline step={5} />
 
       <LessonGuide
-        question="3×3 卷积核只能看一小块时，网络怎样逐步理解整局棋的形势？"
-        why="局部三连很重要，但「哪一边整体更强、两处威胁是否能连起来」需要更大的感受野。把小卷积核直接做成全盘大小既笨重又难学。"
+        question="同一局棋既要回答「哪里该下」，又要回答「谁更占优」，为什么不用两台完全分开的机器？"
+        why="2 个问题虽然答案形状不同，却都依赖同一批棋形和全盘形势。先共享理解，再分别读出答案，能少学重复的内容。"
         chain={[
-          "浅层卷积核先发现局部棋子和小棋形",
-          "下一层把相邻位置的发现再组合",
-          "每多叠一层，能回看的区域向外扩一圈",
-          "深层把局部特征汇成整盘形势",
+          "主干（前几课那 7 层卷积）把棋盘变成许多张特征图，装着棋形与整盘形势",
+          "策略头保留每个格子的差别，给 81 个落点打分",
+          "价值头把整盘信息汇成一个价值估计",
+          "搜索把「落点建议 + 形势估计」组合成实际走法",
         ]}
-        takeaway="你能算出叠层后的感受野，写出 ResBlock 里 x+h 捷径与两处批标准化（Batch Normalization，简称 BN）的位置，并区分它的训练与推理统计。"
-        boundary="本站演示权重（小一号的 fast 配置，为了让网页算得快）叠 3 个残差块，共 7 层，感受野 15×15（计算见正文）。项目默认是 4 个残差块、9 层卷积。残差块、感受野都由正文定义；理论感受野只表示可能传来的范围，不保证每个位置实际影响相同。"
+        takeaway="你能把 logits（81 个落点各自的分数）走完 softmax 与 tanh 得到 p 与 v_net，写出 v_net 的范围与视角（tanh 压进 −1 到 +1、站在当前行棋方一边），并写出双头 forward 的形状流转（共用主干输出的 48 张特征图，末端各读各的）。"
+        boundary="本课会完整算一次 softmax，并看 tanh 怎样把价值限制在 −1 到 +1。这里的 v_net 是网络直接输出；下一课搜索汇总出的 root_value 是另一个数，不能混称为 v。"
       />
 
       <Quiz
         title="思考题 · 先选一个答案"
         questions={[
           {
-            q: "单个卷积核只看得见 3×3 的一小片，可「我方子力一大片、对方很稀」是全盘的事。怎么让它看见全盘？",
+            q: "网络看完棋盘，要回答 2 个问题：81 格哪里该下（逐点的分数），和整盘谁优（1 个数）。怎么安排这套问答？",
             options: [
-              "把卷积核做大：直接造一张 9×9 的大卷积核，一步看全",
-              "叠层：小卷积核一层层叠上去，能看的范围每层大一圈",
-              "没办法，卷积核天生只能看局部",
+              "2 个网络：一个专门学「下哪」，一个专门学「谁优」",
+              "1 个主干带 2 个头：主干看棋，末端分岔，一个头逐点读，一个头整盘读",
+              "1 个网络答两次：先把 81 个分数算完，再用同一套权重算一遍价值估计",
             ],
             answer: 1,
             explain:
-              "选第二项。单个输入平面上的 9×9 卷积核就要 81 个权重；本模型有三个输入平面，一套全盘卷积核会有 243 个。更要紧的是，它想一步认完所有东西，跳过了「先认局部、再组合整体」的层次。叠层让第二层站在第一层结果上：窗口仍是 3×3，能回看的范围却一圈圈变大。",
+              "选第二项。第一项等于把认棋形学两遍：判断「这里该下」和「这局我优」，看的是同一批棋形，认棋形这件事只该学一次。第三项也不行：81 个分数和 1 个数，读出的方式不同，得各配各的读出层（头）；主干仍共享同一份主干输出。所以第一项错在把主干拆成两份，第三项错在不肯配两种读法。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>每叠一层，感受野边长 +2</h3>
+        <h3>一份棋盘理解，按 2 种问题读出答案</h3>
         <p>
-          一层 3×3 只看 3×3；两层叠起来，第二层的每个格子拿第一层
-          <strong>九个格子的分数</strong>（在第二层眼里，那就是九个特征值）当原料。那九个格子紧挨着排成 3×3，
-          每个自己都向外多看了一圈输入；九个 3×3 拼在一起，覆盖 5×5。
-          于是第二层能回看的输入范围恰好是 5×5。
-          规律是<strong>每多叠一层，感受野边长 +2</strong>。
+          把输入从第一层往末层算一遍、直接得到输出，这样的计算叫一次<strong>前向</strong>（forward pass，下棋只走前向，训练才在前向之后接上误差与梯度）。网络看完棋盘要同时回答「哪里该下」和「谁更占优」：
+          这 2 个问题读的是同一局棋里的棋形与形势。若完全分开做成两套网络，
+          就可能重复学习「怎样认棋形」。共用主干让主干输出的 48 张特征图同时服务 2 个训练目标，
+          通常更省权重，2 个任务的训练信号也都更新同一主干。这是一种常见设计取舍，
+          不保证 2 个任务永远互相帮助：两目标打架时，两路梯度在主干上互相抵消，损失会难降；本项目两笔损失等权 1:1，没有再调这个比例。
         </p>
-        <Def term="感受野" en="receptive field">
-          一个输出格理论上能看到的输入范围。它由结构决定，与权重取值无关：
-          第 1 层看 3×3，第 2 层看 5×5，每多一层边长加 2。
-          「理论上」指信号可能传来的范围，不保证范围内每个位置实际影响相同。
+        <Def term="双头" en="dual-head">
+          一份主干加 2 个末端读法层的结构。主干（第 8 课那 7 层卷积）把棋盘变成
+          48 张 9×9 的特征图，装着棋形与整盘形势；2 个头各自把这份特征图读成自己的答案。
+          代码里「一份理解」就是一个变量 <span className="mono">h</span>，2 个头都从它出发。
         </Def>
+        <HeadBranch />
         <p>
-          本模型的第一层叫 stem，后面还叠 6 层；每两层编成一组，一组叫一个残差块，
-          一共 3 组。这是本课程演示权重的配置（<span className="mono">configs/fast.json</span> 的{" "}
-          <span className="mono">net_res_blocks = 3</span>，合起来 <strong className="num">7</strong> 层；项目默认配置{" "}
-          <span className="mono">configs/default.json</span> 取 4 个残差块，合 9 层卷积）。
+          <strong>策略头</strong>逐点读出「哪里该下」：1×1 卷积把 48 通道压到 2 通道，
+          摊平成 162 个数，再由全连接层读出 81 个动作分。1×1 卷积逐点计算、
+          不混合相邻格，保留每个位置的独立信息。
+        </p>
+        <p>
+          <strong>价值头</strong>把整盘读成 1 个数：1×1 卷积压到 1 通道，
+          摊平成 81 个数，经 81→64→1 的全连接层收成一个价值估计，
+          最后用 tanh 压进 −1…+1。
         </p>
         <EvidenceCard
           fidelity="runtime-exact"
-          title="主干叠层：首层 stem 之后串联 res_blocks 个残差块"
-          source="alphagomoku/model.py · AlphaGomokuNet.__init__"
+          title="双头层定义与前向计算：同一份主干特征 h 分路读出 81 个动作分与 1 个价值估计"
+          source="alphagomoku/model.py · AlphaGomokuNet.__init__ 与 forward"
         >
           <div className="codewalk">
-            <pre>{`        self.blocks = nn.Sequential(*[ResBlock(channels) for _ in range(res_blocks)])`}</pre>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
+              <pre className="min-w-0 flex-1">{`        # policy head
+        self.p_conv = nn.Conv2d(channels, 2, 1, bias=False)
+        self.p_bn = nn.BatchNorm2d(2)
+        self.p_fc = nn.Linear(2 * self.n * self.n, self.n * self.n)
+        # value head
+        self.v_conv = nn.Conv2d(channels, 1, 1, bias=False)
+        self.v_bn = nn.BatchNorm2d(1)
+        self.v_fc1 = nn.Linear(self.n * self.n, 64)
+        self.v_fc2 = nn.Linear(64, 1)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        h = self.blocks(self.stem(x))
+        p = F.relu(self.p_bn(self.p_conv(h)))
+        p = self.p_fc(p.reshape(-1, 2 * self.n * self.n))
+        v = F.relu(self.v_bn(self.v_conv(h)))
+        v = F.relu(self.v_fc1(v.reshape(-1, self.n * self.n)))
+        v = torch.tanh(self.v_fc2(v)).squeeze(-1)
+        return p, v`}</pre>
+              <div className="text-xs leading-relaxed sm:w-56" style={{ color: "var(--fg-faint)" }}>
+                <div>h：主干输出的 48 张 9×9 特征图，p 与 v 两个分支都从它出发。</div>
+                <div className="mt-1">策略头：48→2 通道后摊成 162 个数，经 p_fc 读出 81 个动作分。</div>
+                <div className="mt-1">价值头：48→1 通道后摊成 81 个数，经 81→64→1 与 tanh 收成一个价值估计。</div>
+              </div>
+            </div>
           </div>
         </EvidenceCard>
+        <h3>分数读成概率，价值估计压进同一把标尺</h3>
+        <p>
+          策略头先给 81 个格子的分数，这批未归一化的分数就叫 logits。网络本体到 logits 为止，
+          不输出概率；归一化在只做前向的封装里补一步，训练时与下棋时各做各的：
+          下棋用 softmax，训练用对数归一化（log_softmax，一步算出 ln p 的同一步）。
+          softmax 后的这批数称概率 p（小写；进搜索遮格归一后才叫先验 P）。
+          <strong>softmax 把这批 logits 改成总和为 1 的概率。</strong>
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="推理封装：前向取得 logits 与价值估计后，对 logits 做 softmax 归一化"
+          source="alphagomoku/model.py · Predictor.predict"
+        >
+          <div className="codewalk">
+            <pre>{`logits, v = self.net(x)
+probs = torch.softmax(logits, dim=-1)`}</pre>
+          </div>
+        </EvidenceCard>
+        <p>
+          logits 可正可负，不能直接除以总和当概率。softmax 先把每个分数取
+          <span className="mono">e</span> 的幂变成正数，再除以总和；
+          计算时先减去最大分 <span className="mono">m</span>，防止指数溢出。
+        </p>
         <div className="formula">
-          感受野边长 = <span className="hl">3</span> + 2 × (层数 − 1) → 7 层：
-          3 + 2×<span className="hl">6</span> = <span className="hl">15</span>
+          pᵢ = e^(lᵢ−m) / Σe^(lⱼ−m)　　（e≈2.718）
+          <br />分数 <span className="hl">2 / 1 / 0</span> → 概率 <span className="hl">0.67 / 0.24 / 0.09</span>
         </div>
-        <p>式子念出来：层数减 1 就是乘 2 的次数。这是 stride=1、3×3 核、padding=1 下的规律（padding 不改变 +2，只保证输出图不缩水）。7 层代入得 15，9 层代入得 19。15×15 的感受野以该输出格为中心：天元的格子确实罩住全盘，角落的格子要罩住对角得 17×17（8 层），7 层时角落的半径差一格。</p>
-        <p>整盘判断不因此受阻：单个格看不到对角，末端读出层却会从整张特征图汇总全部 81 个格子（下一课详解），81 个格各看 15×15、合起来早已覆盖全盘。</p>
-      </div>
-
-      <FovSlider />
-
-      <div className="prose mt-12">
-        <h3>深层把局部发现组合成更大范围</h3>
+        <Def term="softmax" en="softmax">
+          把一组 logits 保序地变成总和为 1 的概率：减去最大分、取 e 的幂、再除以总和。
+          例 9-1 的热度会先遮掉已占格，再在空格里归一化，所以展示值不是裸 softmax 输出。
+        </Def>
         <p>
-          这种许多层堆叠的网络叫<strong>深度网络</strong>（deep network），
-          用它做机器学习就是<strong>深度学习</strong>：上一层的输出到下一层就是输入特征，浅层处理小范围原始格子，深层在浅层结果上组合出更大范围的表示（本课程演示模型共 7 层卷积，项目默认 9 层）。
-          层叠带来的感受野增长，正是它「深」的意义之一。
-          更深的层<strong>有能力</strong>把更大范围的信息组合起来：
-          浅层常更容易对局部棋形敏感，深层可能整合成更大的局面特征。
-          这是一种常见倾向，不是「第几层必定懂什么」的承诺；
-          每个通道实际学到什么，要看训练结果。
+          策略头收在概率分布上；价值头的 1 个数不走 softmax，而要过 tanh。
         </p>
-      </div>
-
-      <FeatureWall />
-
-      <div className="prose mt-12">
-        <h3>残差连接让旧信息留下</h3>
+        <Def term="双曲正切" en="hyperbolic tangent（缩写 tanh）">
+          把任意实数平滑压进 −1 到 +1 的函数：输入越正越靠近 +1，输入越负越靠近 −1，0 停在中间。
+          价值头用它收尾，使输出与终局结果 z 共用一把标尺。它不做归一化，压的也不是概率。
+        </Def>
         <p>
-          叠层有个隐患：层一多，原始输入的信号传到后面越来越淡，深网学得又慢又吃力。
-          残差连接是一条简单的补救：每一组层不重写答案，只算一份「修正量」。
-        </p>
-        <p>
-          记号很朴素：<span className="mono">F(x)</span> 是修正量，原输入
-          <span className="mono">x</span> 不动，两路相加，出口再过一次 ReLU。
-          想「什么也不修」，让 <span className="mono">F(x)</span> 学成接近 0 就行，x 原样通过
-          （前提是 x≥0，见下），这是最好学的选择，
-          写成一行就是 <span className="mono">y=ReLU(x+F(x))</span>。
-          倒着看也一样：反向传播（把误差沿各层倒着分解求梯度的算法，第 13 课详述）时，只要出口 ReLU 的门开着，
-          直通路的这份 +1 就让更新信号可以直接穿过，深层不容易收不到更新；
-          直通路只保证这段梯度为 1，梯度仍可能在别处衰减。<span className="mono">F′</span> 是修正量那条路的梯度，
-          这一段的梯度是 <span className="mono">1+F′</span>。
+          和终局结果 z 使用同一把标尺，才能计算误差。价值误差是
+          <span className="mono">(v_net−z)²</span> 的平均，z 取赢 +1、输 −1、和 0；
+          它再与策略头的交叉熵损失 1:1 相加。
         </p>
         <EvidenceCard
           fidelity="runtime-exact"
-          title="残差块前向计算：两层卷积后把原输入 x 加回修正量 h"
-          source="alphagomoku/model.py · ResBlock.forward"
+          title="训练步损失计算：价值头算均方误差，与策略损失等权相加"
+          source="alphagomoku/train.py · train_step"
         >
           <div className="codewalk">
-            <pre>{`    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = F.relu(self.bn1(self.conv1(x)))
-        h = self.bn2(self.conv2(h))
-        return F.relu(x + h)`}</pre>
+            <pre>{`    logits, v = net(x)
+    value_loss = F.mse_loss(v, target_z)
+    logp = F.log_softmax(logits, dim=-1)
+    policy_loss = -(target_pi * logp).sum(dim=-1).mean()
+    loss = value_loss + policy_loss`}</pre>
           </div>
         </EvidenceCard>
-        <p className="mt-3">
-          两行 <span className="mono">h</span> 是修正量分支（梯度 <span className="mono">F′</span>），<span className="mono">return F.relu(x + h)</span> 中的{" "}
-          <span className="mono">x + h</span> 把直通项（梯度 1）与修正量合成为 <span className="mono">1 + F′</span>；出口的 ReLU 既保证传给下一块的{" "}
-          <span className="mono">x ≥ 0</span>（<span className="mono">stem</span> 出口同样经过 ReLU），也让块与块之间保持非线性。本站{" "}
-          <span className="mono">model.ts</span> 的 <span className="mono">resBlock</span> 复现这条推理路径，例 8-2 的特征图即由它逐层算出。
-        </p>
-        <Def term="残差连接" en="residual connection，也叫捷径连接 shortcut connection">
-          把原输入不加改动地加到本组输出上的那条通路。本模型每组算的是修正量
-          <span className="mono">F(x)</span>，输出为
-          <span className="mono">y=ReLU(x+F(x))</span>：
-          「什么也不修」（<span className="mono">F(x)</span> 接近 0）成为容易学到的选择，
-          信息和更新信号都有一条较直接的路。这条捷径不减小感受野：输出能回看的范围是
-          修正量那条路与直通路的并集，只会更大，上文的 +2 规律不破。
-        </Def>
-        <Def term="残差块" en="residual block">
-          带一条残差连接的一组层。本模型每个残差块含两层 3×3 卷积，
-          第一层走「卷积 + 批标准化 + ReLU」，第二层走「卷积 + 批标准化」（不带 ReLU），最后把两层算出的修正量加回原输入，再过一次 ReLU。
-          演示模型叠 3 个残差块，项目默认 4 个。
-        </Def>
-      </div>
-
-      <div className="prose mt-12">
-        <h3>批标准化稳住各层数值尺度</h3>
         <p>
-          不整理尺度会怎样：某层分数可能越滚越大或缩到接近 0，
-          后面层的权重只好追着新尺度反复改，训练又慢，数值又常波动。
-          训练时，批标准化用当前一批样本的统计先把每个通道标准化：
-          <span className="mono">x̂ = (x − μ批) / σ批</span>
-          （每通道减去自己在这批上的均值、除以自己在这批上的标准差，把数值拉回 0 附近）；
-          每通道再用自己的一对可学习系数 γ、β 恢复合适表达（48 通道共 48×2=96 个数，对应{" "}
-          <span className="mono">weights-best.json</span> 中的 <span className="mono">blocks.0.bn1.weight</span> 与{" "}
-          <span className="mono">blocks.0.bn1.bias</span>）：
-          <span className="mono">输出 = γ·x̂ + β</span>。
+          这个直接前向输出记作价值估计 <span className="mono">v_net</span>：
+          它站在当前行棋方立场，是分数不是赢的概率；策略头的分数仍对应原棋盘上的 81 个坐标。
         </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="残差块层定义：两层 3×3 卷积（无偏置）各配一处批标准化"
-          source="alphagomoku/model.py · ResBlock.__init__"
-        >
-          <div className="codewalk">
-            <pre>{`    def __init__(self, channels: int):
-        super().__init__()
-        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(channels)
-        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(channels)`}</pre>
-          </div>
-        </EvidenceCard>
-        <p className="mt-3">
-          训练与推理（inference，只前向算一遍、不做训练的使用方式）两条统计路径由 <span className="mono">net.eval()</span> 切换：<span className="mono">Predictor</span> 初始化与{" "}
-          <span className="mono">load_checkpoint</span> 加载权重后都会调用一次，使推理阶段改用训练期积累的运行均值与运行方差。
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="推理封装初始化：切入 eval 模式以使用运行统计量"
-          source="alphagomoku/model.py · Predictor.__init__"
-        >
-          <div className="codewalk">
-            <pre>{`    def __init__(self, net: AlphaGomokuNet, device: str = "cpu"):
-        self.net = net
-        self.device = torch.device(device)
-        self.net.to(self.device)
-        self.net.eval()`}</pre>
-          </div>
-        </EvidenceCard>
-        <Def term="批标准化" en="Batch Normalization，简称 BN">
-          <p>按通道把数值拉回同一范围的整理步骤。它的另一重身份是尺度整理的层间自动化：第 4 课讲过权重能吸收特征的尺度差，但那样训练步子会两头难顾；有了批标准化，每层输出先回到同一尺度，下一层拿到的特征值量纲相当，全局学习率才同时照顾各层。</p>
-          <p>做法分三步。训练时用当前一批样本的均值与标准差做标准化 <span className="mono">x̂ = (x − μ批) / σ批</span>。再用可学习的缩放与平移 <span className="mono">γ·x̂ + β</span> 恢复表达能力（β 就是卷积层省掉的那份偏置，第 5 课）。同时积累运行统计。标准化的用处在中间过程：先让每层输入回到同一尺度、梯度好走，γ、β 只在最后把表达调回来。</p>
-          <p>真正下棋时（推理）不能用眼前这一批的临时统计。推理必须是输入的确定函数：
-          同一局面每次都要给出同一个 v_net（价值估计）。若输出随同批其他样本变，
-          搜索每次评估同一叶节点会得到不同值，树上的访问计数就全废了（叶节点与访问计数见第 10 课）。
-          所以推理改用训练期攒下的运行均值与方差（滑动平均：越新的样本权重越大；
-          方差开方才是标准化用的标准差）。批标准化的统计在批与全部空间位置上一起算，
-          批为 1 也不是「只有一个数」。</p>
-          <p>残差在管路径，BN 在管数值尺度，两者作用不同，不能互相替代。</p>
-        </Def>
       </div>
 
-      <Ledger title="alphagomoku/model.py · ResBlock 与 blocks">
+      <div className="prose mt-10">
+        <p>
+          例 9-1 由浏览器镜像现算：learn/src/engine/model.ts 的 loadNet 载入导出权重，
+          权重保留 5 位小数、用 Float64 计算，与 torch 前向逐项对比允许末位误差；
+          训练后的权重是 weights-best.json，对照 weights-untrained.json（baseline，单独一份文件，打开开关才下载）。
+        </p>
+      </div>
+
+      <AskBoard />
+
+      <Ledger title="alphagomoku/model.py · 双头 forward 与 alphagomoku/train.py">
         <ul className="ml-5 list-disc space-y-1.5">
           <li>
-            <span className="mono">alphagomoku/model.py · ResBlock</span>：<span className="mono">__init__</span> 定义两层{" "}
-            <span className="mono">3×3</span> 卷积（<span className="mono">padding=1, bias=False</span>）与两处{" "}
-            <span className="mono">BatchNorm2d</span>；<span className="mono">forward</span> 计算修正量{" "}
-            <span className="mono">h</span> 并返回 <span className="mono">F.relu(x + h)</span>。
+            <span className="mono">alphagomoku/model.py · AlphaGomokuNet.__init__ / forward</span>：主干输出{" "}
+            <span className="mono">h = self.blocks(self.stem(x))</span> 后分两路，策略头经{" "}
+            <span className="mono">p_conv (48→2, 1×1)</span>、<span className="mono">p_bn</span>、{" "}
+            <span className="mono">p_fc (162→81)</span> 输出 81 个动作 logits；价值头经{" "}
+            <span className="mono">v_conv (48→1, 1×1)</span>、<span className="mono">v_bn</span>、{" "}
+            <span className="mono">v_fc1 (81→64)</span>、<span className="mono">v_fc2 (64→1)</span> 与{" "}
+            <span className="mono">torch.tanh</span> 输出 <span className="mono">[−1, +1]</span> 范围内的价值估计。
           </li>
           <li>
-            <span className="mono">alphagomoku/model.py · AlphaGomokuNet.__init__（self.blocks）</span>：在{" "}
-            <span className="mono">stem</span> 之后串联 <span className="mono">res_blocks</span> 个残差块，总卷积层数为{" "}
-            <span className="mono">1 + 2 × res_blocks</span>，理论感受野边长为{" "}
-            <span className="mono">3 + 2 × (层数 − 1)</span>（7 层得 15，9 层得 19）。
+            <span className="mono">alphagomoku/model.py · Predictor.predict</span>：推理阶段调用{" "}
+            <span className="mono">torch.softmax(logits, dim=-1)</span> 把 logits 归一化为概率分布。
           </li>
           <li>
-            <span className="mono">alphagomoku/model.py · Predictor.__init__ / load_checkpoint</span>：调用{" "}
-            <span className="mono">net.eval()</span> 切入推理模式，确保批标准化使用保存的运行统计量。
-          </li>
-          <li>
-            上下游衔接：主干输出 <span className="mono">h = self.blocks(self.stem(x))</span> 在第 9 课交给策略头与价值头；浏览器端{" "}
-            <span className="mono">learn/src/engine/model.ts · traceNet</span> 逐层复现该主干并驱动例 8-2。
+            <span className="mono">alphagomoku/train.py · train_step</span>：训练阶段分别计算{" "}
+            <span className="mono">F.mse_loss(v, target_z)</span> 与交叉熵{" "}
+            <span className="mono">policy_loss</span>，并以 <span className="mono">loss = value_loss + policy_loss</span> 等权相加（完整训练步见 <span className="mono">train_step</span>）。
           </li>
           <li>
             验证命令：<span className="mono">pytest tests/test_model.py::test_forward_shapes_and_ranges</span> 与{" "}
-            <span className="mono">cd learn && npm test</span>。
+            <span className="mono">cd learn && npm test</span>（运行 <span className="mono">parity.test.ts</span> 对拍 16 份输入的 6 处中间张量）。
           </li>
         </ul>
       </Ledger>
 
       <ChapterEnd
         summary={[
-          "感受野边长 = 3 + 2 × (层数 − 1)：每叠一层加 2。演示模型 7 层看 15×15，以天元计已盖过 9×9 全盘，角落的半径差一格。",
-          "叠深是让机器按先局部、后整体的顺序扩大感受野；深层有能力组合更大范围，具体通道学到什么由训练结果决定。",
-          "残差连接让每组只学修正量 F(x)，输出 y=ReLU(x+F(x))，旧信息与更新信号都有一条直接通路。",
-          "批标准化按通道稳住数值尺度：训练用当前批次统计并积累运行记录，下棋用保存的运行统计，再施加学到的 γ 与 β。",
+          "双头共用一份主干：主干把棋盘读成 48 张特征图，策略头逐点读出 81 个分数，价值头整盘读出 1 个价值估计。",
+          "softmax 把 logits 改成总和为 1 的概率 p（先减最大分再取 e 的指数）；tanh 把价值压进 −1 到 +1，与 z 共用一把标尺。",
+          "价值估计 v_net 是网络直接前向的输出，视角是当前行棋方；它是价值估计，不等于赢的概率。",
         ]}
         next={
           <>
-            卷积主干到此把局面整理成一层层特征。下一课在网络末端接上两个头：
-            一个回答「哪里更值得下」，另一个回答「这局谁更可能赢」。
-            两个答案为什么共用同一条主干、各自怎样变回可用的形式，都在下一课展开。
+            网络给出的只是第一眼判断。下一课让搜索真的沿棋路走到后面的局面，
+            再把结果正确带回树根：一次模拟分几步、每步按什么顺序做、
+            访问次数与平均成绩怎样记在边上，以及搜索汇总出的 root_value 为什么和 v_net 不是一回事。
           </>
         }
       />
@@ -274,48 +267,37 @@ export default function L09() {
         title="习题"
         questions={[
           {
-            q: "7 层的感受野怎么算？",
+            q: "为什么「下哪」和「谁优」共用 1 个主干，而不训练 2 个网络？",
             options: [
-              "7 × 3 = 21 格",
-              "3 + 2 × (7 − 1) = 15：第一层 3×3，每多叠一层边长 +2",
-              "算不出来，要看每个卷积核的权重才知道",
+              "共用省内存，2 个网络存不下",
+              "2 个问题都依赖棋形和形势：共享主干可避免把「认棋形」学两遍，并让 2 个训练目标共同给主干提供信号",
+              "因为只买得起一份棋谱数据",
             ],
             answer: 1,
             explain:
-              "规律与权重无关，是结构给的：第 1 层看 3×3，第 2 层看 5×5，第 3 层看 7×7……每层把上一层的九个分数当原料，感受野每层 +2。滑杆从 1 拨到 7 亲手数一遍：3、5、7、9、11、13、15。",
+              "主因是主干只学一次：判断该下哪和判断谁占优都依赖同一批棋形与形势。分开学可能重复做「认棋形」这件事；合在一起，2 个训练目标都能更新同一个主干。省权重、省计算是顺带收益，2 个目标是否总能互相帮助仍取决于训练。",
           },
           {
-            q: "从结构上看，叠深网络最稳妥的说法是什么？",
+            q: "策略头和价值头的读法差在哪？",
             options: [
-              "深层可以组合更大范围的局部特征；浅层偏局部、深层偏整体是常见倾向，但具体通道学到什么要由训练结果决定",
-              "浅层认黑子，深层认白子",
-              "层层都一样，只是通道数不同",
-            ],
-            answer: 0,
-            explain:
-              "每多一层，理论感受野就扩大一圈，因此深层有条件把更多局部特征放在一起。特征图里有些亮区看起来贴着棋子、有些连成大片，但这只提供观察提示，不能把单张图直接命名为「它一定在认某种棋形」。",
-          },
-          {
-            q: "残差连接起什么作用、写在 ResBlock 的哪一处？",
-            options: [
-              "让棋盘刷新得更快",
-              "让每层学习「在上一层答案上修一点」；修正量接近 0 时，输入就能大致原样通过",
-              "把 48 个通道压缩成 2 个",
+              "策略头整盘读成 1 个数，价值头逐点读成 81 个分数",
+              "策略头逐点读：压到 2 通道后读成 81 个分数；价值头整盘读：压到 1 通道，经含 64 个隐藏单元的隐藏层收成 1 个数",
+              "没有差别，只是输出的名字不同",
             ],
             answer: 1,
             explain:
-              "捷径使「什么也不修」成为容易学到的选择：修正量 h 接近 0 时，x+h 大致保留输入。反向求梯度时，捷径还提供一条 ×1 的直通路，所以信息和更新信号都有较直接的路；它缓解梯度消失，但不保证梯度永不消失。",
+              "逐点的归逐点、整盘的归整盘。策略头把棋盘一格一格的细节全保住（每格 1 个分数，第 1 课的 81 个动作一一对应）。价值头要把整盘收成 1 个价值估计，81→64→1 的隐藏层（全连接层）就是给这个落差修的中间站。要核对这条形状流转，可对拍 learn/tests/parity.test.ts：它用 16 份输入逐层对比 6 处中间结果，浏览器端的复现与 model.py 的 forward 同源。",
           },
           {
-            q: "推理脚本忘了切 eval()、BN 仍用当前批统计，对局表现会怎么坏？",
+            q: "价值头的输出为什么要过 tanh？",
             options: [
-              "没有不同：每次重新算统计更准",
-              "同一局面的 v_net 会随同批其他局面变化，树上的访问计数就全废了；训练时用批统计并更新运行记录，真正下棋必须用保存的运行统计",
-              "训练时关闭 BN，真正下棋时才打开",
+              "为了让它看起来更像概率，加起来等于 1",
+              "为了压进 −1 到 +1：和训练目标（赢 +1 / 输 −1 / 和 0）同一把标尺，误差才可比，训练早期也不会飙出天文数字",
+              "为了让计算更快",
             ],
             answer: 1,
             explain:
-              "训练的一批样本足以估计通道当前的中心和尺度，BN 同时积累运行统计；真正下棋可能一次只输入少量局面，必须用训练期保存的统计，eval() 切换的就是这件事。忘切的后果不只是波动：同一叶节点每次值不同，树上的访问计数就失去意义。残差负责路径，BN 负责尺度，不能互相替代。",
+              "tanh 把任意数平滑压进 −1 到 +1，让 v_net 与终局结果 z 共用一把标尺，才能计算 (v_net−z)²。硬截断在界外梯度为 0，错到界外就学不回来；tanh 在极值处也会饱和，但仍是平滑可导的。它表示价值估计，不是赢的概率。",
           },
         ]}
       />
@@ -323,212 +305,283 @@ export default function L09() {
   )
 }
 
-/* ============ 例 8-1 · 层深滑杆：感受野一圈圈长大 ============ */
+/* ============ 结构图 · 共享主干怎样分出两个头 ============ */
 
-const CELL5 = 26
-const M5 = CELL5 * 4.2 // 界外余量：7 层感受野(15×15)在 9×9 外还要伸 3.5 格
-const VB5 = M5 * 2 + 8 * CELL5
-const px5 = (x: number) => M5 + x * CELL5
-
-function FovSlider() {
-  const [layers, setLayers] = useState(1)
-  const side = 3 + 2 * (layers - 1)
-  const half = side / 2
-
-  // 感受野框(以天元 (4,4) 为中心),单位：格
-  const bx = px5(4 - half)
-  const by = px5(4 - half)
-  const bw = side * CELL5
-
+function HeadBranch() {
   return (
-    <figure className="figure mt-8">
+    <figure className="figure branch-figure mt-8" aria-label="双头网络结构图">
       <div className="px-4 pt-4 sm:px-5">
-        <span className="mini-label">例 8-1 · 层深滑杆：看第几层的眼睛</span>
+        <span className="mini-label">结构图 · 一份 h，两条读法</span>
       </div>
-      <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
-        <div className="min-w-0 flex-1 md:max-w-[26rem]">
-          <svg viewBox={`0 0 ${VB5} ${VB5}`} style={{ width: "100%", height: "auto", display: "block" }}
-            role="img" aria-label={`层数 ${layers},感受野 ${side}×${side}`}>
-            <rect
-              x={M5 - CELL5 * 0.62}
-              y={M5 - CELL5 * 0.62}
-              width={VB5 - 2 * (M5 - CELL5 * 0.62)}
-              height={VB5 - 2 * (M5 - CELL5 * 0.62)}
-              rx={10}
-              style={{ fill: "var(--board)" }}
-            />
-            <g style={{ stroke: "var(--board-line)" }} strokeWidth={1} opacity={0.85}>
-              {Array.from({ length: 9 }, (_, i) => (
-                <line key={`v${i}`} x1={px5(i)} y1={px5(0)} x2={px5(i)} y2={px5(8)} />
-              ))}
-              {Array.from({ length: 9 }, (_, j) => (
-                <line key={`h${j}`} x1={px5(0)} y1={px5(j)} x2={px5(8)} y2={px5(j)} />
-              ))}
-            </g>
-            {/* 己方三连(与第 7 课同一局面) */}
-            {THREE.map(([x, y]) => (
-              <circle key={`${x}-${y}`} cx={px5(x)} cy={px5(y)} r={CELL5 * 0.36}
-                style={{ fill: "var(--stone-b)", stroke: "var(--stone-b-lo)", strokeWidth: 1.5 }} />
-            ))}
-            {/* 感受野框：中心在天元；伸出棋盘的部分=界外(补 0) */}
-            <rect
-              x={bx} y={by} width={bw} height={bw} rx={8}
-              style={{
-                fill: "var(--accent)",
-                stroke: "var(--accent)",
-                strokeWidth: 2.5,
-                // CSS 几何属性可过渡的浏览器里平滑缩放；不支持则直接跳变(属性兜底)
-                transition: "x 260ms ease, y 260ms ease, width 260ms ease, height 260ms ease",
-              }}
-              fillOpacity={0.06}
-              strokeDasharray={side > 9 ? "9 6" : undefined}
-            />
-            <text x={bx + bw} y={by - 7} textAnchor="end" fontSize={13}
-              fontFamily="ui-monospace, SF Mono, Menlo, monospace" style={{ fill: "var(--accent-deep)" }}>
-              {side}×{side}
-            </text>
-            {side > 9 && (
-              <text x={bx + bw / 2} y={by + bw + 16} textAnchor="middle" fontSize={12}
-                style={{ fill: "var(--fg-faint)" }}>
-                伸出棋盘的部分 = 界外，按 0 算
-              </text>
-            )}
-          </svg>
+      <div className="branch-canvas">
+        <div className="branch-trunk">
+          <span className="branch-trunk-label">共享主干输出</span>
+          <strong className="mono">h</strong>
+          <span className="branch-shape mono">48 × 9 × 9</span>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="mini-label">层数(1 → 7)</div>
-          <input
-            type="range" min={1} max={7} step={1} value={layers}
-            onChange={(e) => setLayers(Number(e.target.value))}
-            aria-label="层数"
-            style={{ ["--fill" as string]: `${((layers - 1) / 6) * 100}%` }}
-            data-qa="fov-slider"
-          />
-          <div className="mt-1 flex justify-between text-xs num" style={{ color: "var(--fg-faint)" }}>
-            {[1, 2, 3, 4, 5, 6, 7].map((l) => (
-              <span key={l}>{l}</span>
-            ))}
+        <div className="branch-fork" aria-hidden="true"><i /><i /></div>
+        <div className="branch-arms">
+          <div className="branch-arm policy">
+            <div className="branch-heading">
+              <span className="branch-kicker">策略头 · 下哪</span>
+              <span className="branch-flow-label">保留每个格子的位置差异</span>
+            </div>
+            <div className="branch-path">
+              <span>1×1 卷积</span><b>→</b>
+              <span>2×9×9</span><b>→</b>
+              <span>摊平 162</span><b>→</b>
+              <span>全连接</span><b>→</b>
+              <span>81 logits</span><b>→</b>
+              <span className="branch-op">softmax</span>
+            </div>
+            <div className="branch-result"><strong>p</strong><span>81 个落点概率 · Σp=1</span></div>
           </div>
-          <div className="reveal-box mt-4">
-            <p className="num text-lg font-bold">
-              感受野边长 = 3 + 2 × ({layers} − 1) ={" "}
-              <span data-qa="fov-side" style={{ color: "var(--accent-deep)" }}>{side}</span>
-            </p>
-            <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-              {layers === 1 && "第 1 层：窗口 3×3，只能看一个短局部片段。"}
-              {layers > 1 && layers < 7 && `叠到第 ${layers} 层：盖住 ${side}×${side}。`}
-              {layers === 7 &&
-                "7 层 = stem 1 层 + 残差块 3 × 2 层（演示模型的配置）：以天元计 15×15 盖过 9×9 全盘。"}
-            </p>
+          <div className="branch-arm value">
+            <div className="branch-heading">
+              <span className="branch-kicker">价值头 · 谁优</span>
+              <span className="branch-flow-label">把整盘收成一个判断</span>
+            </div>
+            <div className="branch-path">
+              <span>1×1 卷积</span><b>→</b>
+              <span>1×9×9</span><b>→</b>
+              <span>摊平 81</span><b>→</b>
+              <span>81→64→1</span><b>→</b>
+              <span className="branch-op">tanh</span>
+            </div>
+            <div className="branch-result"><strong>v_net</strong><span>1 个数 · −1…+1</span></div>
           </div>
-          <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-            从 1 拨到 7，看感受野框一圈圈长大：
-            <span className="num font-bold">3 → 5 → 7 → 9 → 11 → 13 → 15</span>。
-            到第 4 层恰好罩住 9×9；演示模型 7 层，界外还有一圈余量。
-          </p>
         </div>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">例 8-1</span>
-        窗口始终是 3×3，每叠一层感受野边长 +2。棋盘上是第 7 课那个三连局面。
+        <span className="cap-no">结构图</span>
+        两张头图共用同一个 <span className="mono">h</span>；维度来自 <span className="mono">model.py</span> 的
+        <span className="mono">p_conv / p_fc</span> 与 <span className="mono">v_conv / v_fc1 / v_fc2</span>。
       </figcaption>
     </figure>
   )
 }
 
-/* ============ 例 8-2 · 真特征图：观察各层怎样保留与组合信号 ============ */
+/* ============ 例 9-1 · 自由摆子，问真网络 ============ */
 
-const CHANNELS_SHOWN = 6
+function AskBoard() {
+  const [stones, setStones] = useState<number[]>(INIT)
+  const [cur, setCur] = useState<1 | -1>(1) // 下一手摆的颜色（也决定网络替谁看）
+  const [cmp, setCmp] = useState(false)
+  const [wBest, setWBest] = useState<WeightsJson | null>(null)
+  const [wUntrained, setWUntrained] = useState<WeightsJson | null>(null)
+  const [res, setRes] = useState<{ best: AskResult; untrained: AskResult | null } | null>(null)
 
-function FeatureWall() {
-  const [w, setW] = useState<WeightsJson | null>(null)
   useEffect(() => {
     let alive = true
-    loadWeights().then((x) => {
-      if (alive) setW(x)
-    })
+    loadWeights().then((w) => alive && setWBest(w))
     return () => {
       alive = false
     }
   }, [])
+  useEffect(() => {
+    if (!cmp || wUntrained) return
+    let alive = true
+    loadWeightsUntrained().then((w) => alive && setWUntrained(w))
+    return () => {
+      alive = false
+    }
+  }, [cmp, wUntrained])
 
-  // 单次前向(~16ms),缓存；滑杆/交互只切展示，不重算
-  const trace = useMemo(() => {
-    if (!w) return null
-    return traceNet(w)(encode(STATE))
-  }, [w])
+  const netBest = useMemo(() => (wBest ? loadNet(wBest) : null), [wBest])
+  const netUntrained = useMemo(() => (wUntrained ? loadNet(wUntrained) : null), [wUntrained])
 
-  const rows: { label: string; sub: string; planes: Float64Array }[] = useMemo(() => {
-    if (!trace) return []
-    return [
-      { label: "第 1 层 · stem", sub: "局部响应", planes: trace.stemOut.data },
-      { label: "第 2-3 层 · 残差块 1", sub: "", planes: trace.blockOuts[0].data },
-      { label: "第 4-5 层 · 残差块 2", sub: "", planes: trace.blockOuts[1].data },
-      { label: "第 6-7 层 · 残差块 3", sub: "更大范围的组合", planes: trace.blockOuts[2].data },
-    ]
-  }, [trace])
+  const state = useMemo<GameState>(() => {
+    const board = Array.from({ length: 9 }, (_, y) => stones.slice(y * 9, y * 9 + 9))
+    let n = 0
+    for (const v of stones) if (v !== 0) n++
+    return { board, current: cur, winner: 0, moveCount: n, lastMove: null }
+  }, [stones, cur])
+
+  const place = (x: number, y: number) => {
+    setRes(null) // 棋盘一变，旧答案作废：数字永远对得上眼前的局面
+    setStones((s) => {
+      const next = s.slice()
+      next[y * 9 + x] = cur
+      return next
+    })
+  }
+
+  const ask = () => {
+    if (!netBest) return
+    setRes({
+      best: askNet(netBest, state),
+      untrained: cmp && netUntrained ? askNet(netUntrained, state) : null,
+    })
+  }
+
+  const vb = res ? res.best.vNet * cur : 0 // 价值估计条按黑方视角换算
 
   return (
-    <figure className="figure mt-12">
-      <div className="px-4 pt-4 sm:px-5">
-        <span className="mini-label">例 8-2 · 真特征图：每层都有 48 张特征图</span>
-        <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-          观察亮区如何随层变化：有的贴近棋子，有的覆盖更大区域。它们是训练后的数值响应，
-          不是已经被人命名好的「棋理标签」。
-        </p>
+    <figure className="figure mt-8">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
+        <span className="mini-label">例 9-1 · 亲手摆局面，问真网络</span>
+        <label className="flex cursor-pointer items-center gap-2 text-sm" style={{ color: "var(--fg-muted)" }}>
+          <input
+            type="checkbox"
+            checked={cmp}
+            onChange={(e) => {
+              setCmp(e.target.checked)
+              setRes(null)
+            }}
+            data-qa="cmp-toggle"
+          />
+          对照未训练网络（baseline）
+        </label>
       </div>
-      <div className="overflow-x-auto p-4 md:p-5">
-        {!trace ? (
-          <p className="text-sm" style={{ color: "var(--fg-muted)" }}>
-            正在加载真权重（weights-best.json，约 1.2 MB）……
-          </p>
-        ) : (
-          <div className="flex flex-col gap-5" data-qa="fwall">
-            {rows.map((r, ri) => (
-              <div key={ri} data-qa="frow" className="flex flex-wrap items-center gap-4">
-                <div className="w-[7.5rem] flex-none">
-                  <div className="mini-label">{r.label}</div>
-                  {r.sub && (
-                    <div className="text-xs" style={{ color: "var(--fg-faint)" }}>{r.sub}</div>
-                  )}
-                </div>
-                {Array.from({ length: CHANNELS_SHOWN }, (_, ch) => (
-                  <FeatureMap key={ch} planes={r.planes} ch={ch} />
-                ))}
-              </div>
-            ))}
+      <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
+        <div className="min-w-0 flex-1 md:max-w-[24rem]">
+          <div data-qa="board-main">
+            <Board board={stones} onCellClick={place} heat={res?.best.probs} ghostPlayer={cur} />
           </div>
-        )}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="seg">
+              <button type="button" className={`seg-btn ${cur === 1 ? "active" : ""}`} onClick={() => { setCur(1); setRes(null) }}>
+                摆黑
+              </button>
+              <button type="button" className={`seg-btn ${cur === -1 ? "active" : ""}`} onClick={() => { setCur(-1); setRes(null) }}>
+                摆白
+              </button>
+            </span>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setStones(new Array<number>(81).fill(0))
+                setRes(null)
+              }}
+            >
+              清空
+            </button>
+            <button type="button" className="btn primary" disabled={!netBest} onClick={ask} data-qa="ask-btn">
+              {netBest ? "问网络 →" : "正在加载真权重……"}
+            </button>
+          </div>
+          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+            红色热度 = 策略头的概率 p（只在空格里重新归一化到 100%，已占格不参与）。
+            序章回放的红色热度是另一样东西：那是搜索访问分布 π。两处都用红色热度呈现，
+            本页这块来自网络第一眼，序章那块来自搜索推演。
+            这张图是 p 在空格上的展示归一，不是网络输出的 p 本身。
+            摆子颜色决定轮到该色行棋；网络替这一方看棋盘、报价值估计。
+          </p>
+          <p className="misconception mt-3 text-xs leading-relaxed">
+            <span className="m-title">使用边界</span>
+            这里允许你任意摆黑白子，目的是观察一次真实前向计算。若摆出了不合规则的局面
+            （例如双方数量不符合轮流落子），数值仍是网络对这份输入的输出，<strong>不应当解释成
+            合法对局中的落子建议或棋力证据</strong>。
+          </p>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          {!res ? (
+            <p className="text-sm" style={{ color: "var(--fg-muted)" }}>
+              初始是第 7 课的三连局面。你可以随手摆子来观察输入怎样改变输出；若想把结果
+              当作棋局建议，请自己保持黑白轮流与合法落子。按「问网络」会进行一次真前向计算，
+              2 个头同时给出输出。
+            </p>
+          ) : (
+            <>
+              <div className="mini-label">策略头 · 下哪：top5（坐标 (x,y)，概率）</div>
+              <ol className="mt-2 space-y-1.5">
+                {res.best.top.map((t) => (
+                  <li key={t.a} className="l00-top-row" data-qa="top-row">
+                    <span className="mono text-sm">({t.a % 9},{Math.floor(t.a / 9)})</span>
+                    <span className="prob-track">
+                      <span className="prob-fill" style={{ width: `${t.p * 100}%` }} />
+                    </span>
+                    <span
+                      className="num w-12 flex-none text-right text-sm"
+                      style={{ color: "var(--accent-deep)" }}
+                    >
+                      {(t.p * 100).toFixed(1)}%
+                    </span>
+                  </li>
+                ))}
+              </ol>
+
+              <div className="mt-4 border-t pt-3" style={{ borderColor: "var(--hairline)" }}>
+                <div className="mini-label">价值头 · 谁优</div>
+                <p className="num mt-1.5 text-2xl font-bold" data-qa="v-best" style={{ color: "var(--accent-deep)" }}>
+                  v_net = {res.best.vNet >= 0 ? "+" : "−"}{Math.abs(res.best.vNet).toFixed(2)}
+                  <span className="ml-2 text-sm font-normal" style={{ color: "var(--fg-faint)" }}>
+                    一次前向 {res.best.ms.toFixed(1)} 毫秒
+                  </span>
+                </p>
+                <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+                  v_net 站在{cur === 1 ? "黑" : "白"}方视角，轮到谁就替谁看。条上已换算到黑方视角。
+                </p>
+                <div className="l00-vbar mt-2">
+                  <i className="l00-vbar-zero" />
+                  <i className="l00-vbar-needle" style={{ left: `${((vb + 1) / 2) * 100}%` }} />
+                </div>
+                <div className="num mt-1 flex justify-between text-xs" style={{ color: "var(--fg-faint)" }}>
+                  <span>−1 白优</span>
+                  <span>0</span>
+                  <span>+1 黑优</span>
+                </div>
+              </div>
+            </>
+          )}
+
+          {cmp && (
+            <div className="mt-5 border-t pt-3" style={{ borderColor: "var(--hairline)" }} data-qa="cmp-panel">
+              <div className="mini-label">对照组 · 未训练 baseline</div>
+              {!res?.untrained ? (
+                <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
+                  baseline 是训练开始前冻住的随机数权重。{wUntrained ? "按「问网络」，2 个网络同题同考。" : "正在加载未训练权重（单独一份文件，约 1.2 MB）……"}
+                </p>
+              ) : (
+                <div className="mt-2 flex flex-col gap-4 sm:flex-row">
+                  <div className="w-40 flex-none" data-qa="board-untrained">
+                    <Board board={stones} heat={res.untrained.probs} />
+                    <p className="num mt-1 text-center text-xs" style={{ color: "var(--fg-faint)" }}>
+                      未训练的热度
+                    </p>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <ol className="space-y-1.5">
+                      {res.untrained.top.slice(0, 3).map((t) => (
+                        <li key={t.a} className="l00-top-row" data-qa="top-row-untrained">
+                          <span className="mono text-sm">({t.a % 9},{Math.floor(t.a / 9)})</span>
+                          <span className="prob-track">
+                            <span className="prob-fill" style={{ width: `${t.p * 100}%` }} />
+                          </span>
+                          <span
+                            className="num w-12 flex-none text-right text-sm"
+                            style={{ color: "var(--fg-muted)" }}
+                          >
+                            {(t.p * 100).toFixed(1)}%
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                    <p className="num mt-3 text-lg font-bold" data-qa="v-untrained" style={{ color: "var(--fg-muted)" }}>
+                      v_net = {res.untrained.vNet >= 0 ? "+" : ""}
+                      {res.untrained.vNet.toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+              )}
+              <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+                同一局面、同一副网络骨架，只差训练。未训练 baseline 的策略头几乎把概率均分给 81 格，
+                初始三连局面实测最热一格才 1.4%（78 个空格平摊、每格约 1.3%）；价值估计实测 +0.02，换哪个局面都基本贴着 0 小幅漂。
+                训练过的（只吃过第 0–2 轮的自我对弈样本）已有态度：同一局面 v_net=−0.31、最热 2.0%，
+                离懂棋还远，但已经不是一片均匀的乱数了。
+              </p>
+            </div>
+          )}
+        </div>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">例 8-2</span>
-        真引擎 + 真权重：<span className="mono">traceNet</span>（model.ts）对三连局面从头到尾算一遍。
-        每层 48 个卷积核，就有 48 张特征图，一张叫一个「通道」；这里每组出口摆出前 {CHANNELS_SHOWN} 张。
-        亮 = 这张图在这里的相对响应高。每张图都按<strong>自己</strong>的最大值着色，所以不同通道的亮度不能直接比较大小。滚动前先猜哪一层还亮在横三连那三格上，再往下对照。
+        <span className="cap-no">例 9-1</span>
+        真引擎加真权重：<span className="mono">encode</span>（learn/src/engine/game.ts）→{" "}
+        <span className="mono">loadNet</span>（learn/src/engine/model.ts）前向，softmax 在站内现算。
+        每次「问网络」都由这份浏览器复现当场计算；top5 坐标即原棋盘坐标，策略头不做视角翻转。
       </figcaption>
     </figure>
-  )
-}
-
-/** 一张 9×9 特征图：planes 为 [48, 9, 9] 布局，通道在前；每通道按自身最大值归一。 */
-function FeatureMap({ planes, ch }: { planes: Float64Array; ch: number }) {
-  const off = ch * 81
-  let max = 0
-  for (let k = 0; k < 81; k++) max = Math.max(max, planes[off + k])
-  return (
-    <svg viewBox="0 0 90 90" width="86" height="86" data-qa="fmap" role="img"
-      aria-label={`通道 ${ch} 特征图`}
-      style={{ borderRadius: 6, background: "var(--card-sunken)", flex: "none" }}>
-      {Array.from({ length: 9 }, (_, y) =>
-        Array.from({ length: 9 }, (_, x) => {
-          const v = planes[off + y * 9 + x]
-          const t = max > 0 ? v / max : 0
-          return (
-            <rect key={`${x}-${y}`} x={x * 10 + 0.5} y={y * 10 + 0.5} width={9} height={9}
-              style={{ fill: "var(--accent)" }} opacity={0.05 + t * 0.85} />
-          )
-        }),
-      )}
-    </svg>
   )
 }

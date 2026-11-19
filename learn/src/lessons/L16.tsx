@@ -49,7 +49,7 @@ export default function L16() {
 
       <LessonGuide
         question="自我对弈、保存回放池、训练、竞技场、指标和检查点为什么必须按这个顺序？"
-        why="训练不只要算对，还要在暂停、停止或崩溃后留下彼此对得上的记录；顺序本身就是正确性的一部分。这串步骤项目里叫管线：一轮训练依次走「自我对弈 → 保存回放池 → 训练（或预热）→ 竞技场（到轮次才跑）→ 写指标记录 → 保存检查点」，每阶段都有明确的落盘产物，顺序本身保证崩溃后可恢复。"
+        why="训练不只要算对，还要在暂停、停止或崩溃后留下彼此对得上的记录；顺序本身就是正确性的一部分。这串步骤项目里叫管线：一轮训练依次走「自我对弈 → 保存回放池 → 训练（或预热）→ 竞技场（到轮次才跑）→ 写指标记录 → 保存检查点」，每阶段都有明确的落盘产物，这个顺序划清了中断后哪些文件已经可信、哪一段必须重做。"
         chain={[
           "当前网络先下棋，产生并保存新样本",
           "回放池够大才训练，指定轮次才跑竞技场",
@@ -86,8 +86,8 @@ export default function L16() {
           样本够数才更新权重，到了配置规定的轮次才跑竞技场，最后先写指标行、再保存网络权重。
         </p>
         <Def term="管线" en="pipeline">
-          一轮训练固定要走的阶段序列：自我对弈、保存回放池、训练或预热、竞技场、写指标记录、保存检查点（检查点定义与命名规则见第 14 课）。
-          阶段顺序写死在代码里，每阶段产出各自负责的文件。顺序本身保证中断之后能从某个阶段边界接着跑：可恢复的是权重与轮号，样本可恢复以 buffer 文件完整为前提。
+          一轮训练固定要走的阶段序列：自我对弈、保存回放池、训练或预热、竞技场、写指标记录、保存检查点。检查点就是训练中保存的一组网络权重与元数据。
+          阶段顺序写死在代码里，每阶段产出各自负责的文件。中断后能从哪个阶段边界接着跑，取决于哪些文件已经完整落盘：权重与轮号可恢复，旧样本可恢复则以 buffer 文件完整为前提。
         </Def>
         <Def term="指标记录" en="metrics record">
           每轮结束追加一行的指标记录，落在 <span className="mono">metrics.jsonl</span>，
@@ -100,136 +100,44 @@ export default function L16() {
       <PipelineStepper />
 
       <div className="prose mt-10">
-        <h3>把一轮训练跑起来：命令与配置</h3>
+        <h3>同一份配置决定每轮走到哪一步</h3>
         <p>
           训练器的入口是 <span className="mono">python -m alphagomoku.trainer</span>。
-          只有 <span className="mono">--run</span> 必填，指向 run 目录；
-          <span className="mono">--config</span> 仅在该目录尚无 config.json 时用来播种，
-          <span className="mono">--max-iterations</span> 限制轮数。
+          <span className="mono">--run</span> 指向 run 目录，<span className="mono">--max-iterations</span> 限制轮数。
+          每轮读同一份配置：回放池够不够 <span className="mono">min_buffer</span> 决定这一步训练还是预热；
+          轮号是否命中 <span className="mono">arena_every</span> 决定这一步要不要比赛。
         </p>
         <EvidenceCard
-          fidelity="constructed"
-          title="训练器启动命令与开发、验收脚本示例"
-          source="README.md 运行说明与 scripts/dev.sh、scripts/start.sh"
+          fidelity="runtime-exact"
+          title="训练器从 CLI 接收 run 目录与最大轮数"
+          source="alphagomoku/trainer.py · main"
         >
           <div className="codewalk">
             <pre>{`python -m alphagomoku.trainer --run data/runs/dev --config configs/fast.json
-python -m alphagomoku.trainer --run data/runs/dev --max-iterations 4
-
-scripts/dev.sh
-scripts/start.sh`}</pre>
+python -m alphagomoku.trainer --run data/runs/dev --max-iterations 4`}</pre>
           </div>
         </EvidenceCard>
         <p>
-          配置的两套值：项目默认（<span className="mono">configs/default.json</span>）与
-          演示（<span className="mono">configs/fast.json</span>，站里真实记录就出自它）。
-          改一个数之前先看它影响哪一段：
+          <span className="mono">--config</span> 只在该目录尚无 <span className="mono">config.json</span> 时用来播种；
+          之后训练器不再改它。站里的真实记录出自演示配置 <span className="mono">configs/fast.json</span>：
+          <span className="mono">min_buffer=256</span>、<span className="mono">arena_every=2</span>。
         </p>
-        <table className="l09-table">
-          <thead><tr><th>配置键</th><th>默认</th><th>演示</th><th>影响</th></tr></thead>
-          <tbody>
-            <tr><td className="mono">net_channels / net_res_blocks</td><td>64 / 4</td><td>48 / 3</td><td>网络容量与感受野</td></tr>
-            <tr><td className="mono">mcts_simulations</td><td>100</td><td>40</td><td>自我对弈每手思考量</td></tr>
-            <tr><td className="mono">c_puct / dirichlet_epsilon / dirichlet_alpha</td><td>1.5 / 0.25 / 0.3</td><td>同左</td><td>探索强度与根噪声</td></tr>
-            <tr><td className="mono">temp_threshold</td><td>12</td><td>10</td><td>前几手按 π 采样，之后取最大访问</td></tr>
-            <tr><td className="mono">games_per_iteration / parallel_games</td><td>24 / 8</td><td>12 / 6</td><td>每轮对局数与并行局数</td></tr>
-            <tr><td className="mono">batch_size / train_steps</td><td>128 / 30</td><td>128 / 20</td><td>每轮更新的批大小与步数</td></tr>
-            <tr><td className="mono">lr / weight_decay</td><td>0.01 / 1e-4</td><td>同左</td><td>步幅与轻拽</td></tr>
-            <tr><td className="mono">buffer_size / min_buffer</td><td>100000 / 512</td><td>50000 / 256</td><td>回放池容量与训练门槛</td></tr>
-            <tr><td className="mono">arena_every / arena_games / arena_simulations</td><td>2 / 10 / 50</td><td>2 / 6 / 30</td><td>受控对战的节奏、局数与每手思考量</td></tr>
-            <tr><td className="mono">promote_threshold</td><td>0.55</td><td>0.55</td><td>晋升线</td></tr>
-            <tr><td className="mono">seed / device / keep_checkpoint_every</td><td>42 / auto / 10</td><td>42 / auto / 5</td><td>可复现性、算力选择、留档节奏</td></tr>
-          </tbody>
-        </table>
-        <p>
-          表里与本课边界直接相关的三个键是 <span className="mono">temp_threshold</span>、
-          <span className="mono">buffer_size</span> 与 <span className="mono">min_buffer</span>。
-          <span className="mono">min_buffer</span> 是开训门槛（定义见第 14 课），不是回放池容量：
-          没过门槛的那一轮照常留下对局与样本，只跳过权重更新。
-          三个键的两套值是 temp_threshold 默认 12、演示 10，buffer_size 与 min_buffer
-          默认 100000 与 512、演示 50000 与 256。
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="自我对弈与训练阶段的默认配置字段"
-          source="alphagomoku/config.py · Config"
-        >
-          <div className="codewalk">
-            <pre>{`    temp_threshold: int = 12
-    # self-play
-    games_per_iteration: int = 24
-    parallel_games: int = 8
-    # training
-    batch_size: int = 128
-    train_steps: int = 30
-    lr: float = 0.01
-    weight_decay: float = 1e-4
-    buffer_size: int = 100_000
-    min_buffer: int = 512`}</pre>
-          </div>
-        </EvidenceCard>
 
         <h3>「继续训练」有两种，恢复的程度不一样</h3>
         <p>
-          同一进程里的下一轮会保留网络、优化器的动量、随机数发生器和回放池。
-          进程退出后重新启动则不同：项目会自动加载 <span className="mono">latest.pt</span> 和
-          <span className="mono">buffer.npz</span>，下一轮编号取检查点里的迭代号加 1。
-          所以「恢复训练」准确地说是：恢复网络权重和旧样本，再新建优化器（参见：第 3 课）与随机数发生器。
-          恢复的随机数不是「接续」，而是确定性重开：同一个种子重新走一遍随机流。
-          检查点只保存网络权重、配置和少量说明，没有保存优化器状态与随机数发生器的状态。
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="启动时重设随机种子，并尝试恢复最新检查点与回放池"
-          source="alphagomoku/pipeline.py · run"
-        >
-          <div className="codewalk">
-            <pre>{`    torch.manual_seed(cfg.seed)
-    rng = np.random.default_rng(cfg.seed)
-
-    net = AlphaGomokuNet(cfg.board_size, cfg.net_channels, cfg.net_res_blocks)
-    iteration = 0
-    latest_path = storage.checkpoint_path("latest")
-    if latest_path.exists():
-        net, meta = load_checkpoint(str(latest_path), device)
-        iteration = int(meta.get("iteration", -1)) + 1
-        storage.append_event("log", {"level": "info",
-                                     "message": f"resumed from latest.pt, next iteration {iteration}"})
-
-    buffer = ReplayBuffer(cfg.buffer_size, cfg.board_size)
-    if storage.buffer_path.exists():
-        try:
-            buffer.load(storage.buffer_path)
-        except (OSError, ValueError) as e:
-            storage.append_event("log", {"level": "warn", "message": f"buffer load failed: {e}"})`}</pre>
-          </div>
-        </EvidenceCard>
-        <p>
-          三者都相同且网络权重没变，重做出的就是同一批对局；已下局数写进指标记录之后再崩，
-          重做时它已经变了，出的是另一批。这是有意的安排：防止同一批样本二次入池。
-          逐轮自我对弈的随机流由「种子、轮号、已下局数」三者决定（已下局数只数自我对弈，不含竞技场）。
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="每轮自我对弈用种子、轮号与累计局数派生独立随机流"
-          source="alphagomoku/pipeline.py · run"
-        >
-          <div className="codewalk">
-            <pre>{`            iter_rng = np.random.default_rng(cfg.seed * 1_000_003 + iteration * 97 + games_total)`}</pre>
-          </div>
-        </EvidenceCard>
-        <p>
-          动量历史（第 14 课定义的优化器惯性状态）则归零。恢复后头几步没有惯性，单批噪声直接拽着权重走、方向比平时颠簸；
-          几步之后惯性重建，对最终收敛通常可容忍。
+          同一进程里的下一轮保留网络、优化器动量、随机数状态和回放池。
+          进程退出后重开，网络训练状态主要由 <span className="mono">latest.pt</span> 的权重与轮号、
+          <span className="mono">buffer.npz</span> 的旧样本恢复；累计局数、样本数与 best 轮次从指标尾行读取。
+          优化器重新建立，随机数按种子重开。
+          检查点没有保存动量，也没有保存随机数发生器的内部状态。
         </p>
         <p>
-          检查点不保存优化器与随机数状态：它的职责只是「权重可复用」（server、
-          竞技场加载权重都靠它）。优化器状态只对续训有用，存它会让文件翻倍、加载路径分叉；
-          这是有意的简化，升级路径是保存时把优化器一并塞进文件。这些合起来就是当前实现的恢复边界。
+          每轮自我对弈的随机流不直接沿用上一轮，而由「种子、轮号、累计局数」重新派生。
+          因此网络权重没变时，重做能复现同一批对局；累计局数已经写进指标后再崩，
+          重做就会换一批，避免同一批样本二次入池。优化器动量则归零，恢复后的头几步方向会比平时颠簸。
         </p>
         <Def term="随机数发生器" en="random number generator, RNG">
-          产生随机数序列的机制；它的内部状态决定下一串抽样。检查点不保存它，
-          所以恢复后的抽样序列不会与中断前接续。
+          产生随机数序列的机制。检查点不保存它的内部状态，所以恢复后的抽样序列不会与中断前接续。
         </Def>
       </div>
 
@@ -243,9 +151,11 @@ scripts/start.sh`}</pre>
         <Def term="原子" en="atomic">
           一次写入要么完整生效、要么完全不生效，不会留下写了一半的文件。
           检查点的保存走这条路；回放池 <span className="mono">buffer.npz</span> 是直接写入，
-          不保证原子（回放池是 np.savez_compressed 直接写目标文件；检查点那样先写临时文件再换名，就能原子，这是它的升级路径）。写一半断电留下的截断文件，加载时抛出的异常（如 zipfile.BadZipFile、EOFError）
-          不在 pipeline 的捕获范围（那里只接 OSError、ValueError），进程会带着报错退出，
-          要删掉 buffer.npz 才能重跑；回放池作废（接得住的加载失败则丢弃回放池、以空的回放池继续攒）。恢复边界里不可逆丢样本的路径只有这一条。
+          不保证原子。写坏或截断的 <span className="mono">.npz</span> 会在加载时抛{" "}
+          <span className="mono">BadZipFile</span>；启动代码只捕获 <span className="mono">OSError</span> 与{" "}
+          <span className="mono">ValueError</span>，所以训练器会直接退出，必须删掉或修复文件才能重跑，旧样本随之丢失。
+          板径不匹配的 <span className="mono">ValueError</span> 则只记一条警告，回放池从空开始。
+          这是恢复边界里唯一会不可逆丢样本的路径。
         </Def>
         <p>
           stop 命令除了在每轮开头被检查一次，自我对弈的下棋过程中也会每隔一会儿被查看一次（竞技场不查：它是固定局数的评估，中途打断得不偿失，停在轮边界即可）。
@@ -269,7 +179,7 @@ scripts/start.sh`}</pre>
         </EvidenceCard>
         <p>
           收到 stop 的那一轮既不训练也不记预热，直接离开本轮；已经完成的对局仍会写入，
-          随后程序退出训练。正常退出会在 <span className="mono">finally</span> 中再次保存回放池和
+          随后程序退出训练。正常退出会在 <span className="mono">finally</span> 中再次保存回放池和{" "}
           <span className="mono">latest</span>，并把 status.json 的状态写成 stopped。
         </p>
         <EvidenceCard
@@ -291,7 +201,7 @@ scripts/start.sh`}</pre>
         </p>
         <p>
           强制崩溃可能来不及执行 finally，所以项目还依靠原子写入的检查点和
-          「指标先于检查点」的写入顺序，守住轮边界（完整写盘代码见下方课末整链第三张卡）。
+          「指标先于检查点」的写入顺序，守住轮边界（完整写盘代码见课末指标卡）。
           这套顺序不能保证一条计算也不重复；它保证的是不会出现「权重已前进、
           记录没前进」却被当成完整一轮的情况：崩溃落在两次写入之间时，重启会从旧检查点再做，
           而不是加载一个指标里从未出现的新模型。finally 的收尾保存也只保证轮号不超前：被中断（如 Ctrl-C）时它存下的权重可能已走过本轮的部分更新，meta 却只记到上一轮（多训半轮可容忍，比加载超前模型安全）。
@@ -311,12 +221,12 @@ scripts/start.sh`}</pre>
             <tr><td>损失一直不动</td><td>回放池是否还在预热</td><td>攒够 min_buffer 才有更新；够了仍不动，回头查学习率与 z 的视角</td></tr>
             <tr><td>π 几乎全压在一两手</td><td>每手模拟数与根噪声</td><td>提高 mcts_simulations；确认自我对弈开了根噪声（竞技场不开是设计如此）</td></tr>
             <tr><td>价值损失贴 0、策略损失高</td><td>z 是否按行棋方视角补的</td><td>对照样本构造一节核对 z；视角错时价值头在拟合错目标</td></tr>
-            <tr><td>训练损失降、受控对战不涨</td><td>对局数与增广是否单一</td><td>过拟合：按「训练损失降、对战不涨」确认后，提升样本多样性（增广与回放混合，第 14 课）</td></tr>
+            <tr><td>训练损失降、受控对战不涨</td><td>对局数与增广是否单一</td><td>过拟合：按「训练损失降、对战不涨」确认后，提升样本多样性（八重增广与回放混合）</td></tr>
           </tbody>
         </table>
         <p>
           完成标准也来自证据而不是感觉：受控对战对 best 的得分率稳定过 55% 晋升线
-          （局数有限时过线也可能是运气，第 15 课有算例），对 baseline 明显领先
+          （6 局里也可能纯靠运气过线），对 baseline 明显领先
           （它是对照尺，不参与晋升），指标曲线可追溯到每一轮的对局与样本数，
           才算这一轮训练在真的变强。
         </p>
@@ -357,30 +267,6 @@ scripts/start.sh`}</pre>
         </EvidenceCard>
         <EvidenceCard
           fidelity="runtime-exact"
-          title="达到最小样本门槛才执行训练步，否则只记预热日志"
-          source="alphagomoku/pipeline.py · run"
-        >
-          <div className="codewalk">
-            <pre>{`            if not stopped_mid and len(buffer) >= cfg.min_buffer:
-                write_status("running", "train")
-                acc = []
-                for i in range(cfg.train_steps):
-                    acc.append(train_step(net, optimizer, buffer.sample(cfg.batch_size, rng),
-                                          device, rng))
-                    heartbeat("train", (i + 1) / cfg.train_steps)
-                avg = {k: sum(a[k] for a in acc) / len(acc) for k in acc[0]}
-                storage.append_event("train_end", {
-                    "iteration": iteration, "loss": avg["loss"],
-                    "policy_loss": avg["policy_loss"], "value_loss": avg["value_loss"],
-                    "buffer": len(buffer),
-                })
-            elif not stopped_mid:
-                storage.append_event("log", {"level": "info",
-                                             "message": f"buffer warming up: {len(buffer)}/{cfg.min_buffer}"})`}</pre>
-          </div>
-        </EvidenceCard>
-        <EvidenceCard
-          fidelity="runtime-exact"
           title="每轮结束先追加指标记录，再保存检查点"
           source="alphagomoku/pipeline.py · run"
         >
@@ -413,7 +299,7 @@ if iteration % cfg.keep_checkpoint_every == 0:
           </div>
         </EvidenceCard>
         <p className="mt-3">
-          运行 <span className="mono">python -m pytest tests/test_smoke.py -q</span> 可跑通最小预算的一轮完整管线，验证 <span className="mono">metrics.jsonl</span> 尾行的轮号始终不落后于 <span className="mono">latest.pt</span> 的迭代号。
+          运行 <span className="mono">python -m pytest tests/test_smoke.py -q</span> 可跑通最小预算的完整管线，验证两轮指标、各类产物与续跑轮号。
         </p>
       </Ledger>
 
@@ -551,7 +437,7 @@ function RecoveryProbe() {
   const copy = {
     before: {
       title: "指标记录之前强制崩溃",
-      body: "这一轮还没有完整指标，也没有同轮检查点。重启从旧 latest 的下一轮编号开始。buffer.npz 是直接写入而非原子替换：崩溃前若已保存本轮样本，重做出的同一批对局会把样本再入池一次（回放池不排重）；写到一半的回放池文件加载时报错退出，要删掉 buffer.npz 才能重跑。",
+      body: "这一轮还没有完整指标，也没有同轮检查点。重启从旧 latest 的下一轮编号开始。buffer.npz 是直接写入而非原子替换：崩溃前若已保存本轮样本，重做出的同一批对局会把样本再入池一次（回放池不排重）；截断的回放池文件会让启动抛 BadZipFile 退出，要删掉或修复它才能重跑。",
       verdict: "不会加载超前模型；样本可能重复入池；重做的是同一批对局，同名棋谱里写入的着法与结果不变（时间戳会变）；写坏的回放池作废。",
     },
     between: {

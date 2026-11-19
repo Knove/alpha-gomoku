@@ -59,7 +59,7 @@ export default function L02() {
             q: "三连（三颗同色子成一排）若不堵，会长成五连。「三连要堵」这句棋理黑白通用。若让机器分学「黑方怎么下」「白方怎么下」两门功课，会发生什么？",
             options: [
               "没问题，各学各的正好",
-              "同一条棋理学两遍：一样的样本，每套规则只分到一半",
+              "同一局面换一套符号就要重学：一样的棋理被迫学两遍",
               "机器会当场混乱，什么都学不会",
             ],
             answer: 1,
@@ -82,7 +82,7 @@ export default function L02() {
         </Def>
         <p>
           行棋方对应一个颜色值：黑 +1、白 −1，做法是整盘乘这个值
-          （乘一下就能完成翻号，这正是第 1 课把黑白编成相反数的原因）：轮到黑乘 +1，原样；
+          （乘一下就能完成翻号，这正是把黑白编成相反数的原因）：轮到黑乘 +1，原样；
           轮到白乘 −1，黑白符号互换，空格 0 不动。
           <strong>送进网络的棋子编码，一律把当前行棋方记为 +1、对手记为 −1。</strong>
         </p>
@@ -97,7 +97,7 @@ export default function L02() {
     """Board from the perspective of the player to move (own stones = 1)."""
     return (self.board * self._current).astype(np.float32)`}</pre>
               <div className="text-xs leading-relaxed sm:w-56" style={{ color: "var(--fg-faint)" }}>
-                <div>def 行：输出一张 9×9 的浮点数表（np.float32），形状见第 1 课。</div>
+                <div>def 行：输出一张 9×9 的浮点数表（np.float32），形状与原棋盘相同。</div>
                 <div className="mt-1">说明行：源码注释 own stones = 1，注明「己方记 +1」。</div>
                 <div className="mt-1">
                   return 行：一次乘法；<span className="mono">self._current</span> 是标量，
@@ -113,13 +113,13 @@ export default function L02() {
         <p>
           换完后，不管真实颜色是什么，棋子关系都写成同一句话：<strong>我方 = +1，
           对方 = −1。</strong>于是双方的棋局例子都只教一门「轮到我时怎样下」。
-          这条约定省下的是重复学习，也让「+1 到底是谁」永远不含糊。
+          这条约定省下的是重复学习，也让「+1 到底是谁」不再含糊。
           同一局面换立场看，已有子的格整体翻号，空格仍是 0。
         </p>
         <PerspectiveSwitch />
         <p>
           这条约定没有抹掉「这方拿的是黑棋还是白棋」的事实：
-          执黑的身份（本项目黑先）仍可能影响棋局，因为先手更主动，但它不靠这套符号承载，而是交给第 6 课的第三个输入平面（<strong>颜色平面</strong>：轮到黑填 1、轮到白填 0）单独标明。
+          执黑的身份（本项目黑先）仍可能影响棋局，因为先手更主动，但它不靠这套符号承载，而是交给第三个输入平面（<strong>颜色平面</strong>：轮到黑填 1、轮到白填 0）单独标明。
           若不另给颜色平面，网络得从「哪边多一子」间接猜轮谁，而早期各层只读邻近几格的卷积，数不出全盘的子数对比。
         </p>
         <p>
@@ -132,13 +132,12 @@ export default function L02() {
           一局有几手就留下几个 z。每手的 z 以该手行棋方为正，固定不随视角开关翻转：
           同一胜负结果，在胜方的各手记 +1、负方的各手记 −1。z 和规范视角都从行棋方出发，
           因此可以直接和网络的价值估计比较。两边共用 −1…+1 这把标尺（z 的记分就是这三档）。价值头用双曲正切（hyperbolic tangent，缩写 tanh，把任意数平滑压进 −1…+1 的函数）把输出压进同一标尺。
-          <span className="def-see">参见：第 9 课</span>
         </Def>
       </div>
 
       <Ledger title="alphagomoku/game.py · Game.canonical_board">
         <p className="mb-3">
-          本课的核心实现是上方已完整展示的 <span className="mono">alphagomoku/game.py</span> 中 <span className="mono">Game.canonical_board</span> 方法（共 3 行）：将 <span className="mono">self.board</span> 整盘乘以 <span className="mono">self._current</span> 并转为 <span className="mono">np.float32</span>。下游由第 6 课的 <span className="mono">encode</span> 拆成输入平面，并由第 12 课的自我对弈在记录样本时调用；终局结果 <span className="mono">z</span> 的按手回填则在第 12 课的 <span className="mono">_finalize</span> 中完成。
+          本课的核心实现是上方已完整展示的 <span className="mono">alphagomoku/game.py</span> 中 <span className="mono">Game.canonical_board</span> 方法（共 3 行）：将 <span className="mono">self.board</span> 整盘乘以 <span className="mono">self._current</span> 并转为 <span className="mono">np.float32</span>。下游由 <span className="mono">encode</span> 拆成输入平面，自我对弈记录样本时调用本方法；终局结果 <span className="mono">z</span> 的按手回填则由 <span className="mono">_finalize</span> 完成。
         </p>
         <ul className="ml-5 list-disc">
           <li>
@@ -177,7 +176,7 @@ export default function L02() {
             ],
             answer: 1,
             explain:
-              "乘以当前行棋方（白 = −1）是每条样本的立场基准：每一格 +1 变 −1、−1 变 +1，0 不动。漏写后白方样本的棋盘停在黑方视角，与按行棋方记的 z 错位，而且是同一个方向的错。样本里存下行棋方（player）：棋盘按行棋方翻号，z 在终局按 player 补上（参见：第 12 课），两边才是同一个视角。排查时可对拍 learn/tests/game.test.ts 的 canonical 用例：浏览器端的 engine/game.ts · canonical() 以不同写法实现同一约定。",
+              "乘以当前行棋方（白 = −1）是每条样本的立场基准：每一格 +1 变 −1、−1 变 +1，0 不动。漏写后白方样本的棋盘停在黑方视角，与按行棋方记的 z 错位，而且是同一个方向的错。样本里存下行棋方（player）：棋盘按行棋方翻号，z 在终局按 player 补上，两边才是同一个视角。排查时可对拍 learn/tests/game.test.ts 的 canonical 用例：浏览器端的 engine/game.ts · canonical() 以不同写法实现同一约定。",
           },
           {
             q: "这条约定主要避免了什么？",
@@ -199,7 +198,7 @@ export default function L02() {
             ],
             answer: 1,
             explain:
-              "行棋方从 +1 换成 −1（或反过来），乘数一换，每个已有子的格整体翻一次号：+1 变 −1、−1 变 +1，空格仍是 0。拿黑棋还是拿白棋仍可能有用，那项身份由颜色平面单独告诉机器（第 6 课）。",
+              "行棋方从 +1 换成 −1（或反过来），乘数一换，每个已有子的格整体翻一次号：+1 变 −1、−1 变 +1，空格仍是 0。拿黑棋还是拿白棋仍可能有用，那项身份由颜色平面单独告诉机器。",
           },
         ]}
       />

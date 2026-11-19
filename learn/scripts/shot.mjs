@@ -14,7 +14,17 @@ const ROUTES = [
 ]
 /** 会懒加载真权重或运行搜索的课，截图前多等一会。 */
 const SLOW = new Set(["l07", "l08", "l09", "l10", "l11", "graduation"])
-const ALL_IDS = ROUTES.map(([id]) => id)
+const STAGE_ENDS = new Set(["l02", "l06", "l11", "l15", "graduation"])
+/** 截图要逐课取景；显式准备完整测试进度，不能靠绕过门户或改 URL 跳课。 */
+const FULL_PROGRESS = JSON.stringify({
+  version: 1,
+  mastered: Object.fromEntries(ROUTES.map(([id]) => [id, {
+    passedAt: "2026-11-04T00:00:00.000Z",
+    evidence: ["截图夹具：课程已通过", "截图夹具：阶段已通过", "截图夹具：仅用于视觉验收"],
+    nextAction: "视觉验收",
+    scope: STAGE_ENDS.has(id) ? "stage" : "lesson",
+  }])),
+})
 
 const vite = await (await import("vite")).createServer({
   root: ROOT, logLevel: "error", server: { port: 5197 },
@@ -29,17 +39,12 @@ mkdirSync("/tmp/learn-final", { recursive: true })
 for (const theme of ["light", "dark"]) {
   await page.goto(base)
   await page.waitForTimeout(200)
-  await page.evaluate(({ ids, theme }) => {
+  await page.evaluate(({ theme, progress }) => {
     localStorage.clear()
     localStorage.setItem("exp-theme", theme)
-    // 全部章节按当前 contentVersion=1 标记完成，毕业沙盒可达。
-    localStorage.setItem("learn-progress-v4", JSON.stringify({
-      version: 4,
-      completed: Object.fromEntries(ids.map((id) => [id, { contentVersion: 1, completedAt: 1 }])),
-    }))
-  }, { ids: ALL_IDS, theme })
-  // localStorage 是在 App 挂载后才写入的,而 App 只在挂载时读一次——
-  // 不 reload 的话,后面全截成锁定页
+    localStorage.setItem("alpha-gomoku-learn/progress/v1", progress)
+  }, { theme, progress: FULL_PROGRESS })
+  // 主题在首次渲染前读取；写入后 reload 一次，让整轮截图使用同一主题。
   await page.reload()
   await page.waitForTimeout(300)
   for (const [route, label] of ROUTES) {

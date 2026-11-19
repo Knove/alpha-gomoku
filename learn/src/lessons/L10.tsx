@@ -1,292 +1,353 @@
-/** 第 9 课 · 双头：一次前向两个答案。
- *  节拍：思考题（两个问题两个网络？）→ 正文（共用主干 / 两种读法 / softmax+tanh）
- *  → 例 9-1（自由摆子真前向：问网络 → 81 分数热力图 + top5 + 价值估计条，
- *  对照开关换 weights-untrained 未训练网：baseline，训练前冻结的随机初始化）
- *  → 源码索引与验证 → 习题。 */
-import { useEffect, useMemo, useState } from "react"
+/** 第 10 课 · 搜索：一次模拟怎样来回走一遍。
+ *  节拍：思考题（第一印象会错）→ 根到叶的选择/求值/扩展 → 逐层取负回传 →
+ *  N/W/Q 与 root_value → 例 10-1 一次模拟 / 例 10-2 子树复用 → 对证 → 习题。 */
+import { useEffect, useRef, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
 import { ChapterEnd, Def } from "../framework/def"
 import { EvidenceCard } from "../framework/evidence"
 import Board from "../lib/board"
-import { encode, legalMoves, type GameState } from "../engine/game"
+import { type GameState } from "../engine/game"
 import { loadNet, type WeightsJson } from "../engine/model"
-import { softmax } from "../engine/nn"
-import { loadWeights, loadWeightsUntrained } from "../lib/weights"
+import { SearchTree, type MctsConfig, type MctsNode } from "../engine/mcts"
+import { loadWeights } from "../lib/weights"
 
-/* 初始局面沿用第 6/7 课的三连(己方 (2,4)(3,4)(4,4)，轮黑)，换你随手摆。 */
-const INIT: number[] = (() => {
-  const b = new Array<number>(81).fill(0)
-  for (const x of [2, 3, 4]) b[4 * 9 + x] = 1
-  return b
+/* 教学局面是合法交替落子后的 6 手，轮黑。它只负责演示一趟搜索，
+ * 第 11 课用专门局面研究 PUCT、噪声、温度和有限预算失败。 */
+const POS: GameState = (() => {
+  const board = Array.from({ length: 9 }, () => new Array<number>(9).fill(0))
+  for (const [x, y, p] of [
+    [4, 4, 1], [3, 4, -1], [5, 4, 1], [4, 3, -1], [4, 5, 1], [5, 5, -1],
+  ] as [number, number, number][]) board[y][x] = p
+  return { board, current: 1, winner: 0, moveCount: 6, lastMove: 5 * 9 + 5 }
 })()
 
-interface AskResult {
-  probs: number[] // 空格上重新归一的 81 概率
-  top: { a: number; p: number }[] // top5
-  vNet: number // 网络直接前向的价值头输出，当前行棋方视角
-  ms: number
-}
+const CFG: MctsConfig = { cPuct: 1.5, dirichletEps: 0, dirichletAlpha: 0.3 }
+const coord = (a: number) => `(${a % 9},${Math.floor(a / 9)})`
 
-/** 一次真前向：encode → loadNet 的函数（与本站引擎同一形状）。 */
-function askNet(
-  net: (input: number[][][]) => { logits: number[]; value: number },
-  st: GameState,
-): AskResult {
-  const t0 = performance.now()
-  const { logits, value } = net(encode(st))
-  const ms = performance.now() - t0
-  const legal = legalMoves(st)
-  const raw = softmax(logits)
-  let sum = 0
-  const probs = raw.map((p, a) => p * legal[a])
-  for (const p of probs) sum += p
-  if (sum > 1e-9) for (let a = 0; a < 81; a++) probs[a] /= sum
-  const top = probs
-    .map((p, a) => ({ a, p }))
-    .filter((t) => t.p > 0)
-    .sort((x, y) => y.p - x.p)
-    .slice(0, 5)
-  return { probs, top, vNet: value, ms }
+type NetFn = (planes: number[][][]) => { logits: number[]; value: number }
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a |= 0
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
 }
 
 export default function L10() {
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
-      <div className="eyebrow mb-3">第 9 课</div>
-      <h1 className="text-2xl font-bold">双头：一次前向两个答案</h1>
+      <div className="eyebrow mb-3">第 10 课</div>
+      <h1 className="text-2xl font-bold">搜索：一次模拟怎样来回走一遍</h1>
 
       <LessonGuide
-        question="同一局棋既要回答「哪里该下」，又要回答「谁更占优」，为什么不用两台完全分开的机器？"
-        why="2 个问题虽然答案形状不同，却都依赖同一批棋形和全盘形势。先共享理解，再分别读出答案，能少学重复的内容。"
+        question="网络给出第一眼判断后，一次搜索模拟怎样沿棋路前进，再把结果正确地带回根？"
+        why="只看眼前棋盘会漏掉对手回应。搜索要真的走到后续局面；但如果回传时搞错黑白视角，再多模拟也只会把输赢记反。"
         chain={[
-          "主干（前几课那 7 层卷积）把棋盘变成许多张特征图，装着棋形与整盘形势",
-          "策略头保留每个格子的差别，给 81 个落点打分",
-          "价值头把整盘信息汇成一个价值估计",
-          "搜索把「落点建议 + 形势估计」组合成实际走法",
+          "从根沿已经展开的边走到一个叶节点",
+          "终局叶直接给答案；普通新叶交给网络，得到 v_net",
+          "扩展新叶，并沿原路径逐层取负回传",
+          "每条边更新访问次数 N、累计结果 W、平均成绩 Q，根另记搜索汇总 root_value",
         ]}
-        takeaway="你能把 logits（81 个落点各自的分数）走完 softmax 与 tanh 得到 p 与 v_net，写出 v_net 的范围与视角（tanh 压进 −1 到 +1、站在当前行棋方一边），并写出双头 forward 的形状流转（共用主干输出的 48 张特征图，末端各读各的）。"
-        boundary="本课会完整算一次 softmax，并看 tanh 怎样把价值限制在 −1 到 +1。这里的 v_net 是网络直接输出；下一课搜索汇总出的 root_value 是另一个数，不能混称为 v。"
+        takeaway="你能手推一次模拟（选择→求值→扩展→回传），对拍树上的 N、W、Q 与 root_value，并写出换根复用的实现（保留子树的 N、W、Q，清零 root_value 展示统计）。"
+        boundary="本课只学搜索分哪几步、每步按什么顺序做、怎样把结果回传。下一课才完整手算 PUCT，并解释访问分布 π、根噪声、温度和实际落子。"
       />
 
       <Quiz
         title="思考题 · 先选一个答案"
         questions={[
           {
-            q: "网络看完棋盘，要回答 2 个问题：81 格哪里该下（逐点的分数），和整盘谁优（1 个数）。怎么安排这套问答？",
+            q: "搜索走到一个从未展开、又没有结束的局面后，下一步应该做什么？",
             options: [
-              "2 个网络：一个专门学「下哪」，一个专门学「谁优」",
-              "1 个主干带 2 个头：主干看棋，末端分岔，一个头逐点读，一个头整盘读",
-              "1 个网络答两次：先把 81 个分数算完，再用同一套权重算一遍价值估计",
+              "立刻把它当成胜局，给所有边加一分",
+              "让网络评价这个叶局面，再展开并沿来路回传",
+              "删除整棵树，从根重新随机落子",
             ],
             answer: 1,
-            explain:
-              "选第二项。第一项等于把认棋形学两遍：判断「这里该下」和「这局我优」，看的是同一批棋形，认棋形这件事只该学一次。第三项也不行：81 个分数和 1 个数，读出的方式不同，得各配各的读出层（头）；主干仍共享同一份主干输出。所以第一项错在把主干拆成两份，第三项错在不肯配两种读法。",
+            explain: "选第二项。非终局的新叶没有真实输赢，网络先给出各着点概率 P（即下文的先验），再给一个价值估计 v_net；随后叶节点展开，这个价值估计才沿选择路径逐层换视角回传。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>一份棋盘理解，按 2 种问题读出答案</h3>
+        <h3>一次模拟是一趟向前、一趟向后的往返</h3>
         <p>
-          把输入从第一层往末层算一遍、直接得到输出，这样的计算叫一次<strong>前向</strong>（forward pass，下棋只走前向，训练才在前向之后接上误差与梯度）。网络看完棋盘要同时回答「哪里该下」和「谁更占优」：
-          这 2 个问题读的是同一局棋里的棋形与形势。若完全分开做成两套网络，
-          就可能重复学习「怎样认棋形」。共用主干让主干输出的 48 张特征图同时服务 2 个训练目标，
-          通常更省权重，2 个任务的训练信号也都更新同一主干。这是一种常见设计取舍，
-          不保证 2 个任务永远互相帮助：两目标打架时，两路梯度在主干上互相抵消，损失会难降；本项目两笔损失等权 1:1，没有再调这个比例。
+          网络一眼看完棋盘给了个判断，为什么不能直接信它落子？因为看漏一步就可能踩进对手的四连陷阱，所以要顺着候选点往后试走几步。
+          搜索从当前局面出发，沿棋路走到后续局面，再把沿途见到的结果带回来；这套「沿树选择、叶处求值、逐层回传」的算法叫蒙特卡洛树搜索。
         </p>
-        <Def term="双头" en="dual-head">
-          一份主干加 2 个末端读法层的结构。主干（第 8 课那 7 层卷积）把棋盘变成
-          48 张 9×9 的特征图，装着棋形与整盘形势；2 个头各自把这份特征图读成自己的答案。
-          代码里「一份理解」就是一个变量 <span className="mono">h</span>，2 个头都从它出发。
+        <Def term="蒙特卡洛树搜索" en="Monte Carlo Tree Search">
+          沿搜索树选择到叶、在叶处取得价值、再把结果逐层回传的算法（缩写 MCTS）。
+          本项目用网络前向代替随机走子，但「选择 → 求值 → 回传」的骨架不变。
         </Def>
         <p>
-          主干吐出 48 张 9×9 的特征图之后，末端分成 2 条读法，一条逐点、一条整盘。
-          策略头先用 1×1 卷积压通道。2 是沿用的工程惯例，不是算出来的；
-          关键是 1×1 不看旁边的格子，1×1 阶段逐点进行、互不合并，这正是第 4 课那套加权求和。
-          <strong>1×1 卷积把 48 通道压到 2 通道：每个交叉点上把 48 个数各乘各的权重再相加。</strong>
-        </p>
-        <p>
-          逐点的归逐点，整盘的归整盘。策略头最后由一层全连接读出动作分，这层不再共享权重，
-          是有意的位置相关读出：天元和角上允许各读各的。共享适合「同一种局部形状」，
-          但「这个位置该下多少」天然与位置有关，所以读出层不共享。
-          价值头压到 1 通道后要把整图收成 1 个数，一层线性读出本身合法，中间却先过一层隐藏层；
-          加这一层是为了提升容量（64 是代码里写定的数）。81→64→1 的两级之间还有一次 ReLU
-          非线性变换：第 5 课讲过线性套线性还是一层线性，这次非线性让两级真正叠出容量，
-          不塌回一层线性。
-          <strong>读出层把整图 162 个数读成 81 个动作分（代码 p_fc：nn.Linear(2×9×9, 81)，代入 n=9 即 162→81），81 个动作各配一套读出权重；价值头先收 81→64，再收 64→1。</strong>
+          搜索记录每个推演过的局面：当前局面叫<strong>根</strong>，一手棋是一条<strong>边</strong>，
+          尚未继续展开的末端叫<strong>叶</strong>。每趟模拟只做一件事：
+          <span className="mono">select</span> 走到叶，调用方用网络评价叶，
+          <span className="mono">expand_and_backup</span> 长出这手棋的候选边并沿原路回传。
         </p>
         <EvidenceCard
           fidelity="runtime-exact"
-          title="双头层定义与前向计算：同一份主干特征 h 分路读出 81 个动作分与 1 个价值估计"
-          source="alphagomoku/model.py · AlphaGomokuNet.__init__ 与 forward"
+          title="一次搜索模拟的主循环：选择、求值、扩展并回传"
+          source="alphagomoku/mcts.py · 模块文档字符串"
         >
           <div className="codewalk">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
-              <pre className="min-w-0 flex-1">{`        # policy head
-        self.p_conv = nn.Conv2d(channels, 2, 1, bias=False)
-        self.p_bn = nn.BatchNorm2d(2)
-        self.p_fc = nn.Linear(2 * self.n * self.n, self.n * self.n)
-        # value head
-        self.v_conv = nn.Conv2d(channels, 1, 1, bias=False)
-        self.v_bn = nn.BatchNorm2d(1)
-        self.v_fc1 = nn.Linear(self.n * self.n, 64)
-        self.v_fc2 = nn.Linear(64, 1)
-
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        h = self.blocks(self.stem(x))
-        p = F.relu(self.p_bn(self.p_conv(h)))
-        p = self.p_fc(p.reshape(-1, 2 * self.n * self.n))
-        v = F.relu(self.v_bn(self.v_conv(h)))
-        v = F.relu(self.v_fc1(v.reshape(-1, self.n * self.n)))
-        v = torch.tanh(self.v_fc2(v)).squeeze(-1)
-        return p, v`}</pre>
-              <div className="text-xs leading-relaxed sm:w-56" style={{ color: "var(--fg-faint)" }}>
-                <div>h：主干输出的 48 张 9×9 特征图，p 与 v 两个分支都从它出发。</div>
-                <div className="mt-1">策略头：48→2 通道后摊成 162 个数，经 p_fc 读出 81 个动作分。</div>
-                <div className="mt-1">价值头：48→1 通道后摊成 81 个数，经 81→64→1 与 tanh 收成一个价值估计。</div>
-              </div>
-            </div>
+            <pre>{`    for _ in range(cfg.mcts_simulations):
+        tree.select()                      # descend to a leaf (may need eval)
+        if tree.needs_eval():
+            policy, value = net(tree.leaf_input())   # batched across trees by caller
+            tree.expand_and_backup(policy, value)`}</pre>
           </div>
         </EvidenceCard>
-        <Def term="策略头" en="policy head">
-          双头中逐点读出「哪里该下」的那一头。它保留每个格子的差别，最后给出 81 个落点分数，
-          与第 1 课的 81 个动作一一对应。
-        </Def>
-        <Def term="价值头" en="value head">
-          双头中整盘读出「谁更占优」的那一头。它把整盘信息汇成一个价值估计（value estimate），
-          输出只是一个数，记作 <span className="mono">v_net</span>。
-        </Def>
-        <Def term="隐藏层" en="hidden layer">
-          介于输入与输出之间的那些层的统称。卷积层也是隐藏层（第 7 课），二者读输入的方式不同，权重是否共享也不同（卷积共享，全连接不共享）。
-          价值头这里的隐藏层是全连接层（fully-connected layer）：每个输出都读全部输入。它含 64 个隐藏单元，
-          把 81 个数先收拢到 64，再收成 1（64 是代码里写定的数），给「逐点变成整盘」的落差修了一个中间站。
-          隐藏层之后接一次 ReLU 非线性变换，两级才不塌回一层线性（第 5 课「线性套线性还是线性」）。
-        </Def>
+        <p className="mt-3">
+          例 10-1 的三个按钮按这个次序接力，其中按钮③「扩展并回传」调用{" "}
+          <span className="mono">expand_and_backup</span>，其内部由{" "}
+          <span className="mono">_backup</span> 完成逐边回传。
+        </p>
 
-        <h3>分数读成概率，价值估计压进同一把标尺</h3>
+        <h3>选择沿已展开的边走到一个叶</h3>
         <p>
-          策略头先给 81 个格子的分数，这批未归一化的分数就叫 logits。网络本体到 logits 为止，
-          不输出概率；归一化在只做前向的封装里补一步，训练时与下棋时各做各的：
-          下棋用 softmax，训练用对数归一化（log_softmax，一步算出 ln p 的同一步）。
-          softmax 后的这批数称概率 p（小写；进搜索遮格归一后才叫先验 P）。
-          <strong>softmax 把这批 logits 改成总和为 1 的概率。</strong>
+          第一步是<strong>选择</strong>：从根沿已经展开的边向下走，直到终局或尚未展开的叶。
+          每走一手都记下「从哪个节点、选了哪条边」，回传时才能原路返回。
+          岔口按 PUCT 选边：既看已有平均成绩，也给访问不足的候选留机会。
         </p>
         <EvidenceCard
           fidelity="runtime-exact"
-          title="推理封装：前向取得 logits 与价值估计后，对 logits 做 softmax 归一化"
-          source="alphagomoku/model.py · Predictor.predict"
+          title="沿已展开边下探至叶节点，缺子节点时当场创建"
+          source="alphagomoku/mcts.py · SearchTree.select"
         >
           <div className="codewalk">
-            <pre>{`logits, v = self.net(x)
-probs = torch.softmax(logits, dim=-1)`}</pre>
+            <pre>{`        while node.expanded:
+            a = self._puct_select(node, game)
+            path.append((node, a))
+            child = node.children.get(a)
+            if child is None:
+                child = _Node(game.n * game.n)
+                node.children[a] = child
+            game.play(a)
+            node = child`}</pre>
           </div>
         </EvidenceCard>
         <p>
-          不能直接除以总和：分数有正有负，分母可能是 0 或负数；就算分母是正的，负分数除下来还是负数，当不成概率。
-          选 e 的幂而不是别的正数化办法，第一关是保序（分数越大，概率一定越大）：绝对值和平方在负半轴都不保序，|−3| 会排到 1 前面去，所以不行。e 的幂严格单调、恒正，顺带把差距拉开，还与 ln 配成好算的梯度。
-          下面用 3 个分数算一次（每个分数记作 <span className="mono">l</span>，最大分记作 <span className="mono">m</span>）：
-          先从每个分数减去最大分 <span className="mono">m</span>
-          （softmax 只看分数之差，整体平移不变：e 的 (l−m) 次方之比与 e 的 l 次方之比相同，
-          e 的 −m 次方上下约掉，顺带还能防止指数变成装不下的大数），
-          再取 e 的指数，最后除以这些指数的和。
-          <strong>整个做法写作 <span className="mono">pᵢ=e^(lᵢ−m)/Σe^(lⱼ−m)</span>（e 是固定常数，约 2.718）：先减最大分 m，再取 e 的指数，最后除以和。这样得到的概率总和为 1；先减最大分 m 这一步，概率一个也不变。</strong>
+          叶拿到网络输出后，先遮掉非法落点，再把剩下概率归一到 1，得到边的
+          <strong>先验</strong> <span className="mono">P</span>。它只提供搜索的起跑顺序，
+          之后是否值得继续查，由回传累积的成绩与访问次数决定。
         </p>
-        <div className="formula">
-          分数 <span className="hl">2</span> / 1 / 0 → e^l：7.39 / 2.72 / 1.00
-          （和 11.11）→ 除以和 <span className="hl">0.67</span> / 0.24 / 0.09，加起来正好 1
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="遮住非法落点后将先验重新归一，全零时退化为合法格均匀分布"
+          source="alphagomoku/mcts.py · SearchTree.expand_and_backup"
+        >
+          <div className="codewalk">
+            <pre>{`        legal = game.legal_moves()
+        prior = policy.astype(np.float64) * legal
+        s = prior.sum()
+        prior = (prior / s) if s > 1e-8 else (legal / legal.sum()).astype(np.float64)`}</pre>
+          </div>
+        </EvidenceCard>
+
+        <h3>叶处取得一个价值估计</h3>
+        <p>
+          第二步是<strong>求值</strong>。终局叶不再询问网络：按叶节点行棋方的视角，
+          对手刚成五记 −1，和棋记 0。普通叶则把局面编码后送进网络，
+          取回一个站在<strong>该叶行棋方</strong>视角的价值估计 <span className="mono">v_net</span>。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="走到终局叶节点时直接按胜负定值并回传"
+          source="alphagomoku/mcts.py · SearchTree.select"
+        >
+          <div className="codewalk">
+            <pre>{`        if out is not None:
+            if out == 0:
+                v = 0.0
+            else:
+                v = 1.0 if out == game.current_player else -1.0
+            self._backup(path, v)
+            return`}</pre>
+          </div>
+        </EvidenceCard>
+        <h3>扩展新叶，沿原路径逐层取负回传</h3>
+        <p>
+          第三步是<strong>扩展</strong>：普通叶收到先验后，长出各条候选边，
+          从叶变成可继续选择的内部节点。一次只展开一个新叶，
+          这样每次网络评价都和一条真实模拟对应，下一次选择也能用上刚长出的边。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="暂存待求值的叶局面、路径与叶节点"
+          source="alphagomoku/mcts.py · SearchTree.select"
+        >
+          <div className="codewalk">
+            <pre>{`        self._pending_game = game
+        self._pending_path = path
+        self._pending_leaf = node`}</pre>
+          </div>
+        </EvidenceCard>
+        <p>
+          第四步是<strong>回传</strong>：从叶往根走，每退一层先取负。
+          叶方看到的 <span className="mono">v_net=+0.6</span>，在它上一层的对手眼里就是
+          <span className="mono">−0.6</span>，再上一层又翻回 <span className="mono">+0.6</span>。
+          这样每笔成绩都记在「走这手棋的人」视角上。
+        </p>
+        <Def term="N、W、Q" en="visit count, total action value, mean action value">
+          记在每条边上的 3 个数：<span className="mono">N</span> 是这条边被走过的次数；
+          <span className="mono">W</span> 记的是这手棋的行棋方所见的累计结果；
+          <span className="mono">Q=W/N</span> 是平均成绩。若一条边经过 4 次、W=+2，则 Q=+0.5。
+        </Def>
+        <p>
+          每次回传到一条边，就让 N 加 1、W 加上换视角后的值。
+          回传走完整条路径后，最终值已经翻回根方视角，并被累加进{" "}
+          <span className="mono">_root_value_sum</span> 与{" "}
+          <span className="mono">_root_value_count</span>；两者的商就是
+          <span className="mono">root_value</span>。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="沿路径倒序回传：每退一层先取反，再累加边统计与根汇总"
+          source="alphagomoku/mcts.py · SearchTree._backup"
+        >
+          <div className="codewalk">
+            <pre>{`    def _backup(self, path: list[tuple[_Node, int]], v: float) -> None:
+        for node, a in reversed(path):
+            v = -v  # value flips perspective each ply
+            node.N[a] += 1.0
+            node.W[a] += v
+        self._root_value_sum += v
+        self._root_value_count += 1`}</pre>
+          </div>
+        </EvidenceCard>
+        <Def term="搜索汇总" en="root value">
+          <span className="mono">root_value</span> 是每次模拟换算到根方视角后的平均值。
+          它可能混合许多叶的 <span className="mono">v_net</span> 和真实终局结果，
+          只用于展示搜索过程。
+        </Def>
+      </div>
+
+      <SimulationStepper />
+
+      <ThreeValues />
+
+      <div className="prose mt-12">
+        <h3>落子后把搜过的子树提作新根</h3>
+        <p>
+          真实落子后，刚搜过的子树不该整棵丢掉：把对应子节点提作新根，
+          它下面的 N、W、Q 原样保留，只清零上一根的 <span className="mono">root_value</span> 展示统计；
+          若新根已经展开且开启根噪声，换根时还会重新混一次根噪声，而已有的 N、W、Q 不动。
+          因此新根的 ΣN 可能大于本轮新增模拟数。
+          对手若走了搜索里没有的着，就新建空节点当新根。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="落子后将对应子节点提作新根，并清零根汇总统计"
+          source="alphagomoku/mcts.py · SearchTree.update_root"
+        >
+          <div className="codewalk">
+            <pre>{`        child = self.root.children.get(action)
+        self.root_game.play(action)
+        self.root = child if child is not None else _Node(self.root_game.n * self.root_game.n)
+        self._root_value_sum = 0.0
+        self._root_value_count = 0`}</pre>
+          </div>
+        </EvidenceCard>
+      </div>
+
+      <ReuseProbe />
+
+      <Ledger title="alphagomoku/mcts.py · _Node / select / expand_and_backup">
+        <p className="mb-3 text-sm">
+          下面连贯展示搜索树节点的数据结构 <span className="mono">_Node</span>，以及一次模拟中负责向下走叶的{" "}
+          <span className="mono">select</span> 与负责扩展并触发回传的{" "}
+          <span className="mono">expand_and_backup</span> 完整实现：
+        </p>
+        <div className="codewalk">
+          <pre>{`class _Node:
+    __slots__ = ("prior", "children", "N", "W", "expanded")
+
+    def __init__(self, num_actions: int):
+        self.prior: np.ndarray | None = None  # (num_actions,) masked + normalized
+        self.children: dict[int, "_Node"] = {}
+        self.N = np.zeros(num_actions, dtype=np.float32)  # visit counts per action
+        self.W = np.zeros(num_actions, dtype=np.float32)  # total value per action
+        self.expanded = False`}</pre>
         </div>
-        <Def term="softmax" en="softmax">
-          把一组 logits 归一化（normalization，即保持彼此大小关系、改成总和为 1）为概率 p 的具体做法：每个分数先减去最大分
-          <span className="mono">m</span>，再取 e 的指数，最后除以这些指数的和。
-          减 <span className="mono">m</span> 不改变彼此大小关系，却能防止指数溢出；softmax 不改棋理，只把这批数从分数角色换成概率角色。
-          上面 3 个分数按此法算得 0.67 / 0.24 / 0.09；若先减 m=2，则算 e⁰/e⁻¹/e⁻²，
-          归一化后概率一模一样。例 9-1 的 top5 百分比是它的下一步变体：先把已占格丢掉、
-          再在空格里重新归一化到 100%，所以展示值不是裸 softmax 输出的 p 本身。训练侧不遮格：网络照样对 81 格出 p，目标 π 在非法格是 0，交叉熵会把这些格的 p 往 0 压。
-        </Def>
-        <p>
-          两个头的收尾不一样：策略头收在归一化上，价值头收在标尺上。
-          <strong>价值头的一个数不走 softmax，而要过 tanh（见上方 forward 末行 <span className="mono">torch.tanh(self.v_fc2(v)).squeeze(-1)</span>），压进 −1 到 +1。</strong>
-        </p>
-        <Def term="双曲正切" en="hyperbolic tangent（缩写 tanh）">
-          把任意实数平滑压进 −1 到 +1 的函数：输入越正越靠近 +1，输入越负越靠近 −1，0 停在中间。
-          价值头用它收尾，使输出与终局结果 z 共用一把标尺。它不做归一化，压的也不是概率。
-        </Def>
-        <p>
-          和终局结果 z 使用同一把标尺，才能计算误差。<span className="mono">z</span>
-          就是那局棋最后的真实结果。
-          <strong>误差按均方误差（mean squared error）记：逐元素算 (v_net−z)² 再取平均，z 是赢 +1、输 −1、和 0 的终局结果；再与策略头的交叉熵损失 1:1 相加合成总损失。</strong>
-        </p>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="训练步损失计算：价值头算均方误差，与策略损失等权相加"
-          source="alphagomoku/train.py · train_step"
-        >
-          <div className="codewalk">
-            <pre>{`    logits, v = net(x)
-    value_loss = F.mse_loss(v, target_z)
-    logp = F.log_softmax(logits, dim=-1)
-    policy_loss = -(target_pi * logp).sum(dim=-1).mean()
-    loss = value_loss + policy_loss`}</pre>
-          </div>
-        </EvidenceCard>
-        <p>
-          这个直接前向输出记作价值估计 <span className="mono">v_net</span>：它没有经过<strong>校准</strong>（calibration，即核对预测值与真实战绩频率是否一致，比如预测 0.7 的局面里是否真有约七成获胜），
-          所以不能直接读成赢的概率。就算完全校准，<span className="mono">v_net</span> 等于胜的概率减去负的概率，再用「胜的概率 + 和的概率 + 负的概率 = 1」消去负的概率，换算出的 <span className="mono">(v_net+1)/2</span> 也是「胜的概率 + 和的概率的一半」，除非无和棋才等于赢的概率。视角也要分开说：<span className="mono">v_net</span>
-          站在当前行棋方立场；编码不翻转坐标，策略头的分数仍对应原棋盘上的 81 个坐标。
-        </p>
-      </div>
+        <div className="codewalk mt-3">
+          <pre>{`    def select(self) -> None:
+        """Run one simulation: descend PUCT to a leaf.
 
-      <div className="prose mt-10">
-        <p>
-          例 9-1 由浏览器镜像现算：learn/src/engine/model.ts 的 loadNet 载入导出权重，
-          权重保留 5 位小数、用 Float64 计算，与 torch 前向逐项对比允许末位误差；
-          训练后的权重是 weights-best.json，对照 weights-untrained.json（baseline，单独一份文件，打开开关才下载）。
+        Terminal leaves are backed up immediately; otherwise the leaf is stashed
+        as pending and must be resolved with expand_and_backup().
+        """
+        assert self._pending_game is None, "previous leaf not resolved"
+        node = self.root
+        game = self.root_game.clone()
+        path: list[tuple[_Node, int]] = []
+        while node.expanded:
+            a = self._puct_select(node, game)
+            path.append((node, a))
+            child = node.children.get(a)
+            if child is None:
+                child = _Node(game.n * game.n)
+                node.children[a] = child
+            game.play(a)
+            node = child
+        out = game.outcome()
+        if out is not None:
+            if out == 0:
+                v = 0.0
+            else:
+                v = 1.0 if out == game.current_player else -1.0
+            self._backup(path, v)
+            return
+        self._pending_game = game
+        self._pending_path = path
+        self._pending_leaf = node`}</pre>
+        </div>
+        <div className="codewalk mt-3">
+          <pre>{`    def expand_and_backup(self, policy: np.ndarray, value: float) -> None:
+        """Expand the pending leaf with network prior and back up its value.
+
+        value: from the perspective of the player to move at the leaf.
+        """
+        node = self._pending_leaf
+        game = self._pending_game
+        assert node is not None and game is not None
+        legal = game.legal_moves()
+        prior = policy.astype(np.float64) * legal
+        s = prior.sum()
+        prior = (prior / s) if s > 1e-8 else (legal / legal.sum()).astype(np.float64)
+        node.prior = prior.astype(np.float32)
+        node.expanded = True
+        if node is self.root and self.add_noise:
+            self._mix_noise(node, legal)
+        self._backup(self._pending_path, float(value))
+        self._pending_game = None
+        self._pending_path = []
+        self._pending_leaf = None`}</pre>
+        </div>
+        <p className="mt-3 text-sm">
+          运行 <span className="mono">python -m pytest tests/test_mcts.py -q</span>{" "}
+          可验证访问计数守恒、终局直接回传与子树换根复用。
         </p>
-      </div>
-
-      <AskBoard />
-
-      <Ledger title="alphagomoku/model.py · 双头 forward 与 alphagomoku/train.py">
-        <ul className="ml-5 list-disc space-y-1.5">
-          <li>
-            <span className="mono">alphagomoku/model.py · AlphaGomokuNet.__init__ / forward</span>：主干输出{" "}
-            <span className="mono">h = self.blocks(self.stem(x))</span> 后分两路，策略头经{" "}
-            <span className="mono">p_conv (48→2, 1×1)</span>、<span className="mono">p_bn</span>、{" "}
-            <span className="mono">p_fc (162→81)</span> 输出 81 个动作 logits；价值头经{" "}
-            <span className="mono">v_conv (48→1, 1×1)</span>、<span className="mono">v_bn</span>、{" "}
-            <span className="mono">v_fc1 (81→64)</span>、<span className="mono">v_fc2 (64→1)</span> 与{" "}
-            <span className="mono">torch.tanh</span> 输出 <span className="mono">[−1, +1]</span> 范围内的价值估计。
-          </li>
-          <li>
-            <span className="mono">alphagomoku/model.py · Predictor.predict</span>：推理阶段调用{" "}
-            <span className="mono">torch.softmax(logits, dim=-1)</span> 把 logits 归一化为概率分布。
-          </li>
-          <li>
-            <span className="mono">alphagomoku/train.py · train_step</span>：训练阶段分别计算{" "}
-            <span className="mono">F.mse_loss(v, target_z)</span> 与交叉熵{" "}
-            <span className="mono">policy_loss</span>，并以 <span className="mono">loss = value_loss + policy_loss</span> 等权相加（第 13 课详述完整训练步）。
-          </li>
-          <li>
-            验证命令：<span className="mono">pytest tests/test_model.py::test_forward_shapes_and_ranges</span> 与{" "}
-            <span className="mono">cd learn && npm test</span>（运行 <span className="mono">parity.test.ts</span> 对拍 16 份输入的 6 处中间张量）。
-          </li>
-        </ul>
       </Ledger>
 
       <ChapterEnd
         summary={[
-          "双头共用一份主干：主干把棋盘读成 48 张特征图，策略头逐点读出 81 个分数，价值头整盘读出 1 个价值估计。",
-          "softmax 把 logits 改成总和为 1 的概率 p（先减最大分再取 e 的指数）；tanh 把价值压进 −1 到 +1，与 z 共用一把标尺。",
-          "价值估计 v_net 是网络直接前向的输出，视角是当前行棋方；它没有按真实战绩核对过准头，不能直接当赢的概率。",
+          "一次模拟是一趟往返：向前选择到叶，叶处求值，扩展新叶，再沿原路径逐层取负回传。",
+          "叶处的答案分 2 种：终局读真实 ±1/0，非终局读网络的价值估计 v_net；更早的做法是随机走子一整盘，噪声大，已被一次前向取代。",
+          "边上记 N、W、Q=W/N；根另记 root_value，它是模拟值的平均，与价值估计 v_net、终局结果 z 是 3 个不同的量。",
+          "落子后把已搜过的子树提作新根，只清零 root_value 展示统计，已积累的 N、W、Q 保留下来。",
         ]}
         next={
           <>
-            网络给出的只是第一眼判断。下一课让搜索真的沿棋路走到后面的局面，
-            再把结果正确带回树根：一次模拟分几步、每步按什么顺序做、
-            访问次数与平均成绩怎样记在边上，以及搜索汇总出的 root_value 为什么和 v_net 不是一回事。
+            有了「一次模拟」，还要回答岔口上「下一次该查哪条路」。下一课完整手算 PUCT
+            的打分与选边，再看全部根访问数怎样归一成 π、根噪声与温度怎样影响实际落子，
+            以及有限预算下这套选择规则会怎样失败。
           </>
         }
       />
@@ -295,37 +356,30 @@ probs = torch.softmax(logits, dim=-1)`}</pre>
         title="习题"
         questions={[
           {
-            q: "为什么「下哪」和「谁优」共用 1 个主干，而不训练 2 个网络？",
+            q: "叶节点站在白方视角给出 v_net=+1，回到上一层黑方选择的边时为什么记 −1？",
             options: [
-              "共用省内存，2 个网络存不下",
-              "2 个问题都依赖棋形和形势：共享主干可避免把「认棋形」学两遍，并让 2 个训练目标共同给主干提供信号",
-              "因为只买得起一份棋谱数据",
+              "因为网络输出只能保留一位小数",
+              "因为同一结果对白方是赢，对上一层黑方就是输；每退一层必须换一次视角",
+              "因为 N 增加后 W 必须变成负数",
             ],
             answer: 1,
-            explain:
-              "主因是主干只学一次：判断该下哪和判断谁占优都依赖同一批棋形与形势。分开学可能重复做「认棋形」这件事；合在一起，2 个训练目标都能更新同一个主干。省权重、省计算是顺带收益，2 个目标是否总能互相帮助仍取决于训练。",
+            explain: "黑白每走一手交换一次。叶节点行棋方的「我赢」就是上一层对手的「我输」，所以回传先取负再写入那条边。",
           },
           {
-            q: "策略头和价值头的读法差在哪？",
-            options: [
-              "策略头整盘读成 1 个数，价值头逐点读成 81 个分数",
-              "策略头逐点读：压到 2 通道后读成 81 个分数；价值头整盘读：压到 1 通道，经含 64 个隐藏单元的隐藏层收成 1 个数",
-              "没有差别，只是输出的名字不同",
-            ],
-            answer: 1,
-            explain:
-              "逐点的归逐点、整盘的归整盘。策略头把棋盘一格一格的细节全保住（每格 1 个分数，第 1 课的 81 个动作一一对应）。价值头要把整盘收成 1 个价值估计，81→64→1 的隐藏层（全连接层）就是给这个落差修的中间站。要核对这条形状流转，可对拍 learn/tests/parity.test.ts：它用 16 份输入逐层对比 6 处中间结果，浏览器端的复现与 model.py 的 forward 同源。",
+            q: "一条边经过 4 次，累计 W=+2，它的 Q 是多少？",
+            options: ["+0.5", "+2", "+8"],
+            answer: 0,
+            explain: "Q=W/N=2/4=0.5。",
           },
           {
-            q: "价值头的输出为什么要过 tanh？",
+            q: "有人把搜索的 root_value 直接当 z 写进训练样本，断在哪一环？",
             options: [
-              "为了让它看起来更像概率，加起来等于 1",
-              "为了压进 −1 到 +1：和训练目标（赢 +1 / 输 −1 / 和 0）同一把标尺，误差才可比，训练早期也不会飙出天文数字",
-              "为了让计算更快",
+              "没断：root_value 想得更远，是更好的 z",
+              "断在样本出生这一环：z 必须是终局事实，root_value 是估计；拿估计当标签等于自己教自己，搜索与网络的偏差会被固化回权重",
+              "断在搜索：应该多跑几次模拟再取平均",
             ],
             answer: 1,
-            explain:
-              "tanh 不做归一化（归一化由策略头的 softmax 完成），它管的是标尺：把任意数压进 −1 到 +1。不用硬截断（clip），是因为截断区梯度为 0，错到界外就再也学不回来。tanh 光滑可导，错得离谱时仍给得出梯度；它自己也有饱和区，输入极大极小时梯度同样趋近 0。压进这把标尺后，v_net 才能与终局结果 z 比较，计算 (v_net−z)²。它表示价值估计，不是直接的赢的概率。有和棋、或未校准等情况时，不能把 (v_net+1)/2 当作「赢的概率」。",
+            explain: "z 在终局才补，是事实；root_value 是搜索留下的估计，只作展示记录。把它当标签，训练目标就从「终局事实」降成「自己的旧判断」，偏差会被固化回权重。训练时仍会重新计算 v_net 并与 z 比较。",
           },
         ]}
       />
@@ -333,226 +387,408 @@ probs = torch.softmax(logits, dim=-1)`}</pre>
   )
 }
 
-/* ============ 例 9-1 · 自由摆子，问真网络 ============ */
+interface LeafView {
+  path: number[]
+  leaf: GameState
+}
 
-function AskBoard() {
-  const [stones, setStones] = useState<number[]>(INIT)
-  const [cur, setCur] = useState<1 | -1>(1) // 下一手摆的颜色（也决定网络替谁看）
-  const [cmp, setCmp] = useState(false)
-  const [wBest, setWBest] = useState<WeightsJson | null>(null)
-  const [wUntrained, setWUntrained] = useState<WeightsJson | null>(null)
-  const [res, setRes] = useState<{ best: AskResult; untrained: AskResult | null } | null>(null)
+interface NetAnswer extends LeafView {
+  logits: number[]
+  value: number
+  ms: number
+}
+
+interface EdgeTrace {
+  action: number
+  n: number
+  w: number
+  sent: number
+}
+
+interface BackupTrace {
+  path: number[]
+  leafPlayer: 1 | -1
+  value: number
+  edges: EdgeTrace[]
+  rootValue: number
+}
+
+function traceEdges(tree: SearchTree, path: number[]): EdgeTrace[] {
+  let node: MctsNode = tree.root
+  return path.map((action) => {
+    const n = node.N[action]
+    const w = node.W[action]
+    const child = node.children.get(action)
+    if (child) node = child
+    return { action, n, w, sent: 0 }
+  })
+}
+
+const signed = (value: number) =>
+  `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(2)}`
+
+function SimulationStepper() {
+  const [net, setNet] = useState<NetFn | null>(null)
+  const [stage, setStage] = useState<0 | 1 | 2>(0)
+  const [leaf, setLeaf] = useState<LeafView | null>(null)
+  const [answer, setAnswer] = useState<NetAnswer | null>(null)
+  const [simulations, setSimulations] = useState(0)
+  const [version, setVersion] = useState(0)
+  const [terminalNote, setTerminalNote] = useState<string | null>(null)
+  const [autoTrip, setAutoTrip] = useState(false)
+  const [lastTrace, setLastTrace] = useState<BackupTrace | null>(null)
+  const treeRef = useRef<SearchTree | null>(null)
 
   useEffect(() => {
     let alive = true
-    loadWeights().then((w) => alive && setWBest(w))
-    return () => {
-      alive = false
-    }
+    loadWeights().then((weights: WeightsJson) => {
+      if (!alive) return
+      const loaded = loadNet(weights)
+      setNet(() => loaded)
+      treeRef.current = new SearchTree(POS, CFG, loaded, mulberry32(42))
+      setVersion((v) => v + 1)
+    })
+    return () => { alive = false }
   }, [])
-  useEffect(() => {
-    if (!cmp || wUntrained) return
-    let alive = true
-    loadWeightsUntrained().then((w) => alive && setWUntrained(w))
-    return () => {
-      alive = false
+
+  const select = () => {
+    const tree = treeRef.current
+    if (!tree || stage !== 0) return
+    setLastTrace(null)
+    tree.select()
+    setTerminalNote(null)
+    if (tree.needsEval()) {
+      const pending = tree.pendingState()
+      if (pending) setLeaf({ path: tree.pendingActions() ?? [], leaf: pending })
+      setStage(1)
+    } else {
+      setSimulations((n) => n + 1)
+      setTerminalNote("这次选择直接到达终局：SearchTree 已把真实 ±1/0 沿路径回传，不需要网络。")
+      setAutoTrip(false)
+      setVersion((v) => v + 1)
     }
-  }, [cmp, wUntrained])
-
-  const netBest = useMemo(() => (wBest ? loadNet(wBest) : null), [wBest])
-  const netUntrained = useMemo(() => (wUntrained ? loadNet(wUntrained) : null), [wUntrained])
-
-  const state = useMemo<GameState>(() => {
-    const board = Array.from({ length: 9 }, (_, y) => stones.slice(y * 9, y * 9 + 9))
-    let n = 0
-    for (const v of stones) if (v !== 0) n++
-    return { board, current: cur, winner: 0, moveCount: n, lastMove: null }
-  }, [stones, cur])
-
-  const place = (x: number, y: number) => {
-    setRes(null) // 棋盘一变，旧答案作废：数字永远对得上眼前的局面
-    setStones((s) => {
-      const next = s.slice()
-      next[y * 9 + x] = cur
-      return next
-    })
   }
 
-  const ask = () => {
-    if (!netBest) return
-    setRes({
-      best: askNet(netBest, state),
-      untrained: cmp && netUntrained ? askNet(netUntrained, state) : null,
-    })
+  const evaluate = () => {
+    const tree = treeRef.current
+    if (!tree || !net || !leaf || stage !== 1) return
+    const started = performance.now()
+    const result = net(tree.leafInput())
+    setAnswer({ ...leaf, ...result, ms: performance.now() - started })
+    setStage(2)
   }
 
-  const vb = res ? res.best.vNet * cur : 0 // 价值估计条按黑方视角换算
+  const backup = () => {
+    const tree = treeRef.current
+    if (!tree || !answer || stage !== 2) return
+    const path = answer.path
+    tree.expandAndBackup(answer.logits, answer.value)
+    const edges = traceEdges(tree, path).map((edge, i) => ({
+      ...edge,
+      sent: answer.value * (-1) ** (path.length - i),
+    }))
+    setLastTrace({
+      path,
+      leafPlayer: answer.leaf.current,
+      value: answer.value,
+      edges,
+      rootValue: tree.rootValue(),
+    })
+    setLeaf(null)
+    setAnswer(null)
+    setStage(0)
+    setAutoTrip(false)
+    setSimulations((n) => n + 1)
+    setVersion((v) => v + 1)
+  }
+
+  const reset = () => {
+    if (!net) return
+    treeRef.current = new SearchTree(POS, CFG, net, mulberry32(42))
+    setStage(0)
+    setLeaf(null)
+    setAnswer(null)
+    setSimulations(0)
+    setTerminalNote(null)
+    setAutoTrip(false)
+    setLastTrace(null)
+    setVersion((v) => v + 1)
+  }
+
+  useEffect(() => {
+    if (!autoTrip || !net) return
+    const id = window.setTimeout(() => {
+      if (stage === 0) select()
+      else if (stage === 1) evaluate()
+      else if (stage === 2) backup()
+    }, 420)
+    return () => window.clearTimeout(id)
+  }, [autoTrip, stage, net, leaf, answer])
+
+  const pending = answer ?? leaf
+  const chainPath = lastTrace?.path ?? pending?.path ?? []
+  const chainLeafPlayer = lastTrace?.leafPlayer ?? pending?.leaf.current ?? null
+  const chainValue = lastTrace?.value ?? answer?.value ?? null
+  const activePath = chainPath
+  const pathMarks = activePath.map((a, idx) => ({
+    x: a % 9,
+    y: Math.floor(a / 9),
+    anchor: idx === activePath.length - 1,
+  }))
+
+  const tree = treeRef.current
+  const rootRows = tree
+    ? Array.from(tree.root.N)
+      .map((n, action) => ({ action, n, w: tree.root.W[action] }))
+      .filter((row) => row.n > 0)
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 5)
+    : []
+  const rootValue = tree?.rootValue() ?? 0
+  const chainEdges = lastTrace?.edges ?? (tree ? traceEdges(tree, chainPath) : [])
+  const resolved = lastTrace !== null
+  void version
 
   return (
-    <figure className="figure mt-8">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
-        <span className="mini-label">例 9-1 · 亲手摆局面，问真网络</span>
-        <label className="flex cursor-pointer items-center gap-2 text-sm" style={{ color: "var(--fg-muted)" }}>
-          <input
-            type="checkbox"
-            checked={cmp}
-            onChange={(e) => {
-              setCmp(e.target.checked)
-              setRes(null)
-            }}
-            data-qa="cmp-toggle"
-          />
-          对照未训练网络（baseline）
-        </label>
+    <figure className="figure mt-8" data-qa="simulation-stepper">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">例 10-1 · 一次模拟分三键完成</span>
       </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
-        <div className="min-w-0 flex-1 md:max-w-[24rem]">
-          <div data-qa="board-main">
-            <Board board={stones} onCellClick={place} heat={res?.best.probs} ghostPlayer={cur} />
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="seg">
-              <button type="button" className={`seg-btn ${cur === 1 ? "active" : ""}`} onClick={() => { setCur(1); setRes(null) }}>
-                摆黑
-              </button>
-              <button type="button" className={`seg-btn ${cur === -1 ? "active" : ""}`} onClick={() => { setCur(-1); setRes(null) }}>
-                摆白
-              </button>
-            </span>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                setStones(new Array<number>(81).fill(0))
-                setRes(null)
-              }}
-            >
-              清空
+        <div className="min-w-0 flex-1 md:max-w-[21rem]">
+          <Board board={POS.board.flat()} lastMove={{ x: 5, y: 5 }} marks={pathMarks} />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className="btn" disabled={!net || stage !== 0}
+              onClick={select} data-qa="step-select">① 选择</button>
+            <button type="button" className="btn" disabled={stage !== 1}
+              onClick={evaluate} data-qa="step-evaluate">② 求值（网络评价）</button>
+            <button type="button" className="btn" disabled={stage !== 2}
+              onClick={backup} data-qa="step-backup">③ 扩展并回传</button>
+            <button type="button" className={`btn ${autoTrip ? "active" : ""}`} disabled={!net}
+              onClick={() => setAutoTrip((v) => !v)}>
+              {autoTrip ? "⏸ 停" : "▶ 自动走一趟"}
             </button>
-            <button type="button" className="btn primary" disabled={!netBest} onClick={ask} data-qa="ask-btn">
-              {netBest ? "问网络 →" : "正在加载真权重……"}
-            </button>
+            <button type="button" className="btn" disabled={!net} onClick={reset}>↺ 重置</button>
           </div>
-          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            红色热度 = 策略头的概率 p（只在空格里重新归一化到 100%，已占格不参与）。
-            序章回放的红色热度是另一样东西：那是搜索访问分布 π。两处都用红色热度呈现，
-            本页这块来自网络第一眼，序章那块来自搜索推演。
-            这张图是 p 在空格上的展示归一，不是网络输出的 p 本身。
-            摆子颜色决定轮到该色行棋；网络替这一方看棋盘、报价值估计。
+          <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+            已完成 <span className="num">{simulations}</span> 次模拟。每个等待评价的叶子，
+            必须先让网络评价完、把结果回传，才能开始下一次选择；同一棵树一次只处理一个这样的叶子。
           </p>
-          <p className="misconception mt-3 text-xs leading-relaxed">
-            <span className="m-title">使用边界</span>
-            这里允许你任意摆黑白子，目的是观察一次真实前向计算。若摆出了不合规则的局面
-            （例如双方数量不符合轮流落子），数值仍是网络对这份输入的输出，<strong>不应当解释成
-            合法对局中的落子建议或棋力证据</strong>。
-          </p>
-        </div>
-
-        <div className="min-w-0 flex-1">
-          {!res ? (
-            <p className="text-sm" style={{ color: "var(--fg-muted)" }}>
-              初始是第 7 课的三连局面。你可以随手摆子来观察输入怎样改变输出；若想把结果
-              当作棋局建议，请自己保持黑白轮流与合法落子。按「问网络」会进行一次真前向计算，
-              2 个头同时给出输出。
-            </p>
-          ) : (
-            <>
-              <div className="mini-label">策略头 · 下哪：top5（坐标 (x,y)，概率）</div>
-              <ol className="mt-2 space-y-1.5">
-                {res.best.top.map((t) => (
-                  <li key={t.a} className="l00-top-row" data-qa="top-row">
-                    <span className="mono text-sm">({t.a % 9},{Math.floor(t.a / 9)})</span>
-                    <span className="prob-track">
-                      <span className="prob-fill" style={{ width: `${t.p * 100}%` }} />
-                    </span>
-                    <span
-                      className="num w-12 flex-none text-right text-sm"
-                      style={{ color: "var(--accent-deep)" }}
-                    >
-                      {(t.p * 100).toFixed(1)}%
-                    </span>
-                  </li>
-                ))}
-              </ol>
-
-              <div className="mt-4 border-t pt-3" style={{ borderColor: "var(--hairline)" }}>
-                <div className="mini-label">价值头 · 谁优</div>
-                <p className="num mt-1.5 text-2xl font-bold" data-qa="v-best" style={{ color: "var(--accent-deep)" }}>
-                  v_net = {res.best.vNet >= 0 ? "+" : "−"}{Math.abs(res.best.vNet).toFixed(2)}
-                  <span className="ml-2 text-sm font-normal" style={{ color: "var(--fg-faint)" }}>
-                    一次前向 {res.best.ms.toFixed(1)} 毫秒
-                  </span>
+          {terminalNote && <div className="reveal-box mt-3 text-sm">{terminalNote}</div>}
+          {(answer ?? leaf) && (
+            <div className="reveal-box mt-3 text-sm" data-qa="leaf-state">
+              <p>路径：根{(answer ?? leaf)!.path.map((a) => ` → ${coord(a)}`).join("") || "（根自身）"}</p>
+              <p className="mt-1">叶节点的行棋方：{(answer ?? leaf)!.leaf.current === 1 ? "黑" : "白"}</p>
+              {answer ? (
+                <p className="num mt-1" style={{ color: "var(--accent-deep)" }}>
+                  v_net={answer.value >= 0 ? "+" : ""}{answer.value.toFixed(3)}（{answer.ms.toFixed(1)} ms）
                 </p>
-                <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-                  v_net 站在{cur === 1 ? "黑" : "白"}方视角，轮到谁就替谁看。条上已换算到黑方视角。
-                </p>
-                <div className="l00-vbar mt-2">
-                  <i className="l00-vbar-zero" />
-                  <i className="l00-vbar-needle" style={{ left: `${((vb + 1) / 2) * 100}%` }} />
-                </div>
-                <div className="num mt-1 flex justify-between text-xs" style={{ color: "var(--fg-faint)" }}>
-                  <span>−1 白优</span>
-                  <span>0</span>
-                  <span>+1 黑优</span>
-                </div>
-              </div>
-            </>
-          )}
-
-          {cmp && (
-            <div className="mt-5 border-t pt-3" style={{ borderColor: "var(--hairline)" }} data-qa="cmp-panel">
-              <div className="mini-label">对照组 · 未训练 baseline</div>
-              {!res?.untrained ? (
-                <p className="mt-2 text-sm" style={{ color: "var(--fg-muted)" }}>
-                  baseline（参见：第 15 课）是训练开始前冻住的随机数权重。{wUntrained ? "按「问网络」，2 个网络同题同考。" : "正在加载未训练权重（单独一份文件，约 1.2 MB）……"}
-                </p>
-              ) : (
-                <div className="mt-2 flex flex-col gap-4 sm:flex-row">
-                  <div className="w-40 flex-none" data-qa="board-untrained">
-                    <Board board={stones} heat={res.untrained.probs} />
-                    <p className="num mt-1 text-center text-xs" style={{ color: "var(--fg-faint)" }}>
-                      未训练的热度
-                    </p>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <ol className="space-y-1.5">
-                      {res.untrained.top.slice(0, 3).map((t) => (
-                        <li key={t.a} className="l00-top-row" data-qa="top-row-untrained">
-                          <span className="mono text-sm">({t.a % 9},{Math.floor(t.a / 9)})</span>
-                          <span className="prob-track">
-                            <span className="prob-fill" style={{ width: `${t.p * 100}%` }} />
-                          </span>
-                          <span
-                            className="num w-12 flex-none text-right text-sm"
-                            style={{ color: "var(--fg-muted)" }}
-                          >
-                            {(t.p * 100).toFixed(1)}%
-                          </span>
-                        </li>
-                      ))}
-                    </ol>
-                    <p className="num mt-3 text-lg font-bold" data-qa="v-untrained" style={{ color: "var(--fg-muted)" }}>
-                      v_net = {res.untrained.vNet >= 0 ? "+" : ""}
-                      {res.untrained.vNet.toFixed(2)}
-                    </p>
-                  </div>
-                </div>
-              )}
-              <p className="mt-3 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                同一局面、同一副网络骨架，只差训练。未训练 baseline 的策略头几乎把概率均分给 81 格，
-                初始三连局面实测最热一格才 1.4%（78 个空格平摊、每格约 1.3%）；价值估计实测 +0.02，换哪个局面都基本贴着 0 小幅漂。
-                训练过的（只吃过第 0–2 轮的自我对弈样本）已有态度：同一局面 v_net=−0.31、最热 2.0%，
-                离懂棋还远，但已经不是一片均匀的乱数了。
-              </p>
+              ) : <p className="mt-1">叶子尚未询问网络。</p>}
             </div>
           )}
         </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="sim-chain-panel" data-qa="sim-tree">
+            <div className="mini-label">
+              {resolved ? "这一趟的路径与回传" : "这一趟的路径"} · 根 → 叶
+            </div>
+            <div className="sim-chain-track">
+              <div className="sim-chain-node root">
+                <span className="sim-chain-node-tag">根</span>
+                <strong>{POS.current === 1 ? "黑" : "白"}</strong>
+              </div>
+              {chainPath.map((action, i) => {
+                const edge = chainEdges[i]
+                const isLeaf = i === chainPath.length - 1
+                const player = isLeaf && chainLeafPlayer !== null
+                  ? chainLeafPlayer
+                  : i % 2 === 0 ? -1 : 1
+                return (
+                  <div className="sim-chain-hop" key={`${action}-${i}`}>
+                    <span className="sim-chain-arrow" aria-hidden="true">→</span>
+                    <div className={`sim-chain-edge${resolved ? " resolved" : ""}${isLeaf ? " leaf" : ""}`}>
+                      <div className="sim-chain-edge-head">
+                        <span className="sim-chain-action mono">{coord(action)}</span>
+                        <span className="sim-chain-player">{isLeaf ? "叶" : "节点"} · {player === 1 ? "黑" : "白"}</span>
+                      </div>
+                      <span className="sim-chain-stat mono">
+                        N {resolved ? `${edge.n - 1}→${edge.n}` : edge.n}
+                      </span>
+                      <span className="sim-chain-stat mono">
+                        W {resolved ? `${signed(edge.w - edge.sent)}→${signed(edge.w)}` : signed(edge.w)}
+                      </span>
+                      {resolved && (
+                        <span
+                          className="sim-chain-sent mono"
+                          style={{ animationDelay: `${(chainPath.length - 1 - i) * 170}ms` }}
+                        >
+                          {signed(edge.sent)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            {chainPath.length === 0 && (
+              <p className="sim-chain-empty">
+                {pending || resolved ? "这一趟停在根自身：根就是待展开的新叶。" : "按「① 选择」从根出发。"}
+              </p>
+            )}
+            {chainPath.length > 0 && (
+              <div className="sim-chain-readout">
+                <span>{chainValue === null ? "叶值待网络评价" : `叶节点 v_net ${signed(chainValue)}`}</span>
+                {resolved && (
+                  <span className="sim-chain-values">
+                    <span className="sim-chain-values-label">逐层取负</span>
+                    <b>{signed(lastTrace!.value)}</b>
+                    {[...lastTrace!.edges].reverse().map((edge, i) => (
+                      <span key={edge.action} style={{ animationDelay: `${i * 170}ms` }}>
+                        → <b>{signed(edge.sent)}</b>
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="mini-label mt-4">根节点统计 · 每条边记 N、W、Q</div>
+          {rootRows.length === 0 ? (
+            <p className="mt-3 text-sm" style={{ color: "var(--fg-muted)" }}>
+              第一趟只展开根本身，路径为空，所以还没有根边统计。继续做第二趟才会经过一条根边。
+            </p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {rootRows.map((row) => (
+                <div key={row.action} className="l00-top-row" data-qa="root-ledger-row">
+                  <span className="mono">{coord(row.action)}</span>
+                  <span className="prob-track">
+                    <span className="prob-fill" style={{ width: `${Math.min(100, (row.n / Math.max(1, simulations)) * 100)}%` }} />
+                  </span>
+                  <span className="num">N={row.n}</span>
+                  <span className="num">W={row.w >= 0 ? "+" : ""}{row.w.toFixed(2)}</span>
+                  <span className="num">Q={(row.w / row.n) >= 0 ? "+" : ""}{(row.w / row.n).toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="reveal-box mt-4 text-sm">
+            <div className="mini-label">root_value · 搜索汇总</div>
+            <p className="num mt-1 text-xl font-bold" style={{ color: "var(--accent-deep)" }}>
+              {rootValue >= 0 ? "+" : ""}{rootValue.toFixed(3)}
+            </p>
+            <p className="mt-2" style={{ color: "var(--fg-muted)" }}>
+              它是每次模拟换算到根方视角后的平均；不等于任何一次叶处的价值估计，也不是终局结果 z。
+            </p>
+          </div>
+        </div>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">例 9-1</span>
-        真引擎加真权重：<span className="mono">encode</span>（learn/src/engine/game.ts）→{" "}
-        <span className="mono">loadNet</span>（learn/src/engine/model.ts）前向，softmax 在站内现算。
-        每次「问网络」都由这份浏览器复现当场计算；top5 坐标即原棋盘坐标，策略头不做视角翻转。
+        <span className="cap-no">例 10-1</span>
+        三键直接调用 alphagomoku/mcts.py 的 SearchTree.select 与 SearchTree.expand_and_backup（站内镜像名 leafInput、expandAndBackup）；权重舍入和 JavaScript 数值属于浏览器适配。
+        root_value 面板按模拟次数求平均，每次模拟贡献换算到根方视角的一笔。
+      </figcaption>
+    </figure>
+  )
+}
+
+function ThreeValues() {
+  return (
+    <figure className="figure mt-8" data-qa="three-values">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">一张表分清 3 个最易混的值</span>
+      </div>
+      <div className="overflow-x-auto p-4 sm:p-5">
+        <table className="l09-table value-compare">
+          <thead>
+            <tr><th>量</th><th>谁产生</th><th>站在谁的视角</th><th>用在哪里</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span className="mono">v_net</span></td>
+              <td>网络对叶局面的一次前向</td>
+              <td>叶节点的当前行棋方</td>
+              <td>搜索的叶值；训练时再算价值损失</td>
+            </tr>
+            <tr>
+              <td><span className="mono">root_value</span></td>
+              <td>这次搜索所有模拟的最终值求平均</td>
+              <td>当前根的行棋方</td>
+              <td>展示搜索过程；不进训练目标</td>
+            </tr>
+            <tr>
+              <td><span className="mono">z</span></td>
+              <td>整局下完后的真实结果</td>
+              <td>记录该手时的行棋方</td>
+              <td>价值头的终局训练目标</td>
+            </tr>
+          </tbody>
+        </table>
+        <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+          一句话：<span className="mono">v_net</span> 是网络对一片叶的第一眼，
+          <span className="mono">root_value</span> 是整次搜索的平均记录，
+          <span className="mono">z</span> 是棋局结束后才拿到的事实。
+        </p>
+      </div>
+      <figcaption className="figure-cap">
+        <span className="cap-no">对照表</span>
+        三个量都可能落在 −1…+1 内，但产生方式、视角与用途不同，不能互相替换。
+      </figcaption>
+    </figure>
+  )
+}
+
+function ReuseProbe() {
+  const [result, setResult] = useState<{
+    action: number
+    childVisits: number
+    keptVisits: number
+    newRootValue: number
+  } | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  const run = async () => {
+    setLoading(true)
+    const weights = await loadWeights()
+    const net = loadNet(weights)
+    const tree = new SearchTree(POS, CFG, net, mulberry32(7))
+    tree.run(8)
+    const action = tree.bestAction()
+    const child = tree.root.children.get(action)
+    const childVisits = child ? Array.from(child.N).reduce((sum, n) => sum + n, 0) : 0
+    tree.updateRoot(action)
+    const keptVisits = Array.from(tree.root.N).reduce((sum, n) => sum + n, 0)
+    setResult({ action, childVisits, keptVisits, newRootValue: tree.rootValue() })
+    setLoading(false)
+  }
+
+  return (
+    <figure className="figure mt-8" data-qa="reuse-probe">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">例 10-2 · 落子后为什么保留子树</span>
+      </div>
+      <div className="p-4 sm:p-5">
+        <p className="text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+          搜索 8 次后选择访问最多的动作，再调用 <span className="mono">updateRoot</span>。
+          若该动作已有子节点，整棵已检查的子树成为新根；只有上一根的 root_value 统计会清零。
+        </p>
+        <button type="button" className="btn primary mt-4" disabled={loading} onClick={run}>
+          {loading ? "正在搜索…" : "搜索并复用子树"}
+        </button>
+        {result && (
+          <div className="reveal-box mt-4 text-sm">
+            <p>实际落子：<span className="mono">{coord(result.action)}</span></p>
+            <p className="mt-1">子树原有访问总数：<span className="num">{result.childVisits}</span></p>
+            <p className="mt-1">成为新根后仍保留：<span className="num">{result.keptVisits}</span></p>
+            <p className="mt-1">新根 root_value 统计：<span className="num">{result.newRootValue.toFixed(1)}</span>（已清零）</p>
+          </div>
+        )}
+      </div>
+      <figcaption className="figure-cap">
+        <span className="cap-no">例 10-2</span>
+        跑 8 次模拟再落子，对比子树成为新根前后的访问总数；清零的只有 root_value 展示统计。
       </figcaption>
     </figure>
   )

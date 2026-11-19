@@ -1,6 +1,6 @@
-/** 地基篇(第 3-6 课)的纯函数：梯度下降 / 点积 / XOR-ReLU / 两层反向传播。
+/** 教程用到的纯数学函数：第 3–5 课的梯度下降 / 点积 / ReLU，以及第 13 课的双权重反向传播。
  *  只放数学，不放 JSX:tests/ 用 node --experimental-strip-types 直跑，
- *  .tsx 进不了测试导入。所有数字例与 archive/foundations.md 的推导链一致。 */
+ *  .tsx 进不了测试导入。archive/foundations.md 保留同源公式推导，但界面参数以课程为准。 */
 
 /** 负分归零：第 5 课的「非线性变换」。 */
 export const relu = (s: number): number => (s > 0 ? s : 0)

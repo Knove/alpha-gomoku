@@ -1,230 +1,253 @@
-/** 第 6 课 · 三个输入平面(地基篇 4/4)。
- *  节拍：思考题(一个 ±1 平面够吗)→ 正文(正负抵消 → 拆两个 0/1 平面 + 颜色平面)→
- *  例 6-1(正负抵消计算器：同一个横三连卷积核，不同窗口内容，亲手验证 3 > 2 > 1)→
- *  例 6-2(同一局面三个输入平面并排，点格联动)→
- *  为什么刚好选三个 → 对证(game.py encode + replay.py 重建)→ 习题。 */
-import { useState } from "react"
+/** 第 7 课 · 卷积核：在全盘滑动的一组权重。
+ *  节拍：思考题(结构先给什么)→ 正文(卷积核=3×3 加权求和 / 同一个扫全盘=权重共享 /
+ *  归纳偏置 / 48 个是训练学出来的)→ 例 7-1(滑窗 + 扫全盘热力图，conv2d 真算)→
+ *  例 7-2(真卷积核墙：weights-best.json 前 8 个)→ 源码索引与验证 → 习题。 */
+import { useEffect, useMemo, useState } from "react"
 import { Quiz } from "../framework/quiz"
 import { Ledger } from "../framework/ledger"
 import { LessonGuide } from "../framework/lesson-guide"
+import { NetPipeline } from "../framework/net-pipeline"
 import { ChapterEnd, Def } from "../framework/def"
 import { EvidenceCard } from "../framework/evidence"
-import Board from "../lib/board"
 import { MiniGrid9 } from "../lib/minigrid"
+import { conv2d, type Tensor } from "../engine/nn"
+import type { WeightsJson } from "../engine/model"
+import { loadWeights } from "../lib/weights"
 
-/* 教学局面：与第 2 课同一局(5 黑 4 白共 9 手，轮白),
- * 例 6-2 用它渲染「网络眼里的三个输入平面」。 */
-const BLACK_POS: [number, number][] = [
+/* 横三连卷积核(同第 6 课三个输入平面):中间一行 1 1 1。 */
+const KERNEL = [0, 0, 0, 1, 1, 1, 0, 0, 0]
+/* 教学局面(同 archive/network.md 手算例):己方三连横排在 y=4,x=2..4。 */
+const THREE: [number, number][] = [
   [2, 4],
   [3, 4],
   [4, 4],
-  [4, 5],
-  [3, 5],
 ]
-const WHITE_POS: [number, number][] = [
-  [5, 4],
-  [4, 3],
-  [5, 3],
-  [6, 4],
-]
-const OBJ: number[] = (() => {
+const OWN81: number[] = (() => {
   const b = new Array<number>(81).fill(0)
-  for (const [x, y] of BLACK_POS) b[y * 9 + x] = 1
-  for (const [x, y] of WHITE_POS) b[y * 9 + x] = -1
+  for (const [x, y] of THREE) b[y * 9 + x] = 1
   return b
 })()
 
-/* 例 6-2 的三个输入平面(轮白：canonical 里白的变 +1,即「己方」)。
- * 与 game.ts encode() 同一套切法，数据在本组件里现算，改动棋盘即联动。 */
-const PLANE_OWN = OBJ.map((v) => (v === -1 ? 1 : 0)) // 轮白：白子 = 己方
-const PLANE_OPP = OBJ.map((v) => (v === 1 ? 1 : 0))
-const PLANE_COLOR = new Array<number>(81).fill(0) // 轮白 → 整张 0
+/** 81 个窗口分数：真引擎 conv2d(与 model.py stem 同一算子，pad=1 界外补 0)。 */
+const SCORES: number[] = (() => {
+  const own: Tensor = { data: Float64Array.from(OWN81), shape: [1, 9, 9] }
+  const tmpl: Tensor = { data: Float64Array.from(KERNEL), shape: [1, 1, 3, 3] }
+  return Array.from(conv2d(own, tmpl, null, 1).data)
+})()
 
 export default function L07() {
 
   return (
     <section className="mx-auto max-w-3xl px-6 py-12">
-      <div className="eyebrow mb-3">第 6 课</div>
-      <h1 className="text-2xl font-bold">三个输入平面</h1>
+      <div className="eyebrow mb-3">第 7 课</div>
+      <h1 className="text-2xl font-bold">卷积核：在全盘滑动的一组权重</h1>
+
+      <NetPipeline step={3} />
 
       <LessonGuide
-        question="棋盘已有 0/+1/−1 的记法，为什么送进网络前要拆成两个 0/1 平面、再加一个颜色平面？"
-        why="网络第一层要用小卷积核寻找「我方在这里」「对方在这里」这些事实。把它们分开，能让卷积核更直接地读到各自的特征。"
+        question="机器怎样在棋盘每个位置都寻找同一种局部棋形，而不用把同一条棋理学 81 遍？"
+        why="三个输入平面只是把棋盘摆好；网络还需要一套方法，在任意位置发现「这里像三连」「那里像威胁」这样的局部图案。"
         chain={[
-          "先用第 2 课的视角约定统一我方和对方",
-          "我方子、对方子各占一个 0/1 平面",
-          "卷积核可分别检测两类棋形，不让正负号在一次求和中抵消",
-          "颜色平面补上执黑或执白这一全局身份",
+          "一个 3×3 卷积核为局部格子分别打分",
+          "同一卷积核滑过全盘，汇成一张特征图",
+          "同一套数字在各位置共用，避免重复学习",
+          "许多训练得到的卷积核一起工作，提供后续层需要的特征",
         ]}
-        takeaway="你能从任意局面构造 3 个 9×9 输入平面并与 encode() 对拍。"
-        boundary="「不请人」禁止代机器算棋理特征，不禁止规定这种输入编码。直接用一个 ±1 平面并非信息丢失或绝对做不到，不同网络可以选不同编码。"
+        takeaway="你能手算一处卷积响应（滑窗、padding、通道），并指出结构只预先给出「棋形局部、各处复用」、核里各格的分量仍由训练决定。"
+        boundary="卷积核是一组可学习的局部权重，只负责检测小窗里的图案；整盘判断还要靠后续层与搜索来组合这些响应。"
       />
 
       <Quiz
         title="思考题 · 先选一个答案"
         questions={[
           {
-            q: "己方 +1、对方 −1、空 0 的数组没有丢棋盘信息。本模型仍把它拆成两个 0/1 平面（颜色平面另说是新增的状态），主要为了什么？",
+            q: "不用人手写「见三连就堵」的规则，仍能让网络少走弯路。结构最适合先给它什么？",
             options: [
-              "因为 ±1 数组缺少棋子位置，必须补更多数据",
-              "把「我方在这里」和「对方在这里」拆成两件事，让第一层卷积核更直接地分别识别它们",
-              "因为五子棋必须记住每一步历史才能知道当前局面",
+              "多喂棋谱：见的局面够多，自然就悟出来了",
+              "把「棋形常由附近格子组成、同一种棋形会在各处出现」写进结构：让可学习卷积核在全盘滑动",
+              "手写一条规则代码：「见到三连就堵」",
             ],
             answer: 1,
             explain:
-              "选第二项。±1 数组的信息并没有丢；这是一种让本模型更好学的改写。一次简单的卷积核求和中，正负号会冲突：「己、敌、己」和「空、己、空」算出同一个数，两样局面分不出彼此。把双方拆开后，卷积核可以分别提出「我方棋形」和「对方棋形」的特征。五子棋没有吃子，也没有「这步能不能下要翻历史」的规则（围棋的打劫规则就是那种），所以当前棋盘加行棋方已足够描述状态。",
+              "选第二项。结构没有直接给出「哪种棋形一定该堵」这条棋理；它只先给两项常识：棋形先看附近格子，同一种局部图案无论出现在何处都该用同一套检测方式。卷积核具体长什么样、发现后有多重要，仍由训练决定。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>一次求和会把两类事实搅在一起</h3>
+        <h3>一张 3×3 数表给局部格子分别打分</h3>
         <p>
-          第 3 课里的 <span className="mono">x</span> 是我们手工规定的教学特征；从现在起，
-          不再请人替机器数「三连有几条」这类棋理特征。人仍然规定编码方式（三个平面各记什么），
-          但那只是把棋盘事实如实写成数，不是替机器判断棋理。第一步是把棋盘改写成网络能逐层处理的输入，
-          让后面的计算自己从格子里形成特征。
+          接着上一课的手算例：横三连卷积核中间一行是 1、1、1，其余是 0。
+          盖在某个 3×3 小窗上，对应格子相乘、九个乘积相加（第 4 课推的正是这套乘加）。
+          哪里分数大，哪里就有「横排三个己方子」的嫌疑。
+          拿它手算一遍：盖在正罩住己方三连的窗口上，得 <strong className="num">3</strong>；
+          往右挪一格，得 <strong className="num">2</strong>；盖到全空的窗上，得{" "}
+          <strong className="num">0</strong>。
         </p>
-        <p>
-          网络第一层的算法在第 4 课已经推过：比如这个「横三连卷积核」，
-          中间一行是 1、1、1，其余是 0，它量的是「这个窗口的中间一横排，
-          是不是我的子」。用起来是一张 3×3 的九数权重表盖在棋盘某个小窗上，
-          对应格子相乘，再把 9 个乘积加成一个数（这是单个平面的九项；下一课会正式定义卷积核并展开它在全盘的滑动）。
-        </p>
-        <p>
-          现在拿它去算一个 ±1 平面。同一个卷积核，盖在「己、敌、己」三格上：
-          1×1 + 1×(−1) + 1×1 = <strong>1</strong>；盖在「己、空、己」上：
-          1 + 0 + 1 = <strong>2</strong>。（乘 −1 就是变号；+1 撞上 −1
-          正好归零，这是第 4 课那段计算。）更麻烦的是冲突：「己、敌、己」得 1，
-          「空、己、空」也得 1。被敌子隔开的两颗己方子，和孤零零一颗己方子，
-          在这个平面上是同一个数，一次求和分不出彼此。再盖在「敌、敌、敌」上，
-          得 <strong>−3</strong>：对方的子把我方这一项的贡献拖成负的。这一次求和还把「己、敌、己」和「空、己、空」压成同一个数 1，这种不同局面同分的现象叫<strong>混叠</strong>；正负相消则是<strong>抵消</strong>。当然可以设计更多卷积核或更深网络来处理，
-          但本模型选择更直接的写法：一种身份一个平面。
-        </p>
+        <Def term="卷积核与卷积" en="kernel / convolution">
+          一张小数表（教学用单平面卷积核是 3×3 的九个数），盖在输入的同尺寸小窗上，对应格子相乘再把乘积加成一个数。
+          数表里的每个数都是一个权重，沿用第 3 课「特征 × 权重」的配对规则，只是九个格子有固定的空间位置。
+          真实网络的三个输入平面各有自己的一张九数小表，合起来才是一套完整卷积核（9 格 × 3 平面 = 27 个权重）。
+          把这张表滑过全盘、在每个位置都算一遍加权和，就是卷积。
+        </Def>
       </div>
 
-      <CancelCalc />
-
-      <div className="prose mt-12">
-        <h3>一种身份一个平面，外加一个颜色平面</h3>
+      <div className="prose mt-10">
+        <h3>同一个卷积核扫过全盘，处处产生一张特征图</h3>
         <p>
-          解法是<strong>一种身份一个平面，每个只放 0 和 1</strong>。
-          平面 0「己方子」：我的子在哪些格子，是 1、不是 0；平面 1「对方子」：
-          对手的子在哪些格子。拆开后，每个平面上「1 越多，这个事实越成立」，
-          对方棋形由另一个平面单独判断，两类特征不用在同一次求和里互相抵消。
-          空格不用单独一个：<strong>两个平面同为 0 的地方就是空</strong>；
-          「己方横三连」在己方平面上得 3。
+          卷积核不是挑一个位置盖一次，而是<strong>每个位置都盖一次</strong>：
+          81 个分数排成一张 9×9 的图。棋盘外围虚拟补一圈 0，
+          让边缘和角上的 81 个格子也都能当一次窗口中心，特征图不缩水。
         </p>
-        <p>
-          还差最后一项全局信息：轮黑走时整张填 1，轮白走时整张填 0。
-          规范视角（代码里叫 canonical）统一了「我 / 对手」，但没有告诉网络「我拿的是黑还是白」。本模型把这项
-          全局身份直接贴进每个位置，而不是让早期局部卷积核费力推断。
-        </p>
-        <Def term="颜色平面" en="color plane">
-          整张填同一个数的第三个输入平面：轮黑走时全 1，轮白走时全 0。取 1/0 而不是 ±1，是与两个棋子平面同量纲的编码选择，0/1 在乘加里当开关用最直观。
-          它把「我执黑还是执白」这项全局身份送进每个位置，补上前两个平面只描述棋子分布时
-          没直接给出的颜色信息。严格说，能看全盘的网络可以由子数差推出颜色（黑先行、无吃子：轮黑时双方子数相等，轮白时对方多一子），但早期局部卷积核看不到全局计数；与其让每个样本重新推一遍，不如把这一位直接铺进去。
-        </Def>
-        <Def term="输入平面" en="input plane">
-          送进网络的整张 9×9 数值图。己方子、对方子两个 0/1 平面各是 81 个问题的答案（每格一问「这里有我的子吗」或「有对手的子吗」）；
-          颜色平面则是一个全局问题（「现在轮到哪一方走」）广播到 81 格的同一答案。本模型共三个：三个叠起来形状是 <span className="mono">(3, 9, 9)</span>，
-          读作「3 个 9×9」。拆分没有增加棋子分布的事实，只是把同一批事实写成更方便卷积核读取的形式（颜色一位属于规则状态）。颜色广播成 81 格是卷积输入的形状约定（H×W 的图），不是要问 81 遍。
-        </Def>
         <EvidenceCard
-          fidelity="runtime-exact"
-          title="把规范视角棋盘拆成己方、对方、颜色三个 0/1 平面"
-          source="alphagomoku/game.py · encode"
+          fidelity="mirror-exact"
+          title="3×3 窗口滑过全盘：外层逐格移动窗口中心，内层在三张平面上逐格乘加"
+          source="learn/src/engine/nn.ts · conv2d"
         >
           <div className="codewalk">
-            <pre>{`def encode(game: Game) -> np.ndarray:
-    """(3, n, n) float32: current player's stones, opponent's stones, color plane."""
-    canon = game.canonical_board()
-    cur = (canon == 1).astype(np.float32)
-    opp = (canon == -1).astype(np.float32)
-    color = np.full_like(cur, 1.0 if game.current_player == BLACK else 0.0)
-    return np.stack([cur, opp, color])`}</pre>
+            <pre>{`    for (let oy = 0; oy < oh; oy++) {
+      for (let ox = 0; ox < ow; ox++) {
+        let acc = b ? b.data[oc] : 0;
+        const iy0 = oy - pad,
+          ix0 = ox - pad;
+        for (let ic = 0; ic < inC; ic++) {
+          const xBase = ic * xh * xw,
+            wCh = wBase + ic * kh * kw;
+          for (let ky = Math.max(0, -iy0); ky < kyEnd; ky++) {
+            const iy = iy0 + ky;
+            if (iy >= xh) break;
+            const xRow = xBase + iy * xw,
+              wRow = wCh + ky * kw;
+            for (let kx = Math.max(0, -ix0); kx < kxEnd; kx++) {
+              const ix = ix0 + kx;
+              if (ix >= xw) break;
+              acc += x.data[xRow + ix] * w.data[wRow + kx];
+            }
+          }
+        }
+        out[(oc * oh + oy) * ow + ox] = acc;
+      }
+    }`}</pre>
           </div>
         </EvidenceCard>
         <p className="mt-3">
-          <span className="mono">cur</span>、<span className="mono">opp</span>、<span className="mono">color</span>{" "}
-          三个平面按通道维叠成 <span className="mono">(3, 9, 9)</span>；每个平面各配一张 3×3 的九数小表，一套完整卷积核共带
-          <strong className="num"> 9 格 × 3 平面 = 27</strong> 个权重。
+          当 <span className="mono">pad = 1</span>、窗口 <span className="mono">3×3</span> 时，输出高宽{" "}
+          <span className="mono">oh = ow = 9 + 2 − 3 + 1 = 9</span>，特征图与棋盘同大；外层{" "}
+          <span className="mono">oy, ox</span> 走遍 81 个窗口中心，内层 <span className="mono">acc</span> 累加窗口内的逐格乘积，核下标{" "}
+          <span className="mono">wRow + kx</span> 与输入同向而不翻转 180°。例 7-1 的每个窗口分数都由这段算子实时算出。
+          在输入外围虚拟补的这圈 0 叫<strong>填充</strong>（padding）：它让窗口中心也能落在棋盘边缘甚至角上，
+          伸出棋盘的部分按 0 参与乘加，特征图因此与棋盘同大，都是 9×9。
         </p>
+        <Def term="特征图" en="feature map（亦称通道 channel）">
+          一个卷积核扫全盘后得到的那张 9×9 分数图：每个格子放该处窗口的分数。
+          分数越高，越像该卷积核在找的局部图案。每个分数本身也是回答一个问题的答案
+          （「该卷积核找的图案在此处响应多强」）；到下一层，这 81 个分数就换角色成为下一层的 81 个特征值。
+          一个卷积核对应一张特征图，也叫一个输出通道，卷积核的个数就是通道数。
+        </Def>
+        <p>
+          棋盘正中心（天元）的横三连和边角的横三连，用<strong>同一套权重</strong>发现。
+          要是每个位置单配一套，一个卷积核就要从 1 套 9 个数膨胀成 81 套，
+          而且同一条棋理要学 81 遍：省下的不只是权重，还有重复的学习。
+        </p>
+        <EvidenceCard
+          fidelity="runtime-exact"
+          title="首层卷积块 stem：3 张输入平面经 channels 个 3×3 卷积核扫出特征图"
+          source="alphagomoku/model.py · AlphaGomokuNet.__init__（stem）"
+        >
+          <div className="codewalk">
+            <pre>{`self.stem = nn.Sequential(
+    nn.Conv2d(3, channels, 3, padding=1, bias=False),
+    nn.BatchNorm2d(channels),
+    nn.ReLU(),
+)`}</pre>
+          </div>
+        </EvidenceCard>
+        <p className="mt-3">
+          <span className="mono">nn.Conv2d(3, channels, 3, padding=1, bias=False)</span> 指定 3 个输入平面、{" "}
+          <span className="mono">channels</span> 个 3×3 卷积核与外圈补 1 格 0；演示模型的{" "}
+          <span className="mono">channels = 48</span>，每个三平面卷积核含 3×3×3 = 27 个权重，全盘 81 个位置共用同一套参数。
+        </p>
+        <Def term="权重共享" en="weight sharing">
+          同一个卷积核的同一套数字在棋盘各处使用。共享的是局部形状检测：一处学会的响应方式可以迁到其他位置；边缘与天元的全局差异由更深层和末端读出层承担。
+          教学用单平面核有 9 个权重，真实三平面核有 27 个：己方、对方、颜色各配一个 3×3，窗口 9 格 × 3 平面逐项乘加。
+          第 3 课那一对「特征 × 权重」在这里摊成 27 对，每项各问一遍「这里是什么」。
+        </Def>
       </div>
 
-      <ThreePlanes />
+      <SlideWindow />
 
       <div className="prose mt-12">
-        <h3>三个平面是一次取舍，不是唯一答案</h3>
+        <h3>结构先给两条常识，内容由训练长出来</h3>
         <p>
-          己方平面和对方平面让局部卷积核容易分别找两类棋形；颜色平面保留先后手身份。
-          它们把同一局棋拆成更容易使用的特征。空格不用单独一个平面：同一格在己方平面和对方平面上
-          都为 0，就表示空，没有丢掉棋盘事实。
+          这种把「答案大概长什么样」的假设事先写进结构、从而限制并偏好某类解法的做法，
+          正式名字叫<strong>归纳偏置</strong>。此处写进结构的假设是两条常识：
+          棋形先看附近格子（局部性）、同一种局部图案各处通用。
+          卷积核具体长什么样、发现后有多重要，仍全部由训练决定：
+          结构先随机初始化这些数字，具体图案由训练长出来。
         </p>
+        <Def term="归纳偏置" en="inductive bias">
+          把「答案大概长什么样」的假设事先写进结构，从而限制并偏好某类解法的做法。
+          怎么数一条：一条归纳偏置就是结构里一项事先写死的解法偏好；删掉它，网络反而能表达
+          更多类函数，只是学习与搜索失去了偏向。卷积结构写进两条：局部性（棋形先看附近格子）、
+          同图案各处通用（权重共享）。它不规定哪种棋形一定该堵。
+        </Def>
         <p>
-          用第 5 课的语言可以把拆分写成一个式子：己方平面是
-          <span className="mono">ReLU(x)</span>，对方平面是 <span className="mono">ReLU(−x)</span>。
-          这里的 <span className="mono">x</span> 是格子值（第 2 课的 ±1 记法），只有 +1、0、−1 三种取值，一个一个验算全相等。
-          这是帮助理解的一种等价写法，不是本模型必须经过的运行步骤。颜色平面用不着这样的拆法：它整图同值，是一张直接写下的常数图。
-        </p>
-        <p>
-          五子棋没有吃子，也没有「同一棋盘因历史不同而合法走法不同」的规则；
-          因此在本规则里，当前棋盘加上行棋方已经足够描述下一步。三个输入平面满足这个需要。
-        </p>
-        <p>
-          训练侧的回放池（把自我对弈下过的局面存起来供训练随机抽样的样本仓库，第 14 课详解）为了省内存，只保存单张 ±1 的规范视角棋盘与当时的行棋方身份；训练时每次随机抽出一批样本，再按同一规则批量重建出同样的三个输入平面，还原成 <span className="mono">(B, 3, 9, 9)</span> 输入批次。
+          本模型的窗口选 3×3：足以捕捉连续三子等短片段，又保持「先局部、再组合」的层次。
+          2×2 看得更少；5×5 或 9×9 看得更远，却让每层权重按窗面积增长，并削弱局部逐层组合的作用。
+          3×3 横向只罩 3 列，单个核看不到三连两端是否都空，不能单独判定「活三」；这要靠更深层继续组合。
         </p>
       </div>
 
-      <EvidenceCard
-        fidelity="runtime-exact"
-        title="回放池采样：将保存的规范棋盘与行棋方批量还原为三个输入平面"
-        source="alphagomoku/replay.py · ReplayBuffer.sample"
-      >
-        <div className="codewalk">
-          <pre>{`        b = self.boards[idx].astype(np.float32)
-        cur = b == 1.0
-        opp = b == -1.0
-        color = np.where(self.players[idx] == 1, 1.0, 0.0).astype(np.float32)
-        color = np.broadcast_to(color[:, None, None], cur.shape)
-        inputs = np.stack([cur, opp, color], axis=1).astype(np.float32)
-        return inputs, self.pis[idx].copy(), self.zs[idx].copy()`}</pre>
-        </div>
-      </EvidenceCard>
+      <div className="prose mt-12">
+        <h3>第一层的 48 个卷积核全部由训练学出来</h3>
+        <p>
+          本课程演示模型（小一号的 fast 配置，为了让网页算得快）的网络第一层（代码里叫 stem）是{" "}
+          <strong className="num">48</strong>{" "}
+          个这样的卷积核<strong>同时</strong>在 9×9 上扫（48 是演示配置，不是永恒常数；
+          项目默认训练配置是 64 通道，代码中的 <span className="mono">channels</span> 才是可改的通用写法）。
+          这 48 个没有一个是人按棋理画的：每个权重都由训练从对局数据里学出来。
+          一共 <strong className="num">48 × 27 = 1296</strong> 个权重。
+          第 4 课加权求和演示拖过的那 9 个，就是这 48 个卷积核里某一个的己方平面截取（真实权重，不是另编的教学值）；整套 27 元组合是训练自己长出来的。
+          stem 的五行里卷积一行、非线性变换一行：先卷积求和、再整体做非线性变换（第 5 课的次序），这两步一行不缺。
+          例 7-2 给出真实权重。
+        </p>
+      </div>
 
-      <Ledger title="alphagomoku/game.py · encode 与 alphagomoku/replay.py · ReplayBuffer.sample">
+      <RealKernels />
+
+      <Ledger title="alphagomoku/model.py · stem 与 learn/src/engine/nn.ts · conv2d">
         <ul className="ml-5 list-disc space-y-1.5">
           <li>
-            <span className="mono">alphagomoku/game.py · encode</span>：对局与搜索时从{" "}
-            <span className="mono">Game</span> 实例当场构造 <span className="mono">(3, n, n)</span> 浮点数组（己方平面、对方平面、颜色平面）；浏览器端对应实现为{" "}
-            <span className="mono">learn/src/engine/game.ts · encode</span>。
+            <span className="mono">alphagomoku/model.py · AlphaGomokuNet.__init__（self.stem）</span>：用{" "}
+            <span className="mono">nn.Conv2d(3, channels, 3, padding=1, bias=False)</span> 接收第 6 课{" "}
+            <span className="mono">encode</span> 输出的 <span className="mono">(3, 9, 9)</span> 平面，后接批标准化与{" "}
+            <span className="mono">nn.ReLU()</span>，输出 <span className="mono">(channels, 9, 9)</span> 特征图。
           </li>
           <li>
-            <span className="mono">alphagomoku/replay.py · ReplayBuffer.sample</span>：训练采样时从压缩存储的规范棋盘{" "}
-            <span className="mono">boards</span> 与行棋方 <span className="mono">players</span> 批量重建{" "}
-            <span className="mono">(B, 3, n, n)</span> 输入张量，保证推理与训练两侧输入编码一致。
+            <span className="mono">learn/src/engine/nn.ts · conv2d</span>：浏览器端对{" "}
+            <span className="mono">nn.Conv2d</span> 的契约复现，外层遍历 81 个窗口中心，内层在输入通道与 3×3 窗口上逐格乘加。
           </li>
           <li>
-            上下游衔接：<span className="mono">encode</span> 在第 12 课自我对弈与第 10 课搜索评估中被调用；<span className="mono">sample</span> 在第 13 课训练步 <span className="mono">train_step</span> 中提供输入批次。
+            上下游衔接：<span className="mono">game.py · encode</span> 的输出送入本课 <span className="mono">stem</span>；<span className="mono">stem</span> 输出送入残差块序列 <span className="mono">self.blocks</span>。例 7-2 展示的真实权重 <span className="mono">stem.0.weight</span>（形状 <span className="mono">[48, 3, 3, 3]</span>，共 <span className="mono">48 × 27 = 1296</span> 个参数）由 <span className="mono">learn/scripts/export_weights.py</span> 从训练检查点导出。
           </li>
           <li>
-            验证命令：<span className="mono">pytest tests/test_game.py tests/test_replay.py</span> 与{" "}
-            <span className="mono">cd learn && npm test</span>（含 <span className="mono">game.test.ts</span> 逐格编码核对）。
+            验证命令：<span className="mono">pytest tests/test_model.py</span> 与{" "}
+            <span className="mono">cd learn && npm test</span>（对拍 <span className="mono">parity.test.ts</span>）。
           </li>
         </ul>
       </Ledger>
 
       <ChapterEnd
         summary={[
-          "一个 ±1 平面不丢信息，但一次简单求和会出两件事：正负抵消（「己、敌、己」里 1 与 −1 相消，只得 1）与混叠（「己、敌、己」和「空、己、空」得同一个数）。另有「敌、敌、敌」把分拖成负的，那是对方拖分。",
-          "解法是一种身份一个平面：己方子、对方子各占一个 0/1 平面，空格是两个同为 0，不另设平面。",
-          "颜色平面整张填 0 或 1，补上「我执黑还是执白」这项全局身份；三张叠成 (3, 9, 9) 就是网络每次读入的全部事实。",
+          "卷积核是一张小数表（本课 3×3），盖在窗口上做乘加；同一卷积核扫过全盘，81 个分数排成一张特征图。",
+          "填充（padding）在外围补一圈 0，让每个格子都能当窗口中心；权重共享让天元和边角用同一套数字，同一条棋理不必学 81 遍。",
+          "归纳偏置只写进两条常识（局部性、各处通用）；第一层 48 个卷积核共 48 × 27 = 1296 个权重，全部由训练学出来，没有一个是人按棋理手画的。",
         ]}
         next={
           <>
-            下一课看这些平面怎样被逐格读取：同一个 3×3 卷积核在棋盘每个位置各算一遍，
-            分数排成一张 9×9 的图。同一套数字在各处共用，同一种局部棋形不必学 81 遍；
-            真实模型第一层的几十个卷积核长什么样，也由训练决定，而不是人按棋理手画。
+            单个 3×3 卷积核只看得见一小块。下一课把它们一层层叠起来：
+            每多叠一层，能回看的输入范围向外扩一圈，深层有机会把局部发现组合成整盘形势。
+            叠深之后旧信息怎样留下、各层数值尺度怎样稳住，也在下一课交代。
           </>
         }
       />
@@ -233,48 +256,37 @@ export default function L07() {
         title="习题"
         questions={[
           {
-            q: "本模型为什么不直接把一个 ±1 平面交给第一层卷积核？",
+            q: "横三连卷积核盖在己方三连正上方得 3；窗口往右挪一格只得 2。为什么？",
             options: [
-              "数不够精确，应该改用小数",
-              "信息没有丢，但一次简单卷积核求和中正负可能抵消；拆成平面后可分别检测我方和对方的特征",
-              "一个平面装不下 81 个格子，内存会溢出",
+              "因为挪动之后卷积核变短了",
+              "因为窗口右边缘落在空格 (5,4) 上：那一格乘出来是 0，三个 1 只剩两个",
+              "因为 (4,4) 上的子被挡住了",
             ],
             answer: 1,
             explain:
-              "格子还是那 81 个，信息也没有少。例子里 1 + (−1) + 1 = 1，比 1 + 0 + 1 = 2 小，说明一个简单「找我方横排」的卷积核会受到对方负号影响。拆成平面让两种检测各做各的；不是说一个 ±1 平面绝对不能被其他架构学会。",
+              "卷积核没变、子也没动，变的只是窗口罩住哪些格：右边缘那格从「有子(1)」换成「空(0)」，乘积从 1 变 0。每个分数都能像这样一格一格指认：在例 7-1 里亲手挪一遍。",
           },
           {
-            q: "为什么拆成两个 0/1 平面，而不是想办法修正一个 ±1 平面？",
+            q: "权重共享（同一个卷积核扫全盘）省下的到底是什么？",
             options: [
-              "一个平面一个事实：己方平面上 1 越多「我方在」越成立，对方平面同理，谁也不抵消谁",
-              "为了把网络撑大一点，多两层权重",
-              "因为 0 和 1 在计算机里算得更快",
+              "省内存：棋盘可以存得更紧",
+              "省扫描时间：扫一遍更快",
+              "省权重并复用经验：教学单平面卷积核有 9 个数（真实三平面卷积核有 27 个），同一套数字在全盘各处使用",
             ],
-            answer: 0,
+            answer: 2,
             explain:
-              "要点是「一个平面一个事实」：己方平面得 3 说明己方三连特征强，对方平面同理。空格不需要第三个：两个平面都是 0 的地方就是空。这样是为了让本模型的第一层更直接，不是因为三个输入平面凭空增加了信息。",
+              "核心是权重与经验复用：教学单平面卷积核只有 9 个数，真实三平面核只有 27 个，却在全盘每个位置重复使用。一处学到的局部图案检测可以迁到别处，不必每个位置各学一套。",
           },
           {
-            q: "颜色平面整张填同一个数，它补的是什么卷积核算不出来的信息？",
+            q: "第一层放 16 个还是 48 个卷积核，你拿什么证据做取舍？",
             options: [
-              "每个交叉点上是空还是有子（棋子平面已经回答过的问题）",
-              "「现在轮到哪一方走」这项全局身份：本模型选择直接提供它，不让早期局部卷积核先去推断",
-              "最近三手的落子历史",
-            ],
-            answer: 1,
-            explain:
-              "是第二项。轮到谁走，游戏规则里当然知道；麻烦在于早期局部卷积核从两个棋子平面上看不出来（小窗里看不到全局的轮谁）。颜色平面把这项身份直接贴进输入，让早期局部核专心棋形。更深、能看全盘的网络原则上能从子数差推出颜色，但早期局部核推不出，没必要强迫它先做这件事。空还是有子是棋子平面的事，历史在这套规则里不需要。",
-          },
-          {
-            q: "回头看第 3–5 课：把 ±1 拆成己/敌两个 0/1 平面，用第 5 课的话说，相当于给格子值做了什么？",
-            options: [
-              "把数变小，网络算得更快",
-              "手工过了两个 ReLU：己方平面=ReLU(x)、对方平面=ReLU(−x)，x 只有 +1、0、−1 三种取值，一个一个验算全相等：三种身份各归各平面，不再挤在同一条 −1 到 +1 的线上互相抵消",
-              "把输入加一倍，网络权重也跟着翻倍",
+              "按棋理枚举：三连、活二各有几种，数清楚再定",
+              "不按棋理定数目：核里权重全是训练学出来的（例 7-2），数目是容量上的可调项，拿显存、过拟合与对局表现做取舍",
+              "越多越好，直接堆到 256",
             ],
             answer: 1,
             explain:
-              "ReLU(+1)=1、ReLU(0)=0、ReLU(−1)=0，所以在这三个取值上，己方平面确实等于 ReLU(x)，对方平面等于 ReLU(−x)。这是一种把第 5 课概念连回来的看法：用两个平面把正、反两类事实分别亮出来；它不表示实际程序会先运行这两个 ReLU。",
+              "例 7-2 看过：单看数值像噪声，但它们确实在响应棋形，没有人画过图案。数目本身没有棋理答案（演示配置 48、项目默认 64）：小了表达力不足，大了吃显存、更容易过拟合，最后还是看受控对战的成绩。",
           },
         ]}
       />
@@ -282,216 +294,335 @@ export default function L07() {
   )
 }
 
-/* ============ 例 6-1 · 正负抵消计算器 ============ */
+/* ============ 例 7-1 · 卷积核滑窗 + 扫全盘 ============ */
 
-/** 横三连卷积核：中间一行 1 1 1,其余 0(与 archive/network.md 手算例同一张)。 */
-const KERNEL = [0, 0, 0, 1, 1, 1, 0, 0, 0]
-
-/** 窗口内容预设：名字描述中间一横排(卷积核上下两行是 0,乘什么都得 0)。
- *  值：1 己 / −1 敌 / 0 空。 */
-const PRESETS: { name: string; mid: number[] }[] = [
-  { name: "己己己", mid: [1, 1, 1] },
-  { name: "己己空", mid: [1, 1, 0] },
-  { name: "己空己", mid: [1, 0, 1] },
-  { name: "己敌己", mid: [1, -1, 1] },
-  { name: "空己空", mid: [0, 1, 0] },
-  { name: "敌敌敌", mid: [-1, -1, -1] },
+const N = 9
+const CELL = 46
+const MARGIN = CELL * 1.8
+const VB = MARGIN * 2 + (N - 1) * CELL
+const px = (x: number) => MARGIN + x * CELL
+const STARS: [number, number][] = [
+  [2, 2],
+  [2, 6],
+  [6, 2],
+  [6, 6],
+  [4, 4],
 ]
+/** 扫描顺序：逐列(先扫完 x=0 一列，再 x=1……)。i 格的扫描序号。 */
+const ORD = (i: number) => (i % 9) * 9 + Math.floor(i / 9)
 
-type View = "pm1" | "own" | "opp"
+function SlideWindow() {
+  const [cx, setCx] = useState(3)
+  const [cy, setCy] = useState(4)
+  // null = 未扫；0..80 = 正在扫第几个；81 = 扫完
+  const [scanIdx, setScanIdx] = useState<number | null>(null)
 
-function CancelCalc() {
-  const [preset, setPreset] = useState(3) // 默认「己敌己」，直接看抵消
-  const [view, setView] = useState<View>("pm1")
+  useEffect(() => {
+    if (scanIdx === null || scanIdx >= 81) return
+    const t = setTimeout(() => setScanIdx((k) => (k ?? 0) + 1), 45)
+    return () => clearTimeout(t)
+  }, [scanIdx])
 
-  // 3×3 窗口：只有中间一行有内容
-  const window9 = (() => {
-    const w = new Array<number>(9).fill(0)
-    const mid = PRESETS[preset].mid
-    w[3] = mid[0]
-    w[4] = mid[1]
-    w[5] = mid[2]
-    return w
-  })()
+  const scanning = scanIdx !== null && scanIdx < 81
+  const done = scanIdx === 81
+  // 扫描时窗口自动跟着走
+  const wx = scanning ? Math.floor(scanIdx / 9) : cx
+  const wy = scanning ? scanIdx % 9 : cy
 
-  // 当前视角下窗口显示的值：±1 原样 / 己方平面(只有 +1 变 1)/ 对方平面(只有 −1 变 1)
-  const shown = window9.map((v) =>
-    view === "pm1" ? v : view === "own" ? (v === 1 ? 1 : 0) : v === -1 ? 1 : 0,
+  const sum = SCORES[wy * 9 + wx]
+  const outside = wx < 1 || wx > 7 || wy < 1 || wy > 7
+
+  // 窗口内容(己方平面视角；界外按 0 算)
+  const winVals = [0, 1, 2].flatMap((r) =>
+    [0, 1, 2].map((c) => {
+      const y = wy + r - 1,
+        x = wx + c - 1
+      return y < 0 || y > 8 || x < 0 || x > 8 ? 0 : OWN81[y * 9 + x]
+    }),
   )
-  const products = KERNEL.map((t, i) => t * shown[i])
-  const sum = products.reduce((a, b) => a + b, 0)
+  const winLabels = [0, 1, 2].flatMap((r) =>
+    [0, 1, 2].map((c) => {
+      const y = wy + r - 1,
+        x = wx + c - 1
+      return y < 0 || y > 8 || x < 0 || x > 8 ? "界" : winVals[r * 3 + c] ? "1" : "0"
+    }),
+  )
+  const products = KERNEL.map((t, i) => t * winVals[i])
 
-  const fmt = (v: number) => (v === 0 ? "·" : v > 0 ? `${v}` : `−${Math.abs(v)}`)
-  const viewName =
-    view === "pm1" ? "一个 ±1 平面" : view === "own" ? "己方 0/1 平面" : "对方 0/1 平面"
-  const isPM1 = view === "pm1"
+  const move = (dx: number, dy: number) => {
+    if (scanning) return
+    setCx((v) => Math.min(8, Math.max(0, v + dx)))
+    setCy((v) => Math.min(8, Math.max(0, v + dy)))
+  }
+
+  const heatCells: { i: number; v: number }[] = []
+  if (scanIdx !== null)
+    for (let i = 0; i < 81; i++)
+      if (ORD(i) <= scanIdx && SCORES[i] > 0) heatCells.push({ i, v: SCORES[i] })
 
   return (
-    <figure className="figure mt-8" data-qa="fig-calc">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
-        <span className="mini-label">例 6-1 · 正负抵消计算器</span>
-        <span className="seg">
-          <button type="button" className={`seg-btn ${isPM1 ? "active" : ""}`}
-            onClick={() => setView("pm1")}>
-            一个 ±1 平面
-          </button>
-          <button type="button" className={`seg-btn ${view === "own" ? "active" : ""}`}
-            onClick={() => setView("own")}>
-            己方 0/1 平面
-          </button>
-          <button type="button" className={`seg-btn ${view === "opp" ? "active" : ""}`}
-            onClick={() => setView("opp")}>
-            对方 0/1 平面
-          </button>
-        </span>
+    <figure className="figure mt-8">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">例 7-1 · 卷积核滑窗：一个卷积核，81 个位置各算一次</span>
       </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
-        <div className="flex min-w-0 flex-1 items-start justify-center gap-5 md:justify-start">
-          <MiniGrid9 label="卷积核" cells={KERNEL.map(fmt)} tint={KERNEL.map((t) => t !== 0)} />
-          <span className="mt-[4.7rem] text-lg" style={{ color: "var(--fg-faint)" }}>×</span>
-          <MiniGrid9 label={`窗口(${viewName})`} cells={shown.map(fmt)}
-            tint={shown.map((v) => v !== 0)} />
-          <span className="mt-[4.7rem] text-lg" style={{ color: "var(--fg-faint)" }}>=</span>
-          <MiniGrid9 label="9 个乘积" cells={products.map(fmt)}
-            tint={products.map((p) => p !== 0)} hot={products.map((p) => p < 0)} />
-        </div>
         <div className="min-w-0 flex-1">
-          <div className="mini-label">窗口内容（中间一横排）</div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {PRESETS.map((p, i) => (
-              <button key={p.name} type="button" className={`btn ${i === preset ? "active" : ""}`}
-                onClick={() => setPreset(i)}>
-                {p.name}
-              </button>
-            ))}
+          <div
+            tabIndex={0}
+            role="application"
+            aria-label="卷积核滑窗：方向键移动窗口"
+            className="rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]"
+            onKeyDown={(e) => {
+              const k = e.key
+              if (k === "ArrowLeft") move(-1, 0)
+              else if (k === "ArrowRight") move(1, 0)
+              else if (k === "ArrowUp") move(0, -1)
+              else if (k === "ArrowDown") move(0, 1)
+              else return
+              e.preventDefault()
+            }}
+          >
+            <svg viewBox={`0 0 ${VB} ${VB}`} style={{ width: "100%", height: "auto", display: "block" }}
+              role="img" aria-label="9×9 棋盘上的卷积核窗口与特征图">
+              <rect
+                x={MARGIN - CELL * 0.62}
+                y={MARGIN - CELL * 0.62}
+                width={VB - 2 * (MARGIN - CELL * 0.62)}
+                height={VB - 2 * (MARGIN - CELL * 0.62)}
+                rx={12}
+                style={{ fill: "var(--board)" }}
+              />
+              <g style={{ stroke: "var(--board-line)" }} strokeWidth={1.1} opacity={0.85}>
+                {Array.from({ length: N }, (_, i) => (
+                  <line key={`v${i}`} x1={px(i)} y1={px(0)} x2={px(i)} y2={px(8)} />
+                ))}
+                {Array.from({ length: N }, (_, j) => (
+                  <line key={`h${j}`} x1={px(0)} y1={px(j)} x2={px(8)} y2={px(j)} />
+                ))}
+              </g>
+              <g style={{ fill: "var(--board-line)" }}>
+                {STARS.map(([sx, sy]) => (
+                  <circle key={`${sx}-${sy}`} cx={px(sx)} cy={px(sy)} r={Math.max(2.4, CELL * 0.09)} />
+                ))}
+              </g>
+
+              {/* 特征图：每个窗口的分数，分数越高越红 */}
+              <g data-qa="heat">
+                {heatCells.map(({ i, v }) => (
+                  <g key={i}>
+                    <rect
+                      x={px(i % 9) - CELL * 0.44}
+                      y={px(Math.floor(i / 9)) - CELL * 0.44}
+                      width={CELL * 0.88}
+                      height={CELL * 0.88}
+                      rx={7}
+                      style={{ fill: "var(--heat)" }}
+                      opacity={0.45 + v * 0.16}
+                    />
+                    <text
+                      x={px(i % 9)}
+                      y={px(Math.floor(i / 9))}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      fontSize={CELL * 0.34}
+                      fontFamily="ui-monospace, SF Mono, Menlo, monospace"
+                      fill="#fdf6ee"
+                    >
+                      {v}
+                    </text>
+                  </g>
+                ))}
+              </g>
+
+              {/* 己方三连 */}
+              {THREE.map(([x, y]) => (
+                <circle key={`${x}-${y}`} cx={px(x)} cy={px(y)} r={CELL * 0.36}
+                  style={{ fill: "var(--stone-b)", stroke: "var(--stone-b-lo)", strokeWidth: 1.5 }} />
+              ))}
+
+              {/* 3×3 窗口 */}
+              <g style={{ transform: `translate(${px(wx - 1) - CELL * 0.48}px, ${px(wy - 1) - CELL * 0.48}px)`, transition: "transform 120ms ease" }}>
+                <rect
+                  width={2 * CELL + 0.96 * CELL}
+                  height={2 * CELL + 0.96 * CELL}
+                  rx={9}
+                  style={{ fill: "var(--accent)", stroke: "var(--accent)", strokeWidth: 2.5 }}
+                  fillOpacity={0.06}
+                  strokeDasharray={outside ? "8 6" : undefined}
+                />
+                {outside && (
+                  <text x={6} y={-8} fontSize={CELL * 0.26} style={{ fill: "var(--accent-deep)" }}
+                    fontFamily="ui-monospace, SF Mono, Menlo, monospace">
+                    窗口出界：界外按 0（空）算
+                  </text>
+                )}
+              </g>
+            </svg>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" className="btn" disabled={scanning} onClick={() => move(-1, 0)} aria-label="窗口左移">←</button>
+            <button type="button" className="btn" disabled={scanning} onClick={() => move(0, -1)} aria-label="窗口上移">↑</button>
+            <button type="button" className="btn" disabled={scanning} onClick={() => move(0, 1)} aria-label="窗口下移">↓</button>
+            <button type="button" className="btn" disabled={scanning} onClick={() => move(1, 0)} aria-label="窗口右移">→</button>
+            <button type="button" className={`btn ${scanIdx === null ? "primary" : ""}`}
+              disabled={scanning}
+              onClick={() => setScanIdx(0)}
+              data-qa="scan-btn">
+              {scanning ? `正在扫第 ${scanIdx + 1} / 81 格…` : done ? "↺ 再扫一遍" : "扫全盘：81 格逐列盖过去"}
+            </button>
+          </div>
+          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
+            内置局面：己方横三连 (2,4)(3,4)(4,4)。坐标写成 (x, y)：
+            前一个数是列，后一个是行。用棋盘下方的箭头按钮（或键盘方向键）逐格挪动窗口。
+          </p>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="mini-label">当前窗口的计算</div>
+          <div className="mt-2 flex flex-wrap items-start gap-4">
+            <MiniGrid9 label="窗口(己方平面)" cells={winLabels} tint={winVals.map((v) => v === 1)} />
+            <span className="mt-[4.7rem] text-lg" style={{ color: "var(--fg-faint)" }}>×</span>
+            <MiniGrid9 label="卷积核" cells={KERNEL.map(String)} tint={KERNEL.map((t) => t !== 0)} />
+            <span className="mt-[4.7rem] text-lg" style={{ color: "var(--fg-faint)" }}>=</span>
+            <MiniGrid9 label="乘积" cells={products.map(String)} tint={products.map((p) => p !== 0)} />
           </div>
           <div className="reveal-box mt-4">
-            <div className="mini-label">求和</div>
-            <p className="num mt-1.5 text-lg font-bold" data-qa="calc-sum">
-              {expr(products.slice(3, 6))} ={" "}
-              <span style={{ color: "var(--accent-deep)" }}>{sum < 0 ? `−${Math.abs(sum)}` : sum}</span>
+            <p className="num text-lg font-bold">
+              和 = <span data-qa="win-sum" style={{ color: "var(--accent-deep)" }}>{sum}</span>
+              <span className="ml-3 text-sm font-normal" style={{ color: "var(--fg-muted)" }}>
+                (窗口中心 ({wx}, {wy}))
+              </span>
             </p>
             <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-              只列中间一行的三项：卷积核上下两行是 0，乘什么都得 0（乘积格里看得到）。
+              「界」= 窗口伸出棋盘外，那一格按 0 算（棋盘外虚拟补一圈 0）。
             </p>
           </div>
-          {isPM1 ? (
-            <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-              在 ±1 平面上点两组对照：「己敌己」得{" "}
-              <span className="num font-bold">1</span>，「空己空」也得{" "}
-              <span className="num font-bold">1</span>。
-              被敌子隔开的两颗己方子和孤零零一颗己方子，在这个平面上是同一个数，这张核分不出它们。
-              再点「敌敌敌」，得 <span className="num font-bold">−3</span>，
-              对方的子把分拖成负的。这一次求和把「己、敌、己」和「空、己、空」压成同一个数 1，这就是混叠。
-            </p>
-          ) : (
-            <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-              拆到 0/1 平面上再看：己方平面只数己方子、对方平面只数对方子，两个平面各算各的加权和，不再抵消。
-              两个事实各报各的，不再互相抵消。切回「一个 ±1 平面」对照。
-            </p>
+          {done && (
+            <div className="reveal-box mt-4 text-sm leading-relaxed" data-qa="scan-done">
+              81 格盖完，分数落成一张「特征图」：<strong>3</strong> 只出现在三连正中
+              （一处窗口），<strong>2</strong> 出现在 3 的两侧，<strong>1</strong> 在 2 的外侧再各有一格，
+              其余全 0。同一个卷积核、同一套 9 个数，一次扫描把整条横排的嫌疑全标了出来。
+            </div>
           )}
         </div>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">例 6-1</span>
-        同一个横三连卷积核、同一批窗口，只换「平面怎么拆」。抵消发生在求和那一步，
-        点预设换一扇窗，先预测分数，再对照求和框。
+        <span className="cap-no">例 7-1</span>
+        每个分数都由本站引擎 <span className="mono">conv2d</span>（learn/src/engine/nn.ts，
+        与 model.py stem 同款算子）现算，不是预录的动画。
+        「扫全盘」就是权重共享：一个卷积核走遍 81 格，扫出的 81 个分数到下一层换角色成为 81 个特征值。
       </figcaption>
     </figure>
   )
 }
 
-/** 九宫格小表已提取到 lib/minigrid(第 7 课滑窗共用)。 */
+/* ============ 例 7-2 · 真实权重：训练学出来的卷积核 ============ */
 
+const REAL_TPL_SHOWN = 8
 
-/** 「1×1 + 1×(−1) + 1×1」式的中间行展开(卷积核中间一行全是 1)。 */
-function expr(row: number[]): string {
-  const w = (v: number) => (v < 0 ? `(−${Math.abs(v)})` : `${v}`)
-  return row.map((v) => `1×${w(v)}`).join(" + ")
+function RealKernels() {
+  const [w, setW] = useState<WeightsJson | null>(null)
+  useEffect(() => {
+    let alive = true
+    loadWeights().then((x) => {
+      if (alive) setW(x)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const tpl = useMemo(() => {
+    if (!w) return null
+    const flat = w.tensors["stem.0.weight"]
+    const shape = w.shapes["stem.0.weight"] // [48, 3, 3, 3]
+    let maxAbs = 0
+    for (const v of flat) maxAbs = Math.max(maxAbs, Math.abs(v))
+    return { flat, shape, maxAbs }
+  }, [w])
+
+  return (
+    <figure className="figure mt-12">
+      <div className="px-4 pt-4 sm:px-5">
+        <span className="mini-label">例 7-2 · 真实权重：第一层的前 {REAL_TPL_SHOWN} 个卷积核</span>
+      </div>
+      <div className="p-4 md:p-5">
+        {!tpl ? (
+          <p className="text-sm" style={{ color: "var(--fg-muted)" }}>
+            正在加载真权重：weights-best.json（约 1.2 MB，由检查点导出）……检查点（checkpoint）是训练中保存的一组权重，可随时加载。
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
+              {Array.from({ length: REAL_TPL_SHOWN }, (_, ch) => (
+                <RealTemplate key={ch} ch={ch} flat={tpl.flat} maxAbs={tpl.maxAbs} />
+              ))}
+            </div>
+            <p className="mt-4 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+              这些不是示意图：每一格灰度都是{" "}
+              <span className="mono">weights-best.json</span> 里{" "}
+              <span className="mono">stem.0.weight</span> 的真权重（悬停可看数值）。
+              每个卷积核是「3 个一套」，分别作用在己方平面 / 对方平面 / 颜色平面上，
+              左起第一张 3×3 就是它的己方平面 9 个数，第 4 课拖过的那 9 个出自这一层；
+              越黑 = 正权重越大，越白 = 负权重越大，中灰 = 0。单看数值不容易直接读出图案，
+              但训练的用意正是让它们响应棋形：没有人画过图案，
+              <strong>每一个权重都是训练学出来的</strong>。结构只承诺「局部 + 处处通用」，
+              每个卷积核最终认出什么图案，是训练的事。
+              先猜哪几个在响应横三连或斜线，再对照三平面上的明暗分布（要看真响应亮区，见例 8-2）。
+            </p>
+          </>
+        )}
+      </div>
+      <figcaption className="figure-cap">
+        <span className="cap-no">例 7-2</span>
+        真数据：weights-best.json 由 learn/scripts/export_weights.py 从检查点导出；
+        此处展示前 8 个 / 共 48 个。stem.0.weight 的形状是 [48, 3, 3, 3]：48 个卷积核、
+        每核 3×3×3 共 27 个数，合计 48 × 27 = 1296 个权重。
+      </figcaption>
+    </figure>
+  )
 }
 
-/* ============ 例 6-2 · 同一局面，三个输入平面 ============ */
+const PLANE_TAGS = ["己", "敌", "色"]
 
-function ThreePlanes() {
-  const [sel, setSel] = useState<number | null>(null)
-
-  const plane = (data: number[], name: string, sub: string, key: string) => (
-    <div key={key} className="min-w-0">
-      <div className="mini-label mb-1.5">{name}</div>
-      <div className="l03-rows inline-block">
-        <div className="flex">
-          <span className="l01-axis" />
-          {Array.from({ length: 9 }, (_, x) => (
-            <span key={x} className="l01-axis num w-[1.05rem] text-center">{x}</span>
-          ))}
-        </div>
-        {Array.from({ length: 9 }, (_, y) => (
-          <div key={y} className="flex">
-            <span className="l01-axis num leading-[1.05rem]">{y}</span>
-            {Array.from({ length: 9 }, (_, x) => {
-              const i = y * 9 + x
-              return (
-                <button key={x} type="button" className={`l03-cell ${data[i] ? "on" : ""} ${sel === i ? "sel" : ""}`}
-                  aria-label={`(${x},${y}) = ${data[i]}`}
-                  onClick={() => setSel(sel === i ? null : i)}>
-                  <span className="num">{data[i] ? 1 : "·"}</span>
-                </button>
-              )
-            })}
+function RealTemplate({
+  ch,
+  flat,
+  maxAbs,
+}: {
+  ch: number
+  flat: number[]
+  maxAbs: number
+}) {
+  return (
+    <div data-qa="tpl">
+      <div className="mini-label mb-1.5">
+        卷积核 <span className="num">{ch + 1}</span>
+      </div>
+      <div className="flex gap-2">
+        {PLANE_TAGS.map((tag, p) => (
+          <div key={tag}>
+            <div className="mb-1 text-center text-[0.62rem]" style={{ color: "var(--fg-faint)" }}>
+              {tag}
+            </div>
+            <div className="l03-rows inline-block">
+              {[0, 1, 2].map((r) => (
+                <div key={r} className="flex">
+                  {[0, 1, 2].map((c) => {
+                    const v = flat[((ch * 3 + p) * 3 + r) * 3 + c]
+                    const n = v / maxAbs // −1..1
+                    const l = Math.round(128 - n * 115) // 1→黑，−1→白
+                    return (
+                      <span key={c} className="l03-gray" title={String(v)}
+                        style={{ background: `rgb(${l},${l},${l})` }} />
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
           </div>
         ))}
       </div>
-      <p className="mt-1.5 text-xs" style={{ color: "var(--fg-faint)" }}>{sub}</p>
     </div>
-  )
-
-  const selText =
-    sel === null
-      ? "点棋盘或任何一个平面的格子：同一个交叉点在三个输入平面上同时亮起来。"
-      : `你点的是 (${sel % 9},${Math.floor(sel / 9)})：己方平面 ${
-          PLANE_OWN[sel] ? 1 : 0
-        }、对方平面 ${PLANE_OPP[sel] ? 1 : 0}、颜色平面 ${PLANE_COLOR[sel]}。`
-
-  return (
-    <figure className="figure mt-12" data-qa="fig-kernel">
-      <div className="px-4 pt-4 sm:px-5">
-        <span className="mini-label">例 6-2 · 同一局面，网络读入的三个输入平面</span>
-      </div>
-      <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
-        <div className="min-w-0 flex-1 md:max-w-[22rem]">
-          <Board
-            board={OBJ}
-            swap
-            lastMove={{ x: 4, y: 4 }}
-            onCellClick={(x, y) => setSel(sel === y * 9 + x ? null : y * 9 + x)}
-            marks={sel !== null ? [{ x: sel % 9, y: Math.floor(sel / 9) }] : undefined}
-          />
-          <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            第 2 课的教学局面：5 黑 4 白、轮白。已拨到白方视角（己方 = 白）。
-          </p>
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-            {selText}
-          </p>
-          <p className="mt-3 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
-            数一数：己方平面恰有 <strong className="num">4</strong> 个 1（白子），
-            对方平面恰有 <strong className="num">5</strong> 个 1（黑子），
-            颜色平面整张 <strong className="num">0</strong>（轮白走；要是轮黑，
-            这个平面整张变 1）。黑白棋子消失，只剩「事实」本身。
-          </p>
-        </div>
-      </div>
-      <div className="flex flex-wrap items-start justify-center gap-6 border-t border-[color:var(--hairline)] p-4 md:p-5">
-        {plane(PLANE_OWN, "平面 0 · 己方子", "我的子在哪：4 个 1", "own")}
-        {plane(PLANE_OPP, "平面 1 · 对方子", "对手的子在哪：5 个 1", "opp")}
-        {plane(PLANE_COLOR, "平面 2 · 颜色平面", "我执黑？整张同一个数：0", "color")}
-      </div>
-      <figcaption className="figure-cap">
-        <span className="cap-no">例 6-2</span>
-        下方三个 0/1 平面就是 <span className="mono">alphagomoku/game.py · encode</span> 的逐格输出：叠成 (3, 9, 9)
-        就是网络每次读入的完整输入。
-      </figcaption>
-    </figure>
   )
 }

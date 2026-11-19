@@ -1,7 +1,7 @@
-/** 第 5 课 · 非线性变换：直线画不出的形状(地基篇 3/4)。
+/** 第 5 课 · 非线性变换：直线画不出的形状(地基篇 3/3)。
  *  节拍：思考题(一边倒判断，线性学得会吗)→ 直线极限 / 线性叠线性 / ReLU 折痕
- *  → 例 5-1(XOR 切分器：一条直线/一个非线性变换/两个非线性变换三挡对比，|x−y| 构造)
- *  → 例 5-2(折线拼形：ReLU(t)+ReLU(−t)=|t| 徒手拖)→ 求和之后再变换
+ *  → 例 5-1(折线拼形：ReLU(t)+ReLU(−t)=|t| 徒手拖)
+ *  → 例 5-2(XOR 切分器：直线/一道折痕/两道折痕对比，|x−y| 构造)→ 求和之后再变换
  *  → 源码索引与验证 → ChapterEnd → 习题。 */
 import { useEffect, useState } from "react"
 import { Quiz } from "../framework/quiz"
@@ -60,90 +60,36 @@ export default function L05() {
       />
 
       <div className="prose mt-10">
-        <h3>直线分不开斜对角交错的四点</h3>
+        <h3>1. 线性再叠一层，还是同一条直线</h3>
         <p>
-          把思考题里的判断写成两个输入：<span className="mono">x</span> 是我方三连数、
-          <span className="mono">y</span> 是对方三连数。(0,0) 和 (1,1) 两边一样多，都属
-          「均衡」；(1,0) 和 (0,1) 恰好一方占优，都属「一边倒」。只做乘和加的机器，
-          把「分数够不够高」当作判类标准时，在二维纸上画出的边界总是一条直线。可这两组点
-          斜对角交错：无论怎样画一刀直线，都不能把其中一组完整留在一边、
-          另一组完整留在另一边。先接受这个四点反例；到例 5-1 里动手转直线，先预测必错哪个点，再对拍结果。
+          第 4 课最后看到：乘加算出的输出只能沿一条直线变化。
+          有人会想「那就多叠几层」——可惜，两层线性仍然能合并成一层。
         </p>
-        <Def term="异或" en="exclusive or,缩写 XOR">
-          两个输入不同时才为「是」的逻辑关系，程序员熟悉的位运算 ⊕ 就是它的真值表。
-          上面四点正是异或的几何形状：(1,0)、(0,1) 是「是」，(0,0)、(1,1) 是「否」。
-          它是最小的直线不可分例子，本课用它代表一切拐弯才分得开的判断。
-        </Def>
+        <div className="formula">
+          w₂ · (w₁ · x) = (<span className="hl">w₂w₁</span>) · x
+        </div>
         <p>
-          这个四点形状在棋理里有真实对应：「差距大不大」天生只看
-          <span className="mono">|x−y|</span>，两边差得越多越一边倒。棋理里的
-          「恰好一方占优」「先跌后涨」都属于同一类拐弯判断。
+          两个权重相乘，结果仍是一个权重；即使每层再加一个固定数，
+          合并后也只是「一个权重乘 x，再加一个固定数」。
+          叠一百层，形状还是直线。要折弯它，必须在两层之间插入非线性变换。
         </p>
       </div>
 
-      <XorCutter />
-
       <div className="prose mt-12">
-        <h3>线性叠线性仍然是一层</h3>
+        <h3>2. 先看一维：一道 ReLU 折出半边</h3>
         <p>
-          多叠几层乘加也不会自己变弯。本例没有外加固定数时，
-          <span className="mono">w₂(w₁x)=(w₂w₁)x</span>，两层可合成一层（写成矩阵也是同一结论：线性映射的复合仍是线性映射）：两个权重相乘
-          仍是一个权重。即使每层还多加一个固定数（记作 <span className="mono">b</span>），结果仍然是一条直线。
-          <span className="mono">w₂(w₁x+b₁)+b₂=(w₂w₁)x+(w₂b₁+b₂)</span>，
-          合并后还是「一个权重乘 x、再加一个固定数」的形状。
+          插在层间的折弯工序叫<strong>激活函数</strong>。本课只看最常用的 ReLU：
+          正数原样通过，负数一律归 0。它把一条直线折成两段。
         </p>
-        <Def term="偏置" en="bias">
-          加在加权求和结果上的固定数，不与任何特征相配对。每个加权和的输出各有一个；
-          卷积层里每通道一个、沿棋盘各处共享（和权重在各处重复使用是同一套路）。它移动分界线的位置：
-          权重决定直线的方向，偏置决定直线平移多远。字母 b 只为在式子里和权重 w 区分角色。
-          偏置也是训练学出来的数字，但它本身不改变「线性还是线性」这个事实。
-          本项目的卷积层不带偏置(bias=False)，这份平移由批标准化的 β 承担（β 与偏置同类，都是平移；参见：第 8 课）。
-        </Def>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="首层卷积块 stem：卷积不带偏置，紧接批标准化与 ReLU"
-          source="alphagomoku/model.py · AlphaGomokuNet.__init__（stem）"
-        >
-          <div className="codewalk">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
-              <pre className="min-w-0 flex-1">{`        self.stem = nn.Sequential(
-            nn.Conv2d(3, channels, 3, padding=1, bias=False),
-            nn.BatchNorm2d(channels),
-            nn.ReLU(),
-        )`}</pre>
-              <div className="text-xs leading-relaxed sm:w-56" style={{ color: "var(--fg-faint)" }}>
-                <div>bias=False：卷积层省去独立偏置，平移交由紧随其后的 BatchNorm2d 承担。</div>
-                <div className="mt-1">nn.ReLU() 排在卷积与批标准化之后，对汇总后的分数做非线性截断。</div>
-              </div>
-            </div>
-          </div>
-        </EvidenceCard>
-        <p>
-          所以「层多」要产生新能力，层与层之间必须插入会改变形状的步骤。若把非线性只留到最后做一次（先按单输出讲）：前面各层全是线性、可以并成一层，整个网络就相当于单个 ReLU。它只有一道折痕，分不开那四个点。所以弯要弯在每层之后。
-        </p>
-
-        <h3>ReLU 在直线上压出一道折痕</h3>
-        <p>
-          插在层与层之间的这道工序，正式名字是激活函数。它对加权求和的总分做一次
-          非线性变换。本课主角 ReLU 的规则是「总分够正才放行，否则压成 0」；别的激活函数各有自己的弯法，取舍不都长这样。
-        </p>
-        <Def term="激活函数" en="activation function">
-          接在加权求和之后、对总分做非线性变换的函数。没有它，多少层线性都能合并成一层；
-          有了它，网络的表示能力才随层数增加。
-        </Def>
-        <Def term="线性整流单元" en="Rectified Linear Unit（缩写 ReLU）">
-          <span className="mono">ReLU(s) = max(0, s)</span>：正数通过，负数归零。
-          它只添一个折点，折点两侧的梯度都是常数，几十层叠起来也好算。折点本身没有唯一斜率（不可导），实现上约定此处导数取 0（后文把这个导数开关叫「门」，导数取 0 就是关门）。取 0 与主流实现一致（PyTorch 同此约定）；取 ½ 之类也行，差别只落在恰好踩在 0 点的样本上，实践中极少。有了约定，后面的链式法则才写得严格。
-          一次比较就完成计算，是最省事的非线性变换。
+        <Def term="激活函数与 ReLU" en="activation function & Rectified Linear Unit">
+          <strong>激活函数</strong>接在加权和之后，负责把直线折弯。
+          <strong>ReLU</strong>（线性整流单元）的规则是 <span className="mono">max(0, s)</span>：
+          <span className="mono">s</span> 为正时原样输出，为 0 或负时输出 0。
         </Def>
         <p>
-          最常用的激活函数 ReLU 把原本的一条直线压出折点，变成折线：
-          <span className="mono">ReLU(s)</span> 在 s 为正时原样通过，s 为 0 或负时输出 0。
-          把 t 设成「两边三连数的差」，就有 <span className="mono">v=|x−y|</span>：差得越多，一边倒那两点的 v 越大。
-          <span className="mono">ReLU(x−y)</span> 和 <span className="mono">ReLU(y−x)</span>
-          各守一道折痕，一个不够切开四点，两个刚好把「均衡」夹进带状区域（两条平行线之间的带）。
-          这两道镜像折痕拼起来就是绝对值（不管正负，只留大小）：
-          <span className="mono">ReLU(t)+ReLU(−t)=|t|</span>，例如 t=−3 时得到 0+3=3。
+          例 5-1 把同一段折线拆成两半：<span className="mono">ReLU(t)</span> 留下右半边，
+          <span className="mono">ReLU(−t)</span> 留下左半边，相加正好拼出 V 形
+          <span className="mono">|t|</span>。拖一拖 <span className="mono">t</span>，看两个半平面怎样互补。
         </p>
         <EvidenceCard
           fidelity="constructed"
@@ -166,14 +112,29 @@ export const reluAbs = (t: number): number => relu(t) + relu(-t)`}</pre>
       <FoldSum />
 
       <div className="prose mt-12">
-        <h3>非线性变换接在加权求和之后</h3>
+        <h3>3. 再看二维：V 形切开斜对角的四点</h3>
         <p>
-          重复「加权求和 → 非线性变换」，才可以逐层拼出复杂形状：
-          每道 ReLU 贡献半条线和一个折点，折线越拼越碎，能表示的边界随之迅速变丰富，
-          真实网络把这套次序重复许多层，才把许多折线组合成复杂判断。
-          真实路径上卷积先完成一整次乘加、批标准化调整尺度、ReLU 再处理得到的总分；
-          变换落在求和之后的总分上，不是把每个乘积分别截断：网络
-          先把多个特征加权求和成一个分数，再对这个总分做 ReLU，不是把每个格子单独做非线性变换。
+          现在回到思考题：<span className="mono">x</span> 是我方三连数，
+          <span className="mono">y</span> 是对方三连数。
+          令 <span className="mono">t = x − y</span>，再把上一节的两道折痕相加：
+          <span className="mono">v = ReLU(x−y) + ReLU(y−x) = |x−y|</span>。
+          两边一样多时 <span className="mono">v=0</span>，恰好一方占优时 <span className="mono">v=1</span>。
+          斜对角交错的四点，被这个 V 形一次拉开。
+        </p>
+        <Def term="异或" en="exclusive or，缩写 XOR">
+          两个输入不同时才为「是」的逻辑关系。
+          (1,0)、(0,1) 是「是」，(0,0)、(1,1) 是「否」；
+          两类点在平面上斜对角交错，任何一条直线都切不开。
+        </Def>
+      </div>
+
+      <XorCutter />
+
+      <div className="prose mt-12">
+        <h3>4. 折痕接在加权和之后</h3>
+        <p>
+          真实网络先做完整的加权求和，再对总分做 ReLU；不是对每个乘积分别截断。
+          重复「加权和 → 非线性」很多次，折点越来越密，网络就能拼出复杂棋形。
         </p>
         <EvidenceCard
           fidelity="runtime-exact"
@@ -209,11 +170,11 @@ export const reluAbs = (t: number): number => relu(t) + relu(-t)`}</pre>
             <span className="mono">F.relu(x + h)</span>。
           </li>
           <li>
-            <span className="mono">learn/src/lib/foundations.ts · relu / reluAbs</span>：例 5-2 交互图的教学算子，直接计算{" "}
+            <span className="mono">learn/src/lib/foundations.ts · relu / reluAbs</span>：例 5-1 交互图的教学算子，直接计算{" "}
             <span className="mono">ReLU(t) + ReLU(−t) = |t|</span>。
           </li>
           <li>
-            上下游衔接：<span className="mono">stem</span> 与 <span className="mono">ResBlock</span> 在第 8 课组装成卷积主干，第 9 课接双头读出，第 13 课进入训练步反向传播。
+            上下游衔接：<span className="mono">stem</span> 与 <span className="mono">ResBlock</span> 组装成卷积主干；主干提取的特征再交给后续读出层使用。
           </li>
           <li>
             验证命令：<span className="mono">pytest tests/test_model.py::test_forward_shapes_and_ranges</span> 与{" "}
@@ -224,7 +185,7 @@ export const reluAbs = (t: number): number => relu(t) + relu(-t)`}</pre>
 
       <ChapterEnd
         summary={[
-          "只做乘加的分界永远是直线；两个权重相乘仍是一个权重，偏置只移动分界线，线性叠线性不增加表示能力。",
+          "只做乘加的分界永远是直线；两个权重相乘仍是一个权重，线性叠线性不增加表示能力。",
           "激活函数接在加权求和之后改变形状；ReLU 是「正数通过、负数归零」的一道折痕。",
           "ReLU(t)+ReLU(−t)=|t|，两道镜像折痕拼出 V 形，用两条平行线把「均衡 / 一边倒」四点分开。",
           "变换的次序是先加权求和、再非线性变换，两者交替重复才能拼出复杂棋形。",
@@ -232,8 +193,7 @@ export const reluAbs = (t: number): number => relu(t) + relu(-t)`}</pre>
         next={
           <>
             复杂棋形从哪里读进来，取决于棋盘怎么送。下一课把同一份棋盘事实拆成三张图：
-            己方子一张、对方子一张、先后手身份一张。三个平面并排才是网络真正读到的输入；
-            届时再看：己/敌平面与这两道镜像折痕是同一手法（一对 ReLU 各管半边），但作用对象不同：这里作用在 x−y 上，那里作用在单格符号上。
+            己方子一张、对方子一张、先后手身份一张。三个平面并排，才是网络真正读到的输入。
           </>
         }
       />
@@ -250,21 +210,21 @@ export const reluAbs = (t: number): number => relu(t) + relu(-t)`}</pre>
             ],
             answer: 1,
             explain:
-              "在例 5-1 里把直线怎么转怎么挪，最好也分错一个。这不是权重数量问题，是形状问题：直线没有折痕。要切开的形状是「两条平行线夹一条带状区域」，直线一根画不出两根的事。",
+              "在例 5-2 里把直线怎么转怎么挪，最好也分错一个。这不是权重数量问题，是形状问题：直线没有折痕。要切开的形状是「两条平行线夹一条带状区域」，直线一根画不出两根的事。",
           },
           {
             q: "两层线性叠起来仍切不开异或四点。该往哪里加非线性？",
             options: [
               "哪里都不用加：两层看得比一层深",
-              "层与层之间要插非线性：w₂·(w₁·x) = (w₂·w₁)·x，线性套线性还是一条直线，叠一百层也一样；真网络在 conv1 后有 ReLU，块出口对 x+h 再做一次（conv2 后只到批标准化）",
+              "层与层之间要插非线性：w₂·(w₁·x) = (w₂·w₁)·x，线性套线性还是一条直线，叠一百层也一样；真实网络也在卷积层之间穿插非线性变换",
               "只在最后加一次就够",
             ],
             answer: 1,
             explain:
-              "线性套线性还是线性，所以「多叠几层就更厉害」这句话有个前提：层与层之间必须有非线性变换。真网络每个残差块里，conv1 走「卷积→批标准化→非线性变换」、conv2 只到批标准化，块出口再对 x+h 做一次非线性变换（残差块与批标准化，参见：第 8 课），就是在照这个前提做。",
+              "线性套线性还是线性，所以「多叠几层就更厉害」有个前提：层与层之间必须有非线性变换。真实网络也按这个次序搭：先做加权求和，再让激活函数折一下，然后交给下一层。",
           },
           {
-            q: "ReLU(t) + ReLU(−t) 等于什么？这条恒等式在例 5-1 里干成了什么事？",
+            q: "ReLU(t) + ReLU(−t) 等于什么？这条恒等式在例 5-2 里干成了什么事？",
             options: [
               "等于 t；什么都不干",
               "等于 |t|；两个镜像 ReLU 拼出 V 形：v=|x−y| 把「均衡」两点留在最低点、「一边倒」两点推上两侧坡面；两条平行线 v=½ 从两侧夹开（0 与 1 之间任取，½ 最简）",
@@ -280,7 +240,7 @@ export const reluAbs = (t: number): number => relu(t) + relu(-t)`}</pre>
   )
 }
 
-/* ============ 例 5-1 · XOR 切分器：一挡一挡看直线怎么失败 ============ */
+/* ============ 例 5-2 · XOR 切分器：一挡一挡看直线怎么失败 ============ */
 
 const PW = 300, PH = 252, PPL = 40, PPR = 14, PPT = 14, PPB = 38
 const GMIN = -0.35, GMAX = 1.35
@@ -345,7 +305,7 @@ function XorCutter() {
   return (
     <figure className="figure mt-8">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-5">
-        <span className="mini-label">例 5-1 · 异或切分器：谁切开了「一边倒」</span>
+        <span className="mini-label">例 5-2 · 异或切分器：谁切开了「一边倒」</span>
         <span className="seg" data-qa="xor-mode">
           <button type="button" className={`seg-btn ${mode === "line" ? "active" : ""}`}
             onClick={() => setMode("line")}>
@@ -506,8 +466,8 @@ function XorCutter() {
         </div>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">例 5-1</span>
-        一个隐藏层、两个镜像单元（h₁/h₂ 的 (1,−1) 镜像权重是为看清原理摆的；真实网络里这种组合由训练自己找到，没有人手摆权重）：h₁、h₂ 是两个隐藏单元（中间层里做一次乘加再过一道 ReLU 的计算单元），各守一道折痕，
+        <span className="cap-no">例 5-2</span>
+        一个隐藏层、两个镜像单元（h₁/h₂ 的 (1,−1) 镜像权重是为看清原理摆的）：h₁、h₂ 是中间层里各做一次乘加、再过一道 ReLU 的计算单元，各守一道折痕，
         h₁=ReLU(x−y)、h₂=ReLU(y−x)，v=h₁+h₂。
         四点逐值验证在右表：不是一个 ReLU（半平面切不开），而是两个（带状区域刚好够用）。
       </figcaption>
@@ -515,7 +475,7 @@ function XorCutter() {
   )
 }
 
-/* ============ 例 5-2 · 折线拼形：ReLU(t)+ReLU(−t)=|t| ============ */
+/* ============ 例 5-1 · 折线拼形：ReLU(t)+ReLU(−t)=|t| ============ */
 
 const FW = 128, FH = 116, FPL = 24, FPR = 8, FPT = 10, FPB = 22
 const fx = (t: number) => FPL + ((t + 3) / 6) * (FW - FPL - FPR)
@@ -570,7 +530,7 @@ function FoldSum() {
   return (
     <figure className="figure mt-12">
       <div className="px-4 pt-4 sm:px-5">
-        <span className="mini-label">例 5-2 · 折线拼形：两段半截线，拼一个 V</span>
+        <span className="mini-label">例 5-1 · 折线拼形：两段半截线，拼一个 V</span>
       </div>
       <div className="p-4 md:p-5">
         <div className="flex flex-wrap items-start gap-5">
@@ -606,13 +566,13 @@ function FoldSum() {
           <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
             负分区归零 = 半条线：ReLU(t) 只留右半边，ReLU(−t) 只留左半边，
             一拼就是 V。亲手拖到三个验算点：t=2 → 2+0=2；t=−3 → 0+3=3；
-            t=0 → 0+0=0。例 5-1 切开异或的 v=|x−y|，就是这个恒等式换上
+            t=0 → 0+0=0。例 5-2 切开异或的 v=|x−y|，就是这个恒等式换上
             棋盘的轴。
           </p>
         </div>
       </div>
       <figcaption className="figure-cap">
-        <span className="cap-no">例 5-2</span>
+        <span className="cap-no">例 5-1</span>
         折线拼形的最基本一招：每道 ReLU 贡献半条线（带一个折点），
         几道 ReLU 就拼出几段折线。真实网络把「先加权求和再非线性变换」层层重复，
         折线越拼越碎，能拼的形状成倍增加。

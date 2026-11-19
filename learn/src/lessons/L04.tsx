@@ -1,6 +1,6 @@
-/** 第 4 课 · 加权求和：乘和加，不多不少(地基篇 2/4)。
+/** 第 4 课 · 加权求和：乘和加，不多不少(地基篇 2/3)。
  *  节拍：思考题 → 正文(九对配对/加权和/线性的能耐与不能，定义框命名，落点码 dot/linGrad/stem)→
- *  例 4-1(三输入加权求和演示：真权重，拖缩放系数)→
+ *  例 4-1(教学卷积核起步，可切换真实训练核)→
  *  例 4-2(线性的单调性：直线画不出 V)→ 交付物与验证 → 小结与预告 → 习题。 */
 import { useEffect, useMemo, useState } from "react"
 import { Quiz } from "../framework/quiz"
@@ -52,7 +52,7 @@ export default function L04() {
           "训练通过误差调整每个重要程度",
         ]}
         takeaway="你能按「乘法定每个特征的重要程度、加法做汇总」手算任意窗口的点积，并认出它在真实第一层（stem）里的写法。"
-        boundary="乘加是本模型选择的基础运算：权重数可控、易于叠层、硬件也擅长算。它不是在宣称其他数学运算都不能学习。"
+        boundary="本课聚焦乘加这一种基础运算：它让权重数可控、方便逐层组合，也便于训练分别调整每个权重。"
       />
 
       <Quiz
@@ -67,23 +67,41 @@ export default function L04() {
             ],
             answer: 1,
             explain:
-              "选第二项：对应相乘再相加。每个特征各配一个权重，调哪一个权重，只改变它对应那个特征的贡献，互不干扰。这样合成的数简单、稳定，也能原样交给下一层继续加工。取最大只留一个特征，其余八个全丢。连乘让九个特征缠在一起，一处为零全盘归零，没法单独调。它们不是不能用，只是不适合当逐层学习的基础运算。",
+              "选第二项：对应相乘再相加。每个特征各配一个权重，调哪一个权重，只改变它对应那个特征的贡献，互不干扰。这样合成的数简单、稳定，也能原样交给下一层继续加工。取最大只留一个特征，其余八个全丢；连乘让九个特征缠在一起，一处为零全盘归零，没法单独调。",
           },
         ]}
       />
 
       <div className="prose mt-10">
-        <h3>从一对摊到九对</h3>
+        <h3>1. 一个格子一个特征，一个特征一个权重</h3>
         <p>
-          第 3 课把「特征 × 权重」缩到一对来看，那一个特征问的是「己方三连有几条」；
-          本课把问题拆细：一扇 3×3 小窗里，每个格子问一遍「这个交叉点有子还是空、是谁的子」，
-          九个格子九个问题。特征的单位没有变，一个问题、一个数字，变的只是问题的粗细：
-          从一个全盘计数，换成九个细到格子的问题。
-          严格说「是谁的子」要两个平面分工才答得清，本窗先取己方平面。
-          这不是完整棋盘网络，是一道放大看的小题：看清「每个特征各有一个重要程度，
-          再合成一个数」的规则，九项算清了，真实机器只是把同一规则用于更多输入。
-          9 个问题就是 9 个特征，配 9 个权重，每个特征值配一个权重，谁也不共用谁。
+          把 3×3 小窗里的九个交叉点摊开看：每个点问一句「这里有没有我的子」，
+          答案是 <span className="mono">1</span> 或 <span className="mono">0</span>。
+          九个答案就是九个特征，每个特征配一个自己的权重。
         </p>
+        <p>
+          先给一张能徒手核对的横三连核：中间一行三个权重是 1，其余是 0。
+          窗口里正好三颗己方子，于是三个 <span className="mono">1×1</span> 相加，得分是 3。
+        </p>
+      </div>
+
+      <VoteCounter />
+
+      <div className="prose mt-12">
+        <h3>2. 点积：九份贡献汇成一个分数</h3>
+        <p>
+          计算公式只有两步：对应位置先相乘，再把九个乘积相加。
+          第 <span className="mono">i</span> 个特征记作 <span className="mono">xᵢ</span>，
+          它的权重记作 <span className="mono">wᵢ</span>；这个加权和就是这一层的输出。
+        </p>
+        <div className="formula">
+          s = <span className="hl">w₁x₁</span> + w₂x₂ + … + w₉x₉
+        </div>
+        <Def term="加权和" en="weighted sum, dot product">
+          每个特征乘上自己的权重，再把所有乘积相加，也叫点积。
+          权重为 1 时原样通过，为 0 时贡献归零，为负数时把分数往反方向推。
+          下一层会把这里的输出 <span className="mono">s</span> 当作新的输入特征。
+        </Def>
         <EvidenceCard
           fidelity="constructed"
           title="逐项相乘再累加得到点积"
@@ -98,107 +116,42 @@ export default function L04() {
           </div>
         </EvidenceCard>
         <p className="mt-3">
-          循环每转一圈只配一对 <span className="mono">ws[i]</span> 与 <span className="mono">xs[i]</span>，乘法定每个特征的重要程度，加号做汇总。例 4-1 右侧九格的「输入平面 × 权重 = 乘积」就是这行循环的逐格展开，底部的加权和即函数返回的 <span className="mono">s</span>。
+          循环每转一圈只处理一对 <span className="mono">ws[i]</span> 与 <span className="mono">xs[i]</span>：
+          乘法决定这一格贡献多少，加法把九格汇总成一个数。
         </p>
-        <p>
-          乘法负责定每个特征的重要程度。第 i 个特征写作
-          <span className="mono">xᵢ</span>，它的权重写作 <span className="mono">wᵢ</span>。
-          <span className="mono">wᵢ</span> 就是第 3 课那个 <span className="mono">w</span>，
-          只是从一个变成了九个，每个管一个特征。<span className="mono">wᵢ=1</span> 时原样通过，
-          0 时完全压掉，0.5 时只留一半；权重为负时特征越大总分反而越低：
-          不是重要程度更小，而是方向反了。
-        </p>
-        <Def term="加权和" en="weighted sum, dot product">
-          每个特征乘上自己的权重、再把所有乘积相加的运算，亦称点积。它是这一层的答案，
-          不必换算就能原样交给下一层当输入（参见：第 5 课）。交给下一层时，这个分数的角色就换了：
-          在上一层它是输出分数，在下一层它就是输入特征值。看到「点积」就读成：
-          相同位置逐项相乘，再把乘积全部加起来。
-        </Def>
-        <p>
-          加法负责把九个乘积汇总成 <span className="mono">s = w₁x₁ + w₂x₂ + … + w₉x₉</span>。
-          这套做法的好处是每个权重只管自己那一项：<span className="mono">wᵢ</span> 调一点，
-          总分改变多少正好由 <span className="mono">xᵢ</span> 决定，和第 3 课的规则一模一样，
-          只是现在有九个各自独立。正因为梯度带着各自的 <span className="mono">xᵢ</span>，
-          如果某个特征取值比别的特征大几十倍，它的梯度步子也会大几十倍，共用一个学习率便两头难顾；
-          因此本项目的输入特征统一用 <span className="mono">0/1</span> 同尺度编码，层与层之间则交给第 8 课的批标准化把数值拉回相近范围。
-        </p>
-      </div>
 
-      <VoteCounter />
-
-      <div className="prose mt-12">
-        <h3>为什么是乘和加：线性的能耐与不能</h3>
+        <h3>3. 只会乘加，就画不出 V 形</h3>
         <p>
-          朴素的乘加能用有限的权重把许多特征合成分数，容易并排、叠层，也很适合计算硬件。
-          更复杂的互动不必硬塞进一层，可以交给多层「加权求和，再接一道非线性变换」去接力。
+          乘加能并行处理很多特征，也方便一层层叠加。但它有一个硬限制：
+          每个输入对总分的影响方向固定，直线不会先降后升。
+          棋盘想要的却是「敌方 −1 和己方 +1 都该得高分，空位 0 保持低分」，
+          也就是一个 V 形。
         </p>
         <Def term="线性" en="linear">
-          只做乘加、不含其他运算的变换。它的局限是画不出会拐弯的分类边界
-          （把「是 / 否」两类分开的线）：每个输入各走一条直线，权重为正时，输入涨、分数不跌；为负时，输入涨、分数不升，唯独不会先跌后涨。想要「敌、己两头分数都高、空 0 在中间」
-          的 V 形，得让直线会拐弯。
+          只做乘加、不含其他变换的运算。它的分界线永远是直线：
+          权重为正时，输入涨、分数不会跌；权重为负时方向相反，但也不会折返。
+          因此 V 形、异或这类「先跌后涨」的形状，靠一层线性运算画不出来。
         </Def>
-        <p>
-          下方例 4-2 把这条限制摆成一张图：横轴用第 2 课的 ±1 记法（敌 −1、空 0、己 +1）。
-          无论怎样拖动权重旋转直线，它始终只朝一个方向单调变化，画不出两头高、中间低的 V 形：
-        </p>
       </div>
 
       <MonotoneLine />
 
-      <div className="prose mt-12">
-        <Def term="卷积核" en="kernel" see="第 6 课、第 7 课">
-          专给一种局部棋形打分的权重表。例 4-1 滑杆换的就是不同的卷积核（本课只截取其中一个平面的
-          9 个权重来看）；代码里卷积核的个数叫通道数（参见：第 7 课）。
-          一个 3×3 窗口 9 格 × 3 个输入平面 = 27 项，每项一个权重。
-        </Def>
-        <EvidenceCard
-          fidelity="runtime-exact"
-          title="真实网络第一层 stem 的卷积、批标准化与 ReLU"
-          source="alphagomoku/model.py · AlphaGomokuNet.__init__ · stem"
-        >
-          <div className="codewalk">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
-              <pre className="min-w-0 flex-1">{`        self.stem = nn.Sequential(
+      <Ledger title="alphagomoku/model.py · AlphaGomokuNet.__init__ 的 stem">
+        <p className="mb-3">
+          真实网络把同一条规则扩大到 3 张输入平面。第一层 <span className="mono">stem</span> 用
+          3×3×3 的卷积核，一次做 27 项加权和；演示配置并排 48 个卷积核，
+          因而第一层共有 <strong className="num">48 × 27 = 1296</strong> 个权重。
+        </p>
+        <div className="codewalk">
+          <pre>{`        self.stem = nn.Sequential(
             nn.Conv2d(3, channels, 3, padding=1, bias=False),
             nn.BatchNorm2d(channels),
             nn.ReLU(),
         )`}</pre>
-              <div className="text-xs leading-relaxed sm:w-56" style={{ color: "var(--fg-faint)" }}>
-                <div>stem 行：第一层的顺序容器，依次串起三道运算。</div>
-                <div className="mt-1">
-                  <span className="mono">nn.Conv2d</span> 行：3 个输入平面、3×3 窗口、外圈补 0、不带偏置；卷积核个数由 <span className="mono">channels</span> 传入。
-                </div>
-                <div className="mt-1">
-                  <span className="mono">nn.BatchNorm2d</span> 与 <span className="mono">nn.ReLU</span>：批标准化与非线性变换。
-                </div>
-              </div>
-            </div>
-          </div>
-        </EvidenceCard>
-        <p className="mt-3">
-          在 <span className="mono">nn.Conv2d(3, channels, 3, ...)</span> 中，一个 3×3 窗口跨 3 个输入平面共有 9 × 3 = 27 项，每项一个权重，一组乘加算出一个分数 <span className="mono">s</span>；演示配置里 <span className="mono">stem.0.weight</span> 的形状是{" "}
-          <span className="mono">[48, 3, 3, 3]</span>，48 个卷积核并排算出 48 个分，合计{" "}
-          <strong className="num">48 × 27 = 1296</strong> 个权重住在第一层。
-        </p>
-        <p>
-          27 项乘加可以分组看：三个平面各 9 项先各求一和，再把三个组和相加，
-          与直接加 27 个乘积得到同一个数（例如 1.2 +（−0.3）+ 0.5 = 1.4）。
-          48 这个数目属于 fast 演示配置，不是算法常数；项目默认训练配置是 64 通道，
-          代码里的 <span className="mono">channels</span> 才是可改的通用写法。
-        </p>
-      </div>
-
-      <Ledger title="alphagomoku/model.py · AlphaGomokuNet.__init__ 的 stem">
-        <p className="mb-3">
-          本课在仓库中的交付落点是上方已完整展示的 <span className="mono">alphagomoku/model.py</span> 中 <span className="mono">AlphaGomokuNet.__init__</span> 里的 <span className="mono">self.stem</span>（共 5 行），在前向传播 <span className="mono">forward</span> 的第一行由 <span className="mono">self.stem(x)</span> 调用。它接收第 6 课 <span className="mono">encode</span> 输出的 3 个输入平面，用 3×3 卷积完成 27 项点积（第 7 课展开全盘滑动），再依次经过第 8 课的批标准化与第 5 课的 <span className="mono">ReLU</span> 非线性变换。
-        </p>
+        </div>
         <ul className="ml-5 list-disc">
-          <li>
-            手算核对：按三个输入平面各 9 项先分别求和、再把三个组和相加，确认与 27 项直接累加结果完全一致；核对第一层权重总数为 <span className="mono">48 × 3 × 3 × 3 = 1296</span>。
-          </li>
-          <li>
-            验证与测试：运行 <span className="mono">pytest tests/test_model.py::test_forward_shapes_and_ranges</span>；浏览器侧运行 <span className="mono">cd learn && npm test</span> 核对 <span className="mono">foundations.test.ts</span> 中的 <span className="mono">dot</span> 用例。
-          </li>
+          <li>本课只取其中一个卷积核的己方平面，先把 9 项点积算熟。</li>
+          <li>运行 <span className="mono">npm test</span> 核对 <span className="mono">dot</span>；运行 <span className="mono">pytest tests/test_model.py::test_forward_shapes_and_ranges</span> 核对真实形状。</li>
         </ul>
       </Ledger>
 
@@ -230,7 +183,7 @@ export default function L04() {
             ],
             answer: 1,
             explain:
-              "关键不是「别的运算不可能学习」，而是这套基础运算很适合大量重复：每个特征有自己的可调重要程度，合成方式简单，层层叠起来也容易管理。硬件友好也是事实（边界句点过它），但那是顺带的好处，不是第一理由。它的梯度也清楚：某个权重改一点时，s 的变化速度恰好就是它对应的那个特征值 xᵢ（这个变化率的记号与链式计算见第 13 课）。自己实现时必须逐项吻合的就是 27 项点积；三个输入平面与滑动位置的展开（参见：第 6 课、第 7 课）不改变它的算法。",
+              "这套基础运算很适合大量重复：每个特征有自己的可调重要程度，合成方式简单，层层叠起来也容易管理。硬件友好是顺带的好处，不是第一理由。自己实现时必须逐项吻合的就是「对应相乘、再全部相加」这条规则。",
           },
           {
             q: "权重从 +0.5 调到 −0.5，那个特征发生了什么？",
@@ -252,7 +205,7 @@ export default function L04() {
             ],
             answer: 1,
             explain:
-              "负权重就是跌的，但那是条方向不变的直线。想要「先跌后涨」（敌 −1 和己 +1 两头分数都高、空 0 在中间）得让直线会拐弯（参见：第 5 课）。",
+              "负权重就是跌的，但那是条方向不变的直线。想要「先跌后涨」（敌 −1 和己 +1 两头分数都高、空 0 在中间），得让直线会拐弯。",
           },
         ]}
       />
@@ -260,7 +213,7 @@ export default function L04() {
   )
 }
 
-/* ============ 例 4-1 · 三输入加权求和演示：真权重，拖缩放系数 ============ */
+/* ============ 例 4-1 · 九格加权和：教学核与真实训练核 ============ */
 
 /** 数字九宫格(cells 为字符串；on 给非零格上底色，hot 给负数标朱砂)。 */
 function NumGrid9({ cells, on, hot }: { cells: string[]; on: boolean[]; hot?: boolean[] }) {
@@ -283,13 +236,15 @@ function NumGrid9({ cells, on, hot }: { cells: string[]; on: boolean[]; hot?: bo
 }
 
 const fmt2 = (v: number) => `${v >= 0 ? "" : "−"}${Math.abs(v).toFixed(2)}`
+const TEACHING_KERNEL = [0, 0, 0, 1, 1, 1, 0, 0, 0]
 
 function VoteCounter() {
   const [w, setW] = useState<WeightsJson | null>(null)
+  const [mode, setMode] = useState<"teaching" | "real">("teaching")
   const [filter, setFilter] = useState(0)
-  const [k, setK] = useState(1) // 当前组的缩放：权重 × k
 
   useEffect(() => {
+    if (mode !== "real" || w) return
     let alive = true
     loadWeights().then((x) => {
       if (alive) setW(x)
@@ -297,58 +252,65 @@ function VoteCounter() {
     return () => {
       alive = false
     }
-  }, [])
+  }, [mode, w])
 
   const row = useMemo(() => {
+    const xs = WIN[0]
+    if (mode === "teaching") {
+      const ws = TEACHING_KERNEL
+      const ps = ws.map((wv, i) => wv * xs[i])
+      return { xs, ws, ps, sum: dot(ws, xs) }
+    }
     if (!w) return null
     const flat = w.tensors["stem.0.weight"]
-    // 这里只拿真实卷积核的第一个输入平面，故意维持本课“9 个特征”的范围。
-    // 三个输入平面的完整计算见第 6 课。
-    const xs = WIN[0]
-    const ws = Array.from({ length: 9 }, (_, i) => k * flat[wIdx(filter, 0, i)])
+    const ws = Array.from({ length: 9 }, (_, i) => flat[wIdx(filter, 0, i)])
     const ps = ws.map((wv, i) => wv * xs[i])
     return { xs, ws, ps, sum: dot(ws, xs) }
-  }, [w, filter, k])
+  }, [mode, w, filter])
 
-  const total = row?.sum ?? 0
+  const teaching = mode === "teaching"
 
   return (
     <figure className="figure mt-8">
       <div className="px-4 pt-4 sm:px-5">
-        <span className="mini-label">例 4-1 · 九个特征的加权求和演示：真实权重，亲手调整</span>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="mini-label">例 4-1 · 九个特征怎样汇成一个分数</span>
+          <span className="seg" data-qa="kernel-mode">
+            <button type="button" className={`seg-btn ${teaching ? "active" : ""}`}
+              onClick={() => setMode("teaching")}>教学核</button>
+            <button type="button" className={`seg-btn ${!teaching ? "active" : ""}`}
+              onClick={() => setMode("real")}>真实训练核</button>
+          </span>
+        </div>
       </div>
       <div className="flex flex-col gap-6 p-4 md:flex-row md:p-5">
         <div className="min-w-0 flex-1 md:max-w-[15rem]" data-qa="counter-board">
           <Board board={BOARD81} lastMove={{ x: 3, y: 4 }} />
           <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-            教具摆出的三连（黑棋三颗、轮黑走；这是照教学需要摆的局面，不是轮流下出来的）。这里的「己方」就是黑方。想象一个 3×3 的方框罩住正中间那颗子：框里九个点，
-            就是九个特征。右边把<strong>一个输入平面</strong>（参见：第 6 课）
-            的窗口值、九个权重和九个乘积并排；
-            一格对一格地乘。数字发红、加粗的那些是负数，它们的贡献是反向的。
+            3×3 方框罩住三连正中，框里九个点就是九个特征。
+            右边把它们逐格乘以权重，再加起来。
           </p>
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-            <div className="min-w-[11rem] flex-1">
+          {teaching ? (
+            <p className="text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+              横三连核只看中间一行：三个 <span className="mono">1</span> 对上三颗己方子，
+              贡献 <span className="mono">1+1+1=3</span>；其余六格权重为 0，不投票。
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <div className="min-w-[14rem] flex-1">
               <div className="mini-label">
-                浏览器复现 · 换一个导出的真实卷积核：第 <span className="num">{filter + 1}</span> 个
+                导出的真实卷积核：第 <span className="num">{filter + 1}</span> 个
               </div>
               <input type="range" min={0} max={47} step={1} value={filter}
                 onChange={(e) => setFilter(Number(e.target.value))} aria-label="卷积核编号"
                 style={{ ["--fill" as string]: `${(filter / 47) * 100}%` }}
                 data-qa="filter-slider" />
             </div>
-            <div className="min-w-[11rem] flex-1">
-              <div className="mini-label">
-                这组权重 × k:<span className="num">{k.toFixed(1)}</span>
-              </div>
-              <input type="range" min={-2} max={2} step={0.1} value={k}
-                onChange={(e) => setK(Number(e.target.value))} aria-label="这组权重缩放"
-                style={{ ["--fill" as string]: `${((k + 2) / 4) * 100}%` }}
-                data-qa="volume-slider" />
             </div>
-          </div>
+          )}
 
           {!row ? (
             <p className="mt-4 text-sm" style={{ color: "var(--fg-muted)" }}>
@@ -357,56 +319,42 @@ function VoteCounter() {
           ) : (
             <>
               <div className="mt-4 flex flex-wrap items-center gap-2" data-qa="counter-rows">
-                <span className="w-14 flex-none text-xs" style={{ color: "var(--fg-faint)" }}>
-                  输入平面
+                <span className="w-10 flex-none text-xs" style={{ color: "var(--fg-faint)" }}>
+                  窗口
                 </span>
                 <NumGrid9 cells={row.xs.map((v) => (v === 1 ? "1" : "0"))}
                   on={row.xs.map((v) => v !== 0)} />
                 <span style={{ color: "var(--fg-faint)" }}>×</span>
-                <NumGrid9 cells={row.ws.map(fmt2)} on={row.ws.map((v) => Math.abs(v) > 0.005)}
+                <NumGrid9 cells={row.ws.map((v) => (teaching ? String(v) : fmt2(v)))}
+                  on={row.ws.map((v) => Math.abs(v) > 0.005)}
                   hot={row.ws.map((v) => v < 0)} />
                 <span style={{ color: "var(--fg-faint)" }}>=</span>
-                <NumGrid9 cells={row.ps.map(fmt2)} on={row.ps.map((v) => Math.abs(v) > 0.005)}
+                <NumGrid9 cells={row.ps.map((v) => (teaching ? String(v) : fmt2(v)))}
+                  on={row.ps.map((v) => Math.abs(v) > 0.005)}
                   hot={row.ps.map((v) => v < 0)} />
               </div>
               <div className="reveal-box mt-4">
                 <p className="num">
-                  加权和 s = 9 个乘积相加 ={" "}
+                  加权和 s ={" "}
                   <strong style={{ color: "var(--accent-deep)" }} data-qa="counter-sum">
-                    {total.toFixed(3)}
+                    {row.sum.toFixed(teaching ? 0 : 3)}
                   </strong>
                 </p>
-                <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                  拖缩放系数看三件事：① k=1 这组权重原样通过，k=0.5 只留一半，k=0 这组输出归零；
-                  k 拖过 0，总分正负号掉头（反相）。缩放律对拍：权重缩放系数 k 取哪个倍数，
-                  就与把窗口值整体放大同样倍数得到同一组乘积；窗口值若整体放大 k 倍，想让乘积不变，权重就缩到 1/k。
-                </p>
-                <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                  ② 你一拖，权重全变，「窗口值」一列纹丝不动。这一列
-                  正好是每个权重的局部变化率（不是第 3 课定义的损失梯度；损失对 wᵢ 的梯度还要再乘损失对 s 的变化率，参见：第 13 课）：调整 wᵢ 时，s 的变化速度恰好等于 xᵢ
-                  （记作 ∂s/∂wᵢ = xᵢ，∂ 就读作「对…的变化速度」）。∂s/∂wᵢ = xᵢ
-                  里没有 wᵢ，所以权重调多大，∂s/∂wᵢ 都不变。
-                </p>
-                <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                  ③ 哪一格窗口值是 0，它对应的乘积必是 0：那个特征取了 0，就不会给分；它对应的权重也收不到梯度（∂s/∂wᵢ=xᵢ=0）。但这不代表该权重没用：别的样本会教（权重共享时一个权重还受许多位置供养，见第 7 课），只是这一条样本教不了。
-                  只有某特征处处恒为 0 时，该权重才收不到任何样本梯度，只有权重衰减会把它慢慢拽向 0。这样的特征叫死特征，它的权重等于白带着。
+                <p className="mt-1.5 text-sm leading-relaxed" style={{ color: "var(--fg-muted)" }}>
+                  {teaching
+                    ? "三份 1 分相加得 3。改成真实训练核后，权重会变成连续小数，有正有负。"
+                    : `第 ${filter + 1} 个核是训练学出来的 9 个小数；红色负权重会把对应格子的贡献往反方向拉。`}
                 </p>
               </div>
-              <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--fg-faint)" }}>
-                这 9 个权重不是编的：它们是{" "}
-                <span className="mono">weights-best.json</span> 里{" "}
-                <span className="mono">stem.0.weight</span> 第 {filter + 1} 个卷积核的己方平面真值
-                （训练学出来的）。同类卷积核会各学各的局部反应。
-                现在先把一个输入平面的九项加权求和练熟。
-              </p>
             </>
           )}
         </div>
       </div>
       <figcaption className="figure-cap">
         <span className="cap-no">例 4-1</span>
-        这 9 个权重与窗口值逐项相乘再相加，展示「每个特征各有自己的贡献，再汇总成一个数」的基本运算。
-        权重取自演示模型第一层 <span className="mono">stem.0.weight</span> 的第 {filter + 1} 个卷积核（己方平面 9 项）。
+        {teaching
+          ? "教学核让结果一眼可算：三个 1×1 相加得 3。"
+          : `真实权重取自 weights-best.json 的 stem.0.weight 第 ${filter + 1} 个核（己方平面）。`}
       </figcaption>
     </figure>
   )
